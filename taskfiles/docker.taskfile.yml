@@ -36,6 +36,52 @@ tasks:
       - task: integration
         vars: { DISTRO: ubuntu, PLATFORM: linux/arm64 }
 
+  integration:shell:
+    desc: Run the SHELL-axis activation test (DISTRO + PLATFORM + SHELL)
+    requires:
+      vars:
+        - name: DISTRO
+          enum: [alpine, fedora, ubuntu]
+        - name: PLATFORM
+          enum: [linux/amd64, linux/arm64]
+        - name: SHELL
+          enum: [bash, dash, zsh, ksh, fish, nu, elvish, pwsh]
+    preconditions:
+      - sh: docker buildx version
+        msg: 'docker buildx required (install docker-buildx-plugin or Docker Desktop)'
+    vars:
+      VERSION: '{{.VERSION | default "latest"}}'
+    # run.sh: <distro> <platform> [version] [shell]
+    cmd: tests/docker/run.sh "{{.DISTRO}}" "{{.PLATFORM}}" "{{.VERSION}}" "{{.SHELL}}"
+
+  integration:shells:all:
+    desc: Run every shell activation test across the 3 distros (linux/amd64)
+    cmds:
+      # alpine
+      - { task: integration:shell, vars: { DISTRO: alpine, PLATFORM: linux/amd64, SHELL: bash } }
+      - { task: integration:shell, vars: { DISTRO: alpine, PLATFORM: linux/amd64, SHELL: dash } }
+      - { task: integration:shell, vars: { DISTRO: alpine, PLATFORM: linux/amd64, SHELL: zsh } }
+      - { task: integration:shell, vars: { DISTRO: alpine, PLATFORM: linux/amd64, SHELL: ksh } }
+      - { task: integration:shell, vars: { DISTRO: alpine, PLATFORM: linux/amd64, SHELL: fish } }
+      - { task: integration:shell, vars: { DISTRO: alpine, PLATFORM: linux/amd64, SHELL: nu } }
+      - { task: integration:shell, vars: { DISTRO: alpine, PLATFORM: linux/amd64, SHELL: elvish } }
+      # fedora
+      - { task: integration:shell, vars: { DISTRO: fedora, PLATFORM: linux/amd64, SHELL: bash } }
+      - { task: integration:shell, vars: { DISTRO: fedora, PLATFORM: linux/amd64, SHELL: dash } }
+      - { task: integration:shell, vars: { DISTRO: fedora, PLATFORM: linux/amd64, SHELL: zsh } }
+      - { task: integration:shell, vars: { DISTRO: fedora, PLATFORM: linux/amd64, SHELL: ksh } }
+      - { task: integration:shell, vars: { DISTRO: fedora, PLATFORM: linux/amd64, SHELL: fish } }
+      - { task: integration:shell, vars: { DISTRO: fedora, PLATFORM: linux/amd64, SHELL: nu } }
+      - { task: integration:shell, vars: { DISTRO: fedora, PLATFORM: linux/amd64, SHELL: elvish } }
+      # ubuntu
+      - { task: integration:shell, vars: { DISTRO: ubuntu, PLATFORM: linux/amd64, SHELL: bash } }
+      - { task: integration:shell, vars: { DISTRO: ubuntu, PLATFORM: linux/amd64, SHELL: dash } }
+      - { task: integration:shell, vars: { DISTRO: ubuntu, PLATFORM: linux/amd64, SHELL: zsh } }
+      - { task: integration:shell, vars: { DISTRO: ubuntu, PLATFORM: linux/amd64, SHELL: ksh } }
+      - { task: integration:shell, vars: { DISTRO: ubuntu, PLATFORM: linux/amd64, SHELL: fish } }
+      - { task: integration:shell, vars: { DISTRO: ubuntu, PLATFORM: linux/amd64, SHELL: nu } }
+      - { task: integration:shell, vars: { DISTRO: ubuntu, PLATFORM: linux/amd64, SHELL: elvish } }
+
   qemu:register:
     desc: Register binfmt handlers for cross-arch runs (idempotent)
     cmd: docker run --privileged --rm tonistiigi/binfmt --install all

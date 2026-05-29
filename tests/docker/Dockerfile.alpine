@@ -12,15 +12,29 @@ RUN apk add --no-cache \
     curl \
     tar \
     xz \
+    gzip \
     ca-certificates \
-    coreutils
+    coreutils \
+    findutils \
+    shadow
 
 WORKDIR /work
 COPY sh/install.sh /work/install.sh
 COPY tests/docker/smoke.sh /work/smoke.sh
-RUN chmod +x /work/install.sh /work/smoke.sh
+COPY tests/docker/install-shells.sh /work/install-shells.sh
+COPY tests/docker/activate.sh /work/activate.sh
+RUN chmod +x /work/install.sh /work/smoke.sh /work/install-shells.sh /work/activate.sh
+
+# Provision every target shell at build time (bash/dash/zsh/ksh/fish/nu/elvish/pwsh).
+RUN /work/install-shells.sh
+
+# Non-root user with a real writable HOME — profile modification needs it for
+# the SHELL-axis activation test (activate.sh runs as this user).
+RUN useradd -m -s /bin/bash tester || adduser -D -s /bin/bash tester
 
 ENV OCX_HOME=/work/.ocx
 ENV OCX_NO_MODIFY_PATH=1
 
+# Back-compat: default entrypoint is the root smoke test (keeps OCX_NO_MODIFY_PATH).
+# The activation test overrides this via --entrypoint /work/activate.sh.
 ENTRYPOINT ["/work/smoke.sh"]

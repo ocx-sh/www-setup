@@ -43,6 +43,85 @@ jobs:
       - name: Run smoke (${{ matrix.distro }} on ${{ matrix.platform }})
         env:
           VERSION_ARG: ${{ inputs.release_tag }}
+          # Authenticate the installer's GitHub API 'latest' lookup so the
+          # default (unpinned) run does not hit the 60/hr unauthenticated
+          # rate limit (HTTP 403) from CI/container IPs.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           version=${VERSION_ARG#v}
           tests/docker/run.sh "${{ matrix.distro }}" "${{ matrix.platform }}" "${version:-latest}"
+
+  # ---------------------------------------------------------------------------
+  # SHELL-axis activation matrix.
+  #
+  # This exercises the per-shell profile/autoload activation path (env.sh shim +
+  # profile edit for POSIX shells; conf.d/vendor-autoload/rc.elv for
+  # fish/nu/elvish) that the smoke matrix never touches (smoke bakes
+  # OCX_NO_MODIFY_PATH=1 and only checks print-path).
+  #
+  # COVERAGE CAP (intentional, documented here so it is not silent):
+  #   - pull_request / push : SMALL representative subset only — bash + fish + nu
+  #     on ubuntu/linux/amd64. bash covers the POSIX profile path, fish the
+  #     conf.d autoload path, nu the fragile temp-file "source" autoload path.
+  #     This keeps PR runner minutes sane (3 cells vs 42).
+  #   - schedule (nightly) / workflow_dispatch : FULL grid —
+  #     {bash,dash,zsh,ksh,fish,nu,elvish} x {alpine,fedora,ubuntu}
+  #     x {linux/amd64,linux/arm64}  (7 x 3 x 2 = 42 cells).
+  #   pwsh is BEST-EFFORT and excluded from the gating grid (no Linux profile
+  #   hook in install.sh; see tests/docker/activate.sh).
+  # ---------------------------------------------------------------------------
+  shell-matrix:
+    name: ${{ matrix.shell }} / ${{ matrix.distro }} / ${{ matrix.platform }}
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Full grid is the default; the PR/push subset is carved out via
+        # `include` + a per-cell `enabled` gate below.
+        shell: [bash, dash, zsh, ksh, fish, nu, elvish]
+        distro: [alpine, fedora, ubuntu]
+        platform: [linux/amd64, linux/arm64]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # Skip the full grid on pull_request/push; only the small subset runs there.
+      - name: Decide whether this cell runs
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          CELL_SHELL: ${{ matrix.shell }}
+          CELL_DISTRO: ${{ matrix.distro }}
+          CELL_PLATFORM: ${{ matrix.platform }}
+        run: |
+          run_it=false
+          if [ "$EVENT" = "schedule" ] || [ "$EVENT" = "workflow_dispatch" ]; then
+            run_it=true
+          else
+            # PR / push subset: bash + fish + nu on ubuntu/linux/amd64 only.
+            case "${CELL_DISTRO}/${CELL_PLATFORM}/${CELL_SHELL}" in
+              ubuntu/linux/amd64/bash | ubuntu/linux/amd64/fish | ubuntu/linux/amd64/nu)
+                run_it=true ;;
+            esac
+          fi
+          echo "run=$run_it" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        if: steps.gate.outputs.run == 'true'
+        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3
+
+      - name: Set up Buildx
+        if: steps.gate.outputs.run == 'true'
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3
+
+      - name: Run activation (${{ matrix.shell }} on ${{ matrix.distro }} / ${{ matrix.platform }})
+        if: steps.gate.outputs.run == 'true'
+        env:
+          VERSION_ARG: ${{ inputs.release_tag }}
+          # Authenticate the installer's GitHub API 'latest' lookup so the
+          # default (unpinned) run does not hit the 60/hr unauthenticated
+          # rate limit (HTTP 403) from CI/container IPs.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          version=${VERSION_ARG#v}
+          tests/docker/run.sh "${{ matrix.distro }}" "${{ matrix.platform }}" "${version:-latest}" "${{ matrix.shell }}"
