@@ -77,7 +77,7 @@ Describe 'install.ps1 exit codes' {
         }
     }
 
-    It 'exit 6: ocx self setup failure (asserts the corrected hand-off argv)' -Skip:(-not $IsWindows) {
+    It 'exit 6: ocx self setup failure (asserts the corrected hand-off argv)' -Skip:$IsWindows {
         $root = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-ec-ss-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
         $fx = New-OcxFixture -Root $root -ArgvLog 'on' -FailSelfSetup
         $srv = Start-FixtureServer -SrvRoot $fx.SrvRoot

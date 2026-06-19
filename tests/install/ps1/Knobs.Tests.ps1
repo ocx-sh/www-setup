@@ -6,11 +6,12 @@
 # dist.json (OCX_INSTALL_DIST_URL). The manifest url is a dummy; OCX_INSTALL_MIRROR_URL
 # redirects the download to the fixture server.
 #
-# Cross-platform gating: scenarios that EXECUTE the extracted .zip binary self-skip
-# off Windows (-Skip:(-not $IsWindows)) — .NET zip extraction does not set +x on
-# Linux, so `& $bin self setup` would fail before the assertion. Scenarios that only
-# check exit codes / file placement, and the test-hatch path (which chmods its
-# binary), run on ubuntu-pwsh too.
+# Cross-platform gating: the fixture stub is a POSIX `#!/bin/sh` script named
+# ocx.exe, so it only EXECUTES on a POSIX host — never on Windows (it is not a
+# PE). Scenarios that execute the stub's `self setup` hand-off therefore run on
+# ubuntu-pwsh and self-skip on Windows (-Skip:$IsWindows); a real native ocx is
+# exercised by the workflow_dispatch real-release jobs. Scenarios that only check
+# exit codes / file placement run everywhere.
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot 'Fixture.psm1') -Force
@@ -47,13 +48,13 @@ Describe 'install.ps1 env knobs' {
         if (Test-Path $ArgvLog) { Remove-Item -Force $ArgvLog -ErrorAction SilentlyContinue }
     }
 
-    It 'default install hands off to ocx self setup <version>' -Skip:(-not $IsWindows) {
+    It 'default install hands off to ocx self setup <version>' -Skip:$IsWindows {
         & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
         (Get-Content $ArgvLog) | Should -Contain 'self setup 0.0.0 --no-modify-path'
     }
 
-    It 'OCX_INSTALL_VERSION pins the version' -Skip:(-not $IsWindows) {
+    It 'OCX_INSTALL_VERSION pins the version' -Skip:$IsWindows {
         $env:OCX_INSTALL_VERSION = '0.0.0'
         & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
@@ -127,7 +128,7 @@ Describe 'install.ps1 env knobs' {
         Test-Path (Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) 'ocx.exe') | Should -BeTrue
     }
 
-    It '__OCX_TESTING_INSTALL_BINARY records --offline self setup' {
+    It '__OCX_TESTING_INSTALL_BINARY records --offline self setup' -Skip:$IsWindows {
         $binDir = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-kn-tb-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
         $stub = New-OcxTestBinary -Dir $binDir -ArgvLog 'on'
         try {
@@ -135,9 +136,7 @@ Describe 'install.ps1 env knobs' {
             & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
             $LASTEXITCODE | Should -Be 0
             Test-Path (Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) 'ocx.exe') | Should -BeTrue
-            if ($IsWindows) {
-                (Get-Content $ArgvLog) | Should -Contain '--offline self setup --no-modify-path'
-            }
+            (Get-Content $ArgvLog) | Should -Contain '--offline self setup --no-modify-path'
         }
         finally {
             Remove-Item -Recurse -Force $binDir -ErrorAction SilentlyContinue

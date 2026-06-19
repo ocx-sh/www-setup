@@ -220,10 +220,14 @@ install_elvish() {
     ensure_base_tools
     _url="https://dl.elv.sh/linux-${ARCH_GO}/elvish-v${ELVISH_VERSION}.tar.gz"
     _tmp=$(mktemp -d)
-    if fetch "$_url" "$_tmp/elvish.tar.gz"; then
-        tar -xzf "$_tmp/elvish.tar.gz" -C "$_tmp"
-        # Archive contains 'elvish-v<ver>' binary; normalize the name.
-        _bin=$(find "$_tmp" -maxdepth 1 -type f -name 'elvish*' | head -n1)
+    # Extract into a clean subdir and name the download so it does NOT match the
+    # 'elvish*' glob below — otherwise `find` can pick the downloaded archive
+    # itself and install the gzip as the binary ("Exec format error").
+    mkdir -p "$_tmp/ex"
+    if fetch "$_url" "$_tmp/dl.tgz"; then
+        tar -xzf "$_tmp/dl.tgz" -C "$_tmp/ex"
+        # Archive contains the 'elvish-v<ver>' binary; normalize the name.
+        _bin=$(find "$_tmp/ex" -maxdepth 1 -type f -name 'elvish*' | head -n1)
         if [ -n "$_bin" ]; then
             install -m 0755 "$_bin" /usr/local/bin/elvish
         fi

@@ -29,20 +29,12 @@ jobs:
       - name: Run bats (vendored, shells via ocx.toml)
         run: ocx run nushell fish elvish -- external/bats-core/bin/bats -r tests/install/
 
-  # macOS: ocx has no darwin/arm64 leaf for nu/fish/elvish at the locked version,
-  # so the exotic shells cannot be provisioned here. macOS exercises the POSIX
-  # installer with system tools; the per-shell suites self-skip on `command -v`.
-  # The ocx.toml-bootstrapped exotic suites are covered by bats-linux +
-  # verify-distros.yml.
-  bats-macos:
-    name: Bats (macos-latest)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: recursive
-      - name: Run bats (vendored, system shells)
-        run: external/bats-core/bin/bats -r tests/install/
+  # NOTE: macOS is intentionally not in the bats matrix. The runner ships bash 3.2
+  # (no negative array subscripts — the suites use `${lines[-1]}`), and ocx has no
+  # darwin/arm64 leaf for nu/fish/elvish at the locked version, so the per-shell
+  # suites cannot be bootstrapped there. Linux (bats-linux + verify-distros.yml)
+  # covers the POSIX + exotic installers; macOS execution coverage waits on a real
+  # darwin ocx (the workflow_dispatch real-release jobs below).
 
   # PowerShell 7 (pwsh) on Windows + Linux. On ubuntu the binary-execution
   # scenarios self-skip via -Skip:(-not $IsWindows). `shell:` must be a static

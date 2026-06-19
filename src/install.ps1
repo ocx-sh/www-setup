@@ -540,6 +540,11 @@ function Main {
         }
         if (-not $bin) { Err 'Could not find ocx.exe binary in archive.' 5 }
 
+        # The installer targets Windows, but on a non-Windows host (CI / tests) the
+        # zip-extracted binary lacks the executable bit - set it before the binary
+        # is smoke-tested or handed off to `self setup`. No-op on Windows.
+        if ($env:OS -ne 'Windows_NT') { & chmod +x $bin 2>$null }
+
         if (-not $OcxInstallNoSmoketest) {
             try { $null = & $bin version 2>$null }
             catch { Warn 'Binary failed to execute - it may be blocked by antivirus or execution policy.' }
