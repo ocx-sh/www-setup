@@ -9,7 +9,9 @@
 # Cross-platform gating: the fixture stub is a POSIX `#!/bin/sh` script named
 # ocx.exe, so it only EXECUTES on a POSIX host — never on Windows (it is not a
 # PE). Scenarios that execute the stub's `self setup` hand-off therefore run on
-# ubuntu-pwsh and self-skip on Windows (-Skip:$IsWindows); a real native ocx is
+# ubuntu-pwsh and self-skip on Windows. The skip keys off `$env:OS -eq
+# 'Windows_NT'` rather than `$IsWindows` because $IsWindows is undefined under
+# Windows PowerShell 5.1 (it would fail to skip there). A real native ocx is
 # exercised by the workflow_dispatch real-release jobs. Scenarios that only check
 # exit codes / file placement run everywhere.
 
@@ -48,13 +50,13 @@ Describe 'install.ps1 env knobs' {
         if (Test-Path $ArgvLog) { Remove-Item -Force $ArgvLog -ErrorAction SilentlyContinue }
     }
 
-    It 'default install hands off to ocx self setup <version>' -Skip:$IsWindows {
+    It 'default install hands off to ocx self setup <version>' -Skip:($env:OS -eq 'Windows_NT') {
         & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
         (Get-Content $ArgvLog) | Should -Contain 'self setup 0.0.0 --no-modify-path'
     }
 
-    It 'OCX_INSTALL_VERSION pins the version' -Skip:$IsWindows {
+    It 'OCX_INSTALL_VERSION pins the version' -Skip:($env:OS -eq 'Windows_NT') {
         $env:OCX_INSTALL_VERSION = '0.0.0'
         & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
@@ -128,7 +130,7 @@ Describe 'install.ps1 env knobs' {
         Test-Path (Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) 'ocx.exe') | Should -BeTrue
     }
 
-    It '__OCX_TESTING_INSTALL_BINARY records --offline self setup' -Skip:$IsWindows {
+    It '__OCX_TESTING_INSTALL_BINARY records --offline self setup' -Skip:($env:OS -eq 'Windows_NT') {
         $binDir = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-kn-tb-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
         $stub = New-OcxTestBinary -Dir $binDir -ArgvLog 'on'
         try {
