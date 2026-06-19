@@ -63,28 +63,17 @@ jobs:
           $cfg.Output.Verbosity = "Detailed"
           Invoke-Pester -Configuration $cfg
 
-  # Windows PowerShell 5.1 (Desktop) leg — the installer's floor. Separate job so
-  # `shell: powershell` is a static literal.
-  pester-windows-51:
-    name: Pester (windows-latest / powershell 5.1)
+  # Windows PowerShell 5.1 (Desktop) leg — the installer's floor. The full Pester
+  # suite runs on pwsh 7 (windows + ubuntu above): it invokes install.ps1 via
+  # `& pwsh`, so a 5.1 *host* adds no real 5.1 coverage, and the python-server +
+  # Compress-Archive fixture is unreliable under the 5.1 host. The meaningful 5.1
+  # signal is this fixture-free smoke, which executes install.ps1 directly under
+  # powershell.exe via the test-binary hatch and asserts the PrintPath contract.
+  smoke-windows-51:
+    name: 5.1 smoke (windows-latest / powershell)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Install Pester (v5)
-        shell: powershell
-        run: |
-          Install-Module -Name Pester -MinimumVersion 5.0 -Force -Scope CurrentUser -Repository PSGallery -SkipPublisherCheck
-      - name: Run Pester
-        shell: powershell
-        run: |
-          Import-Module Pester -MinimumVersion 5.0
-          $cfg = New-PesterConfiguration
-          $cfg.Run.Path = "tests/install/ps1"
-          $cfg.Run.Exit = $true
-          $cfg.Output.Verbosity = "Detailed"
-          Invoke-Pester -Configuration $cfg
-      # Windows PowerShell 5.1 Desktop smoke: drives the test-only binary hatch so
-      # no network artifact is needed; the PrintPath contract must hold under 5.1.
       - name: 5.1 smoke install (powershell.exe)
         shell: powershell
         run: |
