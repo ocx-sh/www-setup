@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
-#
+
 # Bootstrap the OCX package manager itself inside a clean distro container, so
 # downstream steps can provision the project toolchain (nu/fish/elvish/pwsh, …)
 # straight from ocx.toml via `ocx run` / `ocx pull`.

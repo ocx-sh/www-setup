@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
-#
+
 # make-stub.sh — emit a minimal POSIX `ocx` stub to $1 (default ./ocx-stub).
 #
 # The stub answers `version` (-> 0.0.0) and the `ocx self setup` hand-off

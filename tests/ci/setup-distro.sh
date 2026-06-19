@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
-#
+
 # Install the base toolchain a clean distro container needs before the OCX
 # project toolchain takes over: VCS (git, for checkout submodules + `git
 # ls-files`), the download/extract chain (curl, ca-certificates, tar, xz), and

@@ -2,13 +2,13 @@ inlineHeader = """
 SPDX-License-Identifier: Apache-2.0
 Copyright 2026 The OCX Authors"""
 
-# Scoped to the shell + PowerShell sources hawkeye recognizes by extension, all
-# of which carry the SPDX header. The exotic installers (src/install.{nu,fish,
-# elv}) keep the same header for hygiene but are not enforced here (hawkeye has
-# no built-in comment style for those extensions).
+# Scoped to the POSIX shell sources hawkeye recognizes by extension, all of which
+# carry the SPDX header. The PowerShell + exotic installers (src/install.{ps1,nu,
+# fish,elv}) keep the same header for hygiene but are not enforced here: hawkeye
+# has no built-in comment style for those extensions (it reports them as
+# "unknown" and cannot validate the header).
 includes = [
     "src/install.sh",
-    "src/install.ps1",
     "scripts/**/*.sh",
     "tests/ci/**/*.sh",
     "tests/docker/**/*.sh",
