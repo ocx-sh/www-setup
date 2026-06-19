@@ -34,32 +34,46 @@ jobs:
       - name: Run bats (vendored, shells via ocx.toml)
         run: ocx run nushell fish elvish -- external/bats-core/bin/bats -r tests/install/
 
+  # PowerShell 7 (pwsh) on Windows + Linux. On ubuntu the binary-execution
+  # scenarios self-skip via -Skip:(-not $IsWindows). `shell:` must be a static
+  # value (GitHub rejects a matrix expression in `shell:`), so the 5.1 Desktop
+  # leg lives in its own job below.
   pester:
-    # Three legs:
-    #   - windows-latest / pwsh       : PowerShell 7 on Windows
-    #   - windows-latest / powershell : Windows PowerShell 5.1 (Desktop)
-    #   - ubuntu-latest  / pwsh       : PowerShell 7 on Linux (most paths run; the
-    #     binary-execution scenarios self-skip via -Skip:(-not $IsWindows)).
-    name: Pester (${{ matrix.os }} / ${{ matrix.shell }})
+    name: Pester (${{ matrix.os }} / pwsh)
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            shell: pwsh
-          - os: windows-latest
-            shell: powershell
-          - os: ubuntu-latest
-            shell: pwsh
+        os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install Pester (v5)
-        shell: ${{ matrix.shell }}
+        shell: pwsh
         run: |
           Install-Module -Name Pester -MinimumVersion 5 -Force -Scope CurrentUser -Repository PSGallery -SkipPublisherCheck
       - name: Run Pester
-        shell: ${{ matrix.shell }}
+        shell: pwsh
+        run: |
+          Import-Module Pester -MinimumVersion 5
+          $cfg = New-PesterConfiguration
+          $cfg.Run.Path = "tests/install/ps1"
+          $cfg.Run.Exit = $true
+          $cfg.Output.Verbosity = "Detailed"
+          Invoke-Pester -Configuration $cfg
+
+  # Windows PowerShell 5.1 (Desktop) leg — the installer's floor. Separate job so
+  # `shell: powershell` is a static literal.
+  pester-windows-51:
+    name: Pester (windows-latest / powershell 5.1)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install Pester (v5)
+        shell: powershell
+        run: |
+          Install-Module -Name Pester -MinimumVersion 5 -Force -Scope CurrentUser -Repository PSGallery -SkipPublisherCheck
+      - name: Run Pester
+        shell: powershell
         run: |
           Import-Module Pester -MinimumVersion 5
           $cfg = New-PesterConfiguration
@@ -70,7 +84,6 @@ jobs:
       # Windows PowerShell 5.1 Desktop smoke: drives the test-only binary hatch so
       # no network artifact is needed; the PrintPath contract must hold under 5.1.
       - name: 5.1 smoke install (powershell.exe)
-        if: matrix.shell == 'powershell'
         shell: powershell
         run: |
           $stub = Join-Path $env:RUNNER_TEMP 'ocx.exe'
