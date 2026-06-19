@@ -7,78 +7,101 @@ Canonical hosting for the [OCX](https://ocx.sh) installer scripts.
 
 </div>
 
-`setup.ocx.sh` serves two files:
+`setup.ocx.sh` serves a thin installer for **every supported shell** under bare, friendly paths — each one a one-liner in that shell's own language:
 
 ```
-https://setup.ocx.sh/sh/install.sh             # POSIX (Linux + macOS)
-https://setup.ocx.sh/pwsh/install.ps1          # PowerShell (Windows + cross-platform pwsh)
+https://setup.ocx.sh/sh             # POSIX: bash / zsh / ash / ksh / dash (Linux + macOS)
+https://setup.ocx.sh/pwsh           # PowerShell 5.1+ (Windows + cross-platform pwsh)
+https://setup.ocx.sh/nu             # Nushell (Linux + macOS + Windows)
+https://setup.ocx.sh/fish           # fish (Linux + macOS)
+https://setup.ocx.sh/elvish         # Elvish (Linux + macOS + Windows)
+https://setup.ocx.sh/dist           # dist.json — the distribution manifest the installers read
 ```
 
-Every release also publishes pinned, immutable copies at:
+Each installer is a **thin bootstrap**: it detects the platform, resolves the release from the manifest, downloads + verifies the archive against the manifest's inline `sha256`, then hands off to the downloaded binary's `ocx self setup` — which owns the package-store install, the per-shell env shims, and the managed shell-profile activation blocks.
+
+The bare paths are served directly (nginx `try_files`, no redirect) from the latest-stable installer. The pre-release ("next") channel and pinned, immutable copies live at:
 
 ```
-https://setup.ocx.sh/sh/<VERSION>/install.sh
-https://setup.ocx.sh/pwsh/<VERSION>/install.ps1
+https://setup.ocx.sh/<shell>/next/install.<ext>      # next (latest prerelease)
+https://setup.ocx.sh/<shell>/<VERSION>/install.<ext>  # pinned, immutable
 ```
+
+`<VERSION>` is the semver string without a leading `v` (e.g. `0.5.0`); `<ext>` is `sh`, `ps1`, `nu`, `fish`, or `elv`.
 
 The GitHub Action and GitLab Function listings live in **separate repositories** so they can publish to the native GitHub Marketplace and GitLab CI Catalog. Documentation paths (`/docs/*`) and action paths (`/actions/*`) on `setup.ocx.sh` are forwarded by nginx to those upstream surfaces.
 
 ## Quick start
 
-### Linux / macOS
+```sh
+# POSIX (Linux / macOS):
+curl -fsSL https://setup.ocx.sh/sh | sh
+
+# fish:
+curl -fsSL https://setup.ocx.sh/fish | fish
+
+# Nushell:
+curl -fsSL https://setup.ocx.sh/nu | nu
+
+# Elvish:
+curl -fsSL https://setup.ocx.sh/elvish | elvish
+```
+
+```powershell
+# PowerShell (Windows):
+irm https://setup.ocx.sh/pwsh | iex
+```
+
+### Pinning a version
+
+Use the `OCX_INSTALL_VERSION` env knob — it is portable across every shell's `curl | <shell>` argument-passing quirks:
 
 ```sh
-# Latest:
-curl -fsSL https://setup.ocx.sh/sh/install.sh | sh
+OCX_INSTALL_VERSION=0.5.0 curl -fsSL https://setup.ocx.sh/sh | sh
+```
 
-# Pinned version:
-curl -fsSL https://setup.ocx.sh/sh/install.sh | sh -s -- --version 0.5.0
+`--version` is also accepted where the dialect parses flags cleanly (`sh`, `fish`, and `pwsh`'s `-Version`). For PowerShell, compile to a scriptblock so `-Version` binds to the param:
 
-# Pinned install URL (recommended for CI):
+```powershell
+& ([scriptblock]::Create((irm https://setup.ocx.sh/pwsh))) -Version 0.5.0
+```
+
+### Pinned install URL (recommended for CI)
+
+```sh
 curl -fsSL https://setup.ocx.sh/sh/0.5.0/install.sh | sh
 ```
 
-### Windows / PowerShell
-
-```powershell
-# Latest:
-irm https://setup.ocx.sh/pwsh/install.ps1 | iex
-
-# Pinned version (compile to a scriptblock so -Version binds to the param):
-& ([scriptblock]::Create((irm https://setup.ocx.sh/pwsh/install.ps1))) -Version 0.5.0
-
-# Or download first and invoke with the -Version parameter:
-irm https://setup.ocx.sh/pwsh/install.ps1 -OutFile install.ps1; pwsh -File install.ps1 -Version 0.5.0
-```
+The installers resolve "latest" by reading the self-hosted distribution manifest at `https://setup.ocx.sh/dist.json` — there is **no GitHub API dependency** in the install path. The manifest lists the published OCX product versions (from `ocx-sh/ocx`) with an inline checksum and download URL per platform; override it with `OCX_INSTALL_DIST_URL`.
 
 ## Configuration
 
-Both installers read environment variables to override defaults. The `OCX_INSTALL_*` prefix scopes them to install-time; runtime envs (`OCX_HOME`, `OCX_NO_MODIFY_PATH`, `GITHUB_TOKEN`, `NO_COLOR`, `TMPDIR`) keep their existing names.
+The `OCX_INSTALL_*` prefix scopes a knob to install-time; the shared runtime envs (`OCX_HOME`, `OCX_NO_MODIFY_PATH`, `NO_COLOR`, `TMPDIR`) keep their existing names.
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `OCX_INSTALL_REPO` | GitHub repo to install from | `ocx-sh/ocx` |
-| `OCX_INSTALL_BASE_URL` | Release download base URL | `https://github.com/<repo>/releases/download` |
-| `OCX_INSTALL_API_URL` | GitHub Releases API base | `https://api.github.com/repos/<repo>/releases` |
-| `OCX_INSTALL_FORMAT_URL` | URL template for the archive (`{version}`, `{tag}`, `{target}`, `{ext}`) | `{base}/{tag}/ocx-{target}.{ext}` |
-| `OCX_INSTALL_CHECKSUM_FORMAT_URL` | URL template for `sha256.sum` | `{base}/{tag}/sha256.sum` |
-| `OCX_INSTALL_SKIP_SELF_INIT` | Skip the networked `ocx --remote package install` self-init after extract; the binary is placed on the OCX bin dir directly so it is on PATH, but the package store is not populated by the install. Set `1` in air-gapped / offline envs. | `0` |
-| `OCX_INSTALL_PRINT_PATH` | Emit the bin dir as the final stdout line | `0` |
+| `OCX_INSTALL_VERSION` | Pin a version (empty = latest stable). The portable pinning channel for every shell. | _(latest)_ |
+| `OCX_INSTALL_REPO` | GitHub owner/repo | `ocx-sh/ocx` |
+| `OCX_INSTALL_DIST_URL` | Distribution manifest (`dist.json`) used to resolve the latest version + per-target checksum/URL | `https://setup.ocx.sh/dist.json` |
+| `OCX_INSTALL_MIRROR_URL` | Artifact host override — rewrites the per-target download URL to `<MIRROR_URL>/<tag>/<filename>` | _(use manifest URL)_ |
+| `OCX_INSTALL_NO_SETUP` | Place the binary on PATH only; skip `ocx self setup` (env shims + profile blocks). The CI / air-gapped path. `OCX_NO_MODIFY_PATH` is a no-op in this mode. | `0` |
+| `OCX_INSTALL_NO_SMOKETEST` | Skip the post-extract `ocx version` smoke test | `0` |
 | `OCX_INSTALL_FORCE` | Reinstall even if the target version is already present | `0` |
 | `OCX_INSTALL_QUIET` | Suppress informational stderr output | `0` |
-| `OCX_INSTALL_DOWNLOADER` | Force a downloader (`curl` or `wget`); default auto-detects | _(auto)_ |
+| `OCX_INSTALL_PRINT_PATH` | Emit the bin dir as the final stdout line | `0` |
+| `OCX_INSTALL_DOWNLOADER` | Force a downloader (`curl` or `wget`); default auto-detects (sh only) | _(auto)_ |
 
-The full list lives in `sh/install.sh` (and `pwsh/install.ps1`); see [`.claude/rules/installers.md`](.claude/rules/installers.md) for the naming + parity rules.
+The full list lives in `src/install.sh` (and its peers); see [`.claude/rules/installers.md`](.claude/rules/installers.md) for the naming + 5-way parity rules.
 
 ## Stdout / stderr contract
 
 - All informational, warning, and error output goes to **stderr**.
-- **Stdout is silent on success** unless `OCX_INSTALL_PRINT_PATH=1` (or `-PrintPath`), in which case the final stdout line is the absolute OCX bin dir.
+- **Stdout is silent on success** unless `OCX_INSTALL_PRINT_PATH` is truthy (or `-PrintPath`), in which case the final stdout line is the absolute OCX bin dir.
 
 This contract lets downstream callers do:
 
 ```sh
-BIN_DIR=$(OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 curl -fsSL https://setup.ocx.sh/sh/install.sh | sh | tail -n1)
+BIN_DIR=$(OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 curl -fsSL https://setup.ocx.sh/sh | sh | tail -n1)
 export PATH="$BIN_DIR:$PATH"
 ```
 
@@ -89,20 +112,20 @@ export PATH="$BIN_DIR:$PATH"
 | 0 | Success |
 | 1 | Generic / legacy fallback |
 | 2 | Argument or environment validation |
-| 3 | Network / download / API failure |
+| 3 | Network / download / manifest failure |
 | 4 | Checksum mismatch |
 | 5 | Archive extraction failure |
-| 6 | Bootstrap (`ocx --remote package install`) failure |
+| 6 | `ocx self setup` failure |
 | 7 | Unsupported platform / architecture |
 
 ## Development
 
 ```sh
-task verify                                    # lint + Bats + Pester
-task test:bats                                 # only Bats
+git submodule update --init --recursive        # vendored bats (external/)
+task verify                                    # lint (5 shells) + Bats + Pester
+task test:bats                                 # only Bats (vendored)
 task test:pester                               # only Pester (needs pwsh + Pester)
 task docker:integration DISTRO=alpine PLATFORM=linux/amd64
-task docker:integration:all                    # full 3×2 matrix (needs buildx + QEMU)
 task publish:dry-run                           # validate rsync paths
 ```
 

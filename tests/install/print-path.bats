@@ -6,10 +6,10 @@ bats_require_minimum_version 1.5.0
 
 load helpers/server
 
-INSTALL_SH="${BATS_TEST_DIRNAME}/../../sh/install.sh"
+INSTALL_SH="${BATS_TEST_DIRNAME}/../../src/install.sh"
 
 # Canonical CLI bin subpath (real on-disk store layout). Mirrors
-# OCX_BIN_SUBPATH in sh/install.sh.
+# OCX_BIN_SUBPATH in src/install.sh.
 BIN_SUBPATH="symlinks/ocx.sh/ocx/cli/current/content/bin"
 
 setup_file() {
@@ -33,16 +33,15 @@ setup() {
     export CURL_CA_BUNDLE
     CURL_CA_BUNDLE="$(server_ca_bundle)"
     export OCX_STUB_ARGV="${BATS_TEST_TMPDIR}/stub-argv.log"
-    export OCX_INSTALL_BASE_URL="${FIXTURE_URL}/releases/download"
-    export OCX_INSTALL_API_URL="${FIXTURE_URL}/api/repos/ocx-sh/ocx/releases"
-    unset OCX_INSTALL_FORMAT_URL OCX_INSTALL_CHECKSUM_FORMAT_URL GITHUB_PATH
-    unset OCX_INSTALL_SKIP_SELF_INIT
+    export OCX_INSTALL_DIST_URL="${FIXTURE_URL}/dist.json"
+    export OCX_INSTALL_MIRROR_URL="${FIXTURE_URL}/releases/download"
+    unset GITHUB_PATH OCX_INSTALL_NO_SETUP OCX_INSTALL_VERSION
+    unset __OCX_TESTING_INSTALL_BINARY
 }
 
 # These tests use `run --separate-stderr` so $stdout and $stderr are split.
-# That is what actually proves the discipline: under a plain `run`, bats merges
-# both streams into $output and leaves $stderr empty, which would let stderr
-# leaks pass silently.
+# Under a plain `run`, bats merges both into $output and leaves $stderr empty,
+# which would let stderr leaks pass silently.
 
 @test "stdout is empty on default success" {
     run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
@@ -55,23 +54,20 @@ setup() {
 @test "OCX_INSTALL_PRINT_PATH=1 prints the bin dir as the final stdout line" {
     OCX_INSTALL_PRINT_PATH=1 run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
-    # In --separate-stderr mode $lines is stdout-only; the bin dir is its last
-    # (and, here, only) line.
     [ "${lines[-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
 }
 
 @test "stderr carries the informational banner even with PRINT_PATH set" {
     OCX_INSTALL_PRINT_PATH=1 run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
-    echo "$stderr" | grep -q 'Installing\|Detected\|Downloaded\|Verified\|Bootstrapped\|symlinks'
-    # The banner must NOT have leaked onto stdout.
-    ! echo "$stdout" | grep -q 'Installing\|Detected\|Downloaded\|Verified\|Bootstrapped'
+    echo "$stderr" | grep -q 'Installing\|Detected\|Downloading\|Verified\|self setup\|installed'
+    ! echo "$stdout" | grep -q 'Installing\|Detected\|Downloading\|Verified'
 }
 
 @test "OCX_INSTALL_QUIET=1 silences stderr informational lines" {
     OCX_INSTALL_QUIET=1 run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
-    ! echo "$stderr" | grep -q 'Installing\|Downloaded\|Detected platform' || false
+    ! echo "$stderr" | grep -q 'Installing\|Downloading\|Detected platform' || false
 }
 
 @test "error messages always go to stderr (exit 2 path)" {
@@ -79,4 +75,25 @@ setup() {
     [ "$status" -eq 2 ]
     [ -z "$stdout" ]
     echo "$stderr" | grep -qi 'unknown\|invalid\|usage'
+}
+
+@test "__OCX_TESTING_INSTALL_BINARY mode honors PRINT_PATH on final stdout line" {
+    local _localbin="${BATS_TEST_TMPDIR}/local-ocx"
+    server_stub_body >"$_localbin"
+    chmod +x "$_localbin"
+    __OCX_TESTING_INSTALL_BINARY="$_localbin" OCX_INSTALL_PRINT_PATH=1 \
+        run --separate-stderr sh "$INSTALL_SH"
+    [ "$status" -eq 0 ]
+    [ "${lines[-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+}
+
+@test "__OCX_TESTING_INSTALL_BINARY mode keeps stdout silent without PRINT_PATH" {
+    local _localbin="${BATS_TEST_TMPDIR}/local-ocx"
+    server_stub_body >"$_localbin"
+    chmod +x "$_localbin"
+    __OCX_TESTING_INSTALL_BINARY="$_localbin" \
+        run --separate-stderr sh "$INSTALL_SH"
+    [ "$status" -eq 0 ]
+    [ -z "$stdout" ]
+    [ -n "$stderr" ]
 }

@@ -1,22 +1,20 @@
-# Shared Pester fixtures for pwsh/install.ps1.
+# Shared Pester fixtures for src/install.ps1.
 # Imported via `Import-Module $PSScriptRoot/Fixture.psm1 -Force` from each suite.
 #
-# This is the PowerShell analogue of tests/install/helpers/server.bash: it
-# builds a fake GitHub-release tree (archive + sha256.sum + api/.../latest) and
-# spins a `python3 -m http.server` against it so the installer can be driven
-# end-to-end without network access.
+# PowerShell analogue of tests/install/helpers/server.bash: it builds a fake
+# release tree (FLAT zip archive + a dist.json manifest with an INLINE sha256)
+# and spins a `python http.server` against it so install.ps1 runs end-to-end
+# without network access.
 #
-# Layout notes (load-bearing):
-#   * The release archive is built FLAT (ocx.exe at the archive root, no
-#     ocx-<target>/ wrapper dir). This matches the real cargo-dist release
-#     layout (verified in AUDIT-phase-a Appendix A/F) AND is the only layout the
-#     installer can locate on a non-Windows pwsh host: Join-Path treats '\' as a
-#     literal on Linux, so the nested candidate "ocx-<target>\ocx.exe" never
-#     matches an extracted "ocx-<target>/ocx.exe" there. Flat keeps these suites
-#     meaningful on ubuntu-pwsh and faithful to production on windows-latest.
-#   * The fixture target is always x86_64-pc-windows-msvc — Detect-Architecture
-#     returns that for an X64 host regardless of OS (it keys off
-#     RuntimeInformation.OSArchitecture / PROCESSOR_ARCHITECTURE, not $IsWindows).
+# The installer resolves latest + the per-target checksum/URL from dist.json.
+# The manifest `url` is a dummy (example.invalid); suites set OCX_INSTALL_MIRROR_URL
+# to $Server.MirrorUrl so the archive download is redirected to the fixture
+# (mirror rewrites url -> <MirrorUrl>/<tag>/<filename>).
+#
+# Layout: the archive is FLAT (ocx.exe at the root). Detect-Architecture returns
+# x86_64-pc-windows-msvc for any X64 host (it keys off RuntimeInformation), so the
+# fixture target is always x86_64-pc-windows-msvc and the suites run meaningfully
+# on ubuntu-pwsh as well as windows-latest.
 
 $script:Target = 'x86_64-pc-windows-msvc'
 
@@ -24,10 +22,6 @@ function Get-FixtureTarget {
     return $script:Target
 }
 
-# Wait for `python -m http.server 0` to report its ephemeral port. The port line
-# can land on either stdout or stderr depending on the CPython version, and on
-# Linux pwsh Start-Process forbids redirecting both streams to the SAME file, so
-# we always pass two distinct log files and scan both.
 function Wait-FixturePort {
     param(
         [Parameter(Mandatory)][string]$OutLog,
@@ -45,8 +39,6 @@ function Wait-FixturePort {
     return $null
 }
 
-# Resolve the python interpreter. Windows runners expose `python`; Linux runners
-# (and this dev box) expose `python3`. Prefer python3, fall back to python.
 function Get-PythonExe {
     foreach ($name in @('python3', 'python')) {
         if (Get-Command $name -ErrorAction SilentlyContinue) { return $name }
@@ -55,56 +47,100 @@ function Get-PythonExe {
 }
 
 # Write the stub `ocx.exe` into $BuildDir.
-#   - default: a no-op binary that prints "0.0.0" for `version`.
-#   - $BootstrapArgvLog: capture the bootstrap argv to this file and exit 9, so a
-#     suite can assert the exact `--remote package install --select
-#     ocx.sh/ocx/cli:<ver>` argv and the exit-6 contract. (Only executable on a
-#     real Windows host or via shebang on Linux — see suite-level -Skip gates.)
+#   - default: answers `version` -> 0.0.0, `about`, and the `ocx self setup`
+#     hand-off (records "$*" to $ArgvLog when set, exits 0).
+#   - $FailSelfSetup: the `self setup` hand-off exits 9 (drives the exit-6 path).
+# The stub is a `#!/bin/sh` script (named ocx.exe). On Windows it is invoked as a
+# real exe; on Linux a shebang + a caller chmod makes `& <bin>` runnable — but the
+# DOWNLOAD path extracts via .NET zip (no +x on Linux), so suites that execute the
+# extracted binary self-skip off Windows (see -Skip:(-not $IsWindows)).
 function New-OcxStub {
     param(
         [Parameter(Mandatory)][string]$BuildDir,
-        [string]$BootstrapArgvLog
+        [string]$ArgvLog,
+        [switch]$FailSelfSetup
     )
     New-Item -ItemType Directory -Path $BuildDir -Force | Out-Null
     $stubPath = Join-Path $BuildDir 'ocx.exe'
 
-    if ($BootstrapArgvLog) {
-        # POSIX-shebang stub: records "$*" to the argv log then exits 9 so the
-        # installer surfaces exit code 6. On Windows this same file is invoked
-        # as ocx.exe; on Linux the shebang + a chmod by the caller make it run.
-        $body = "#!/bin/sh`n" +
-                "printf '%s' `"`$*`" > '$BootstrapArgvLog'`n" +
-                "exit 9`n"
+    $record = ''
+    if ($ArgvLog) {
+        $record = "if [ -n `"`$OCX_STUB_ARGV`" ]; then printf '%s\n' `"`$*`" >> `"`$OCX_STUB_ARGV`"; fi`n"
     }
-    else {
-        $body = "#!/bin/sh`n" +
-                "if [ `"`$1`" = version ]; then echo 0.0.0; fi`n" +
-                "exit 0`n"
-    }
+    $setupExit = if ($FailSelfSetup) { '9' } else { '0' }
+    $body = "#!/bin/sh`n" +
+            $record +
+            "case `"`$1`" in`n" +
+            "  version) echo 0.0.0 ;;`n" +
+            "  about) echo 'ocx 0.0.0 (fixture stub)' ;;`n" +
+            "  --offline) shift; [ `"`$1`" = self ] && [ `"`$2`" = setup ] && exit $setupExit; echo 'stub ocx' ;;`n" +
+            "  self) [ `"`$2`" = setup ] && exit $setupExit; echo 'stub ocx' ;;`n" +
+            "  *) echo 'stub ocx' ;;`n" +
+            "esac`n"
     [System.IO.File]::WriteAllText($stubPath, $body)
     return $stubPath
 }
 
+# Build a standalone local test binary for the __OCX_TESTING_INSTALL_BINARY hatch
+# and return its path. chmod +x on non-Windows so `& <bin> version` runs there.
+function New-OcxTestBinary {
+    param(
+        [Parameter(Mandatory)][string]$Dir,
+        [string]$Name = 'ocx.exe',
+        [string]$ArgvLog
+    )
+    New-Item -ItemType Directory -Path $Dir -Force | Out-Null
+    $binPath = Join-Path $Dir $Name
+    New-OcxStub -BuildDir $Dir -ArgvLog $ArgvLog | Out-Null
+    if ($Name -ne 'ocx.exe') {
+        Move-Item -Path (Join-Path $Dir 'ocx.exe') -Destination $binPath -Force
+    }
+    if ($env:OS -ne 'Windows_NT') {
+        & chmod +x $binPath 2>$null
+    }
+    return $binPath
+}
+
+# Write a single-release dist.json under $SrvRoot. $Sha is the inline checksum
+# ('0'*64 when $TamperChecksum). The url is a dummy; suites use OCX_INSTALL_MIRROR_URL.
+function Write-OcxDist {
+    param(
+        [Parameter(Mandatory)][string]$SrvRoot,
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][string]$Sha,
+        [Parameter(Mandatory)][string]$Filename
+    )
+    $json = @"
+{
+  "schema": 1,
+  "latest": {"version":"0.0.0","channel":"stable"},
+  "latest_next": null,
+  "releases": [
+    {"version":"0.0.0","channel":"stable","tag":"v0.0.0","target":"$Target","filename":"$Filename","sha256":"$Sha","url":"https://example.invalid/ocx/releases/download/v0.0.0/$Filename"}
+  ]
+}
+"@
+    Set-Content -Path (Join-Path $SrvRoot 'dist.json') -Value $json -Encoding ASCII -NoNewline
+}
+
 # Build the fake release tree under $Root and return a hashtable describing it.
-# $TamperChecksum forces a wrong sha256 (exit-4 path). $BootstrapArgvLog routes
-# through New-OcxStub's capture stub.
 function New-OcxFixture {
     param(
         [Parameter(Mandatory)][string]$Root,
         [switch]$TamperChecksum,
-        [string]$BootstrapArgvLog
+        [string]$ArgvLog,
+        [switch]$FailSelfSetup
     )
 
     $target = $script:Target
     $build = Join-Path $Root 'build'
-    New-OcxStub -BuildDir $build -BootstrapArgvLog $BootstrapArgvLog | Out-Null
+    New-OcxStub -BuildDir $build -ArgvLog $ArgvLog -FailSelfSetup:$FailSelfSetup | Out-Null
 
     $srvDir = Join-Path $Root 'srv/releases/download/v0.0.0'
     New-Item -ItemType Directory -Path $srvDir -Force | Out-Null
-    $apiDir = Join-Path $Root 'srv/api/repos/ocx-sh/ocx/releases'
-    New-Item -ItemType Directory -Path $apiDir -Force | Out-Null
+    $srvRoot = Join-Path $Root 'srv'
 
-    # FLAT archive: compress the *contents* of $build, not $build itself.
+    # FLAT archive: compress the *contents* of $build (ocx.exe at the root).
     $archive = "ocx-$target.zip"
     $archivePath = Join-Path $srvDir $archive
     Compress-Archive -Path (Join-Path $build '*') -DestinationPath $archivePath -Force
@@ -115,29 +151,18 @@ function New-OcxFixture {
     else {
         $hash = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLower()
     }
-    "$hash  $archive" | Set-Content -Path (Join-Path $srvDir 'sha256.sum') -Encoding ASCII -NoNewline
-
-    '{"tag_name":"v0.0.0","name":"v0.0.0"}' |
-        Set-Content -Path (Join-Path $apiDir 'latest') -Encoding ASCII
+    Write-OcxDist -SrvRoot $srvRoot -Target $target -Sha $hash -Filename $archive
 
     return @{
         Root    = $Root
-        SrvRoot = (Join-Path $Root 'srv')
+        SrvRoot = $srvRoot
         Target  = $target
         Archive = $archive
     }
 }
 
-# Spin a python http.server against $SrvRoot and return @{ Process; Port;
-# BaseUrl; ApiUrl }. Caller stops the process in its teardown.
-#
-# We do NOT use the bare `python -m http.server` (as server.bash does) because
-# that guesses MIME from the file extension: the extensionless `latest` release
-# file is served as application/octet-stream, which makes Invoke-WebRequest
-# return a byte[] (not a string), and Get-LatestVersion's regex never matches.
-# The REAL GitHub API serves application/json, so we launch a one-file server
-# that forces application/json on the `latest` endpoint — faithful to
-# production and identical across windows-latest / ubuntu-pwsh.
+# Spin a python http.server against $SrvRoot. Returns @{ Process; Port; DistUrl;
+# MirrorUrl }. dist.json is served as application/json so ConvertFrom-Json is happy.
 function Start-FixtureServer {
     param([Parameter(Mandatory)][string]$SrvRoot)
 
@@ -152,9 +177,7 @@ import http.server, socketserver
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def guess_type(self, path):
-        # GitHub's releases API responds with JSON; emulate that for the
-        # extensionless `latest` file so Invoke-WebRequest yields a string.
-        if path.endswith('latest'):
+        if path.endswith('dist.json') or path.endswith('/dist'):
             return 'application/json'
         return super().guess_type(path)
 
@@ -178,10 +201,10 @@ with socketserver.TCPServer(('127.0.0.1', 0), Handler) as httpd:
     }
 
     return @{
-        Process = $proc
-        Port    = $port
-        BaseUrl = "http://127.0.0.1:$port/releases/download"
-        ApiUrl  = "http://127.0.0.1:$port/api/repos/ocx-sh/ocx/releases"
+        Process   = $proc
+        Port      = $port
+        DistUrl   = "http://127.0.0.1:$port/dist.json"
+        MirrorUrl = "http://127.0.0.1:$port/releases/download"
     }
 }
 
@@ -192,14 +215,13 @@ function Stop-FixtureServer {
     }
 }
 
-# Canonical OCX bin dir under $OcxHome — the real on-disk store layout
-# (symlinks/ocx.sh/ocx/cli/current/content/bin). Mirrors install.ps1
-# $OcxBinSubPath. Uses Join-Path so the separator matches the host.
+# Canonical OCX bin dir under $OcxHome (the real on-disk store layout).
 function Get-ExpectedBinDir {
     param([Parameter(Mandatory)][string]$OcxHome)
     return (Join-Path $OcxHome 'symlinks/ocx.sh/ocx/cli/current/content/bin')
 }
 
 Export-ModuleMember -Function `
-    Get-FixtureTarget, New-OcxFixture, New-OcxStub, Start-FixtureServer, `
-    Stop-FixtureServer, Get-ExpectedBinDir, Wait-FixturePort, Get-PythonExe
+    Get-FixtureTarget, New-OcxFixture, New-OcxStub, New-OcxTestBinary, Write-OcxDist, `
+    Start-FixtureServer, Stop-FixtureServer, Get-ExpectedBinDir, `
+    Wait-FixturePort, Get-PythonExe

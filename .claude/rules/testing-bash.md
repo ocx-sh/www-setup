@@ -1,117 +1,139 @@
 # Bash testing rules (Bats)
 
+## Vendored Bats
+
+Bats is vendored as git submodules under `external/` — run
+`git submodule update --init --recursive` (or `task test:bootstrap`) once, then
+invoke `external/bats-core/bin/bats -r tests/install/`. `tests/install/helpers/load.bash`
+loads `bats-support` + `bats-assert` so new suites can use
+`assert_success`/`assert_output`; the existing top-level suites keep raw
+`[ "$status" -eq N ]` and gain library availability.
+
 ## Layout
 
 ```
 tests/install/
-├── env-knobs.bats             # OCX_INSTALL_* env var behavior + happy paths
-├── exit-codes.bats            # Each numbered exit code path 2..7
+├── env-knobs.bats             # OCX_INSTALL_* env var behavior + the self-setup hand-off
+├── exit-codes.bats            # Numbered exit codes 3/4/5/6 (2 + no-row/3 in env-knobs)
 ├── print-path.bats            # Stdout/stderr discipline + OCX_INSTALL_PRINT_PATH
+├── dist.bats                  # scripts/gen-dist.sh manifest generator (offline hatches)
+├── {nu,fish,elvish}/          # Per-shell installer suites (gate on `command -v <shell>`)
 ├── helpers/
 │   ├── server.bash            # Runtime fixture builder + HTTPS server helpers
+│   ├── load.bash              # loads bats-support + bats-assert (from external/)
 │   ├── localhost-cert.pem     # CA cert tests trust (CURL_CA_BUNDLE)
 │   └── localhost-combined.pem # key + cert the python HTTPS server loads
 └── fixtures/                  # EMPTY — fixtures are built at runtime (see below)
 ```
 
 > `fixtures/` is intentionally empty. There are **no** static tarballs checked
-> in. The whole release tree (archive + `sha256.sum` + GitHub-API JSON) is
-> generated per-test by `helpers/server.bash`.
+> in. The whole release tree (archive + a `dist.json` manifest with an inline
+> `sha256`) is generated per-test by `helpers/server.bash`.
 
 ## Runtime fixture builder (`helpers/server.bash`)
 
-`load helpers/server` exposes:
+`load helpers/server` (or `load ../helpers/server` from the per-shell dirs)
+exposes:
 
 | Function | Purpose |
 |---|---|
-| `server_detect_target` | Echo the current `<arch>-<os>-<libc>` triple (e.g. `x86_64-unknown-linux-gnu`) so the fixture archive name matches what `detect_target()` in `install.sh` will request. |
-| `server_build_fixture ROOT [LAYOUT]` | Build a v0.0.0 release tree under `ROOT`: `releases/download/v0.0.0/ocx-<target>.tar.xz` + `sha256.sum`, and `api/repos/ocx-sh/ocx/releases/latest`. Echoes the target triple. |
-| `server_stub_body` | Emit the body of the fixture `ocx` stub binary that gets packed into the archive. |
-| `server_start ROOT LOGFILE` | Spin a python3 `ssl`-wrapped HTTP server on an ephemeral port against `ROOT`, scrape the chosen port from the log, echo `PID PORT`. Serves **HTTPS** (see below). |
+| `server_detect_target` | Echo the current `<arch>-<os>-<libc>` triple so the fixture archive name matches what the installer's `detect_target` will request. |
+| `server_build_fixture ROOT [LAYOUT]` | Build a v0.0.0 release tree under `ROOT`: `releases/download/v0.0.0/ocx-<target>.tar.xz`, then a `dist.json` manifest with the archive's inline `sha256`. Echoes the target triple. |
+| `server_write_dist ROOT TARGET SHA FILE` | (Re)write a single-release `dist.json` — used by tamper tests (e.g. a wrong `sha256` for the exit-4 path). |
+| `server_finalize_dist_url ROOT BASE` | Rewrite the dummy manifest `url` to the real fixture server (for the one URL-passthrough test that drops `OCX_INSTALL_MIRROR_URL`). |
+| `server_stub_body` | Emit the body of the fixture `ocx` stub binary packed into the archive. |
+| `server_start ROOT LOGFILE` | Spin a python3 `ssl`-wrapped server on an ephemeral port against `ROOT`; echo `PID PORT`. Serves **HTTPS** (see below). |
 | `server_stop PID` | Kill the server. |
-| `server_ca_bundle` | Echo the path to the vendored localhost CA cert; export it as `CURL_CA_BUNDLE` in `setup()`. |
+| `server_ca_bundle` | Echo the path to the vendored localhost CA cert; export as `CURL_CA_BUNDLE`. |
 
 ### HTTPS, not HTTP
 
-The corrected installer enforces TLS on every download — curl runs with
-`--proto '=https'` and the wget path calls `assert_https_url`, both of which
-reject any non-`https://` URL. So the fixture server **must** speak HTTPS, and
-every fixture URL the tests pass to the installer uses `https://127.0.0.1:PORT`.
+The installers enforce TLS on every download — curl runs with `--proto '=https'`
+and the wget path calls `assert_https_url`. So the fixture server **must** speak
+HTTPS, and every fixture URL uses `https://127.0.0.1:PORT`. A static, long-lived
+self-signed cert for `127.0.0.1` is vendored next to the helper
+(`localhost-cert.pem` = the CA tests trust via `CURL_CA_BUNDLE`;
+`localhost-combined.pem` = key + cert python's `ssl` loads). Trusting one
+localhost test cert does **not** disable TLS verification. If the cert ever
+expires (dated ~100 years out), regenerate a 127.0.0.1 self-signed cert and
+replace both PEMs.
 
-A static, long-lived self-signed cert for `127.0.0.1` is vendored next to the
-helper:
+### dist.json + the mirror redirect
 
-- `helpers/localhost-cert.pem` — the cert (also the CA); tests export it as
-  `CURL_CA_BUNDLE` so curl trusts the fixture server.
-- `helpers/localhost-combined.pem` — key + cert; python's `ssl` loads this to
-  serve.
-
-Trusting one specific localhost test cert via `CURL_CA_BUNDLE` is establishing
-trust for the test fixture; it does **not** disable TLS verification and the
-installer keeps its full `--proto '=https'` hardening. Because curl is detected
-ahead of wget, the curl+`CURL_CA_BUNDLE` path is the one exercised by default.
-If the cert ever expires (it is dated ~100 years out), regenerate a 127.0.0.1
-self-signed cert and replace both PEMs.
+`server_build_fixture` writes a `dist.json` whose single `releases[]` row carries
+the archive's inline `sha256`, but whose `url` is a **dummy**
+(`https://example.invalid/...`). Tests redirect the artifact download to the
+fixture by setting `OCX_INSTALL_MIRROR_URL=${FIXTURE_URL}/releases/download` — the
+installer rewrites the `url` to `<MIRROR_URL>/<tag>/<filename>`. One dedicated
+test calls `server_finalize_dist_url` and drops the mirror to exercise the
+manifest-`url` passthrough. There is **no** separate `sha256.sum` file — the
+checksum is inline in the manifest.
 
 ### Archive layout variants
 
 `server_build_fixture` takes a second arg:
 
-- `nested` (default) — binary at `ocx-<target>/ocx`. Exercises the installer's
-  legacy nested-extraction branch.
-- `flat` — binary at the **archive root** (`ocx`). This is the real cargo-dist
-  release layout that production hits, so at least one test must use it.
-
-```bash
-server_build_fixture "$root"          # nested
-server_build_fixture "$root" flat     # flat (production layout)
-```
+- `nested` (default) — binary at `ocx-<target>/ocx`.
+- `flat` — binary at the **archive root** (`ocx`). The real cargo-dist layout; at
+  least one test must use it.
 
 ### The `ocx` stub binary
 
 The stub packed into the fixture archive (`server_stub_body`):
 
 - answers `version` (`0.0.0`) and `about` (a plausible banner),
-- emits a plausible `ocx self activate --shell=sh` PATH-export snippet,
-- exits 0 for the bootstrap `--remote package install ...` call,
-- **records its full argv** (one line per invocation) to the file named in
-  `OCX_STUB_ARGV` when that env var is set.
+- answers the `ocx self setup [...]` and `--offline self setup [...]` hand-off by
+  exiting **0** (the thin installer hands off to `ocx self setup`; the stub no
+  longer emits shims or completion — `ocx self setup` owns that),
+- **records its full argv** (one line per invocation) to `$OCX_STUB_ARGV` when set.
 
-The argv recording is load-bearing: it is what lets a test assert the
-**exact** bootstrap call
+The argv recording is load-bearing: it lets a test assert the **exact** hand-off
 
 ```
---remote package install --select ocx.sh/ocx/cli:0.0.0
+self setup 0.0.0 --no-modify-path          # default path (version positional)
+--offline self setup --no-modify-path      # test-hatch path (global --offline pre-flag)
 ```
 
-A stub that merely `exit 0`s on any `--remote` is unacceptable — it would let
-the installer silently regress to the old broken `ocx --remote install --select
-ocx.sh/ocx:VERSION` and the suite would still pass green.
+A regression to the old `--remote package install` bootstrap would fail the
+assertion.
+
+## `__OCX_TESTING_INSTALL_BINARY` — internal test-only download-skip hatch
+
+`__OCX_TESTING_INSTALL_BINARY` is the installer's internal, **undocumented**,
+test-only hatch (double-underscore; never in `usage()`/README env matrix). Set it
+to a path and the installer skips download + checksum + extract + the network
+manifest probe, copies that file to the canonical bin dir + `chmod +x`, then
+either runs `<bin> --offline self setup [--no-modify-path]` (default) or, under
+`OCX_INSTALL_NO_SETUP`, places the binary only. It honors `OCX_INSTALL_PRINT_PATH`.
+The tests **own** this hatch. Assert:
+
+- happy path: binary present + executable at the canonical bin dir, the recorded
+  `--offline self setup` argv, **no** archive fetched;
+- bad path (`__OCX_TESTING_INSTALL_BINARY=/nonexistent`) → exit **2** (message
+  contains the substring `__OCX_TESTING_INSTALL_BINARY`);
+- `OCX_INSTALL_PRINT_PATH` still emits the bin dir as the final stdout line.
 
 ## Install modes under test
 
-The installer has two terminal paths; tests must pick deliberately:
-
 | Mode | How | What happens | What to assert |
 |---|---|---|---|
-| **bootstrap** (default) | leave `OCX_INSTALL_SKIP_SELF_INIT` unset | runs `ocx --remote package install --select ocx.sh/ocx/cli:VERSION`, writes `$OCX_HOME/env.sh` shims. The binary is NOT copied to the canonical bin dir (the package store owns it). | the recorded bootstrap argv; `env.sh` exists and delegates to `self activate`; no legacy extensionless `env`. |
-| **skip-self-init** | `OCX_INSTALL_SKIP_SELF_INIT=1` | copies the binary to `$OCX_HOME/symlinks/ocx.sh/ocx/cli/current/content/bin/ocx`, **no** bootstrap, **no** env shims. The CI/air-gapped path. | the binary is present + executable at the canonical bin dir; no bootstrap argv recorded; no `env.sh`. |
+| **self setup** (default) | leave `OCX_INSTALL_NO_SETUP` unset | downloads + verifies + extracts, then runs `ocx self setup <version> [--no-modify-path]`. The binary is NOT copied to the bin dir (a real `self setup` would populate the store; the stub no-ops). | the recorded `self setup <version>` argv + exit 0. |
+| **no-setup** | `OCX_INSTALL_NO_SETUP=1` | copies the binary to `$OCX_HOME/symlinks/ocx.sh/ocx/cli/current/content/bin/ocx`; **no** `self setup`. The CI/air-gapped path. | the binary present + executable at the canonical bin dir; **no** `self setup` argv; no env shims. |
 
 The idempotent fast-path keys off the binary being present at the canonical bin
-dir, so tests for `OCX_INSTALL_FORCE` / idempotency must run in skip-self-init
-mode.
+dir, so tests for `OCX_INSTALL_FORCE` / idempotency must run in **no-setup** mode.
 
 ## Standard `setup_file` / `setup` shape
 
 ```bash
 setup_file() {
   export FIXTURE_DIR="${BATS_FILE_TMPDIR}/srv"
-  FIXTURE_TARGET=$(server_build_fixture "$FIXTURE_DIR")   # nested by default
+  FIXTURE_TARGET=$(server_build_fixture "$FIXTURE_DIR")
   export FIXTURE_TARGET
   local _info
   _info=$(server_start "$FIXTURE_DIR" "${BATS_FILE_TMPDIR}/server.log")
   export FIXTURE_PID="${_info% *}" FIXTURE_PORT="${_info#* }"
-  export FIXTURE_URL="http://127.0.0.1:${FIXTURE_PORT}"
+  export FIXTURE_URL="https://127.0.0.1:${FIXTURE_PORT}"
 }
 teardown_file() { server_stop "${FIXTURE_PID:-}"; }
 
@@ -120,25 +142,36 @@ setup() {
   export OCX_NO_MODIFY_PATH=1
   export CURL_CA_BUNDLE; CURL_CA_BUNDLE="$(server_ca_bundle)"   # trust fixture cert
   export OCX_STUB_ARGV="${BATS_TEST_TMPDIR}/stub-argv.log"
-  export OCX_INSTALL_BASE_URL="${FIXTURE_URL}/releases/download"  # https://127.0.0.1:...
-  export OCX_INSTALL_API_URL="${FIXTURE_URL}/api/repos/ocx-sh/ocx/releases"
-  unset OCX_INSTALL_FORMAT_URL OCX_INSTALL_CHECKSUM_FORMAT_URL GITHUB_PATH
-  unset OCX_INSTALL_SKIP_SELF_INIT
+  export OCX_INSTALL_DIST_URL="${FIXTURE_URL}/dist.json"               # manifest at the fixture
+  export OCX_INSTALL_MIRROR_URL="${FIXTURE_URL}/releases/download"     # redirect the artifact download
+  unset GITHUB_PATH OCX_INSTALL_NO_SETUP OCX_INSTALL_VERSION __OCX_TESTING_INSTALL_BINARY
 }
 ```
 
-`FIXTURE_URL` is `https://127.0.0.1:${FIXTURE_PORT}` (set in `setup_file`).
-
 The canonical bin subpath asserted in tests is
 `symlinks/ocx.sh/ocx/cli/current/content/bin` (mirrors `OCX_BIN_SUBPATH` in
-`sh/install.sh`). Never assert the old `ocx/current/bin`.
+`src/install.sh`).
+
+## Per-shell suites (`tests/install/{nu,fish,elvish}/`)
+
+Each exotic installer has a per-shell suite that `load ../helpers/server` +
+`load ../helpers/load` and gates every test on `command -v <shell>` (skip when
+absent — fish runs locally; nu/elvish run in the docker matrix). fish/elvish use
+curl/`e:curl` (trust `CURL_CA_BUNDLE`) so the full download path runs; nu falls
+back to `^curl` for the same reason. Assert the same contract: exit codes 2–4,
+print-path = bin dir, the recorded `self setup` argv, and the `__OCX_TESTING_INSTALL_BINARY`
+hatch.
 
 ## Conventions
 
-- One assertion per test where possible. Bats does not stop on the first failure within a test, but failing fast keeps signals readable.
-- Use `run` for commands that may fail — never bare `sh/install.sh`. `run` captures stderr+stdout+exit.
-- Assert exit code AND output when both are meaningful. Exit-only assertions miss regressions in messaging. For the bootstrap path, assert the recorded argv, not just the exit code.
-- Tests must not require network. The runtime fixture server (HTTPS, localhost) is the only network endpoint allowed.
+- Use `run` for commands that may fail — never bare `sh "$INSTALL_SH"`.
+- Assert exit code AND output when both are meaningful. For the hand-off, assert
+  the recorded argv, not just the exit code.
+- Tests must not require network. The runtime fixture server (HTTPS, localhost)
+  is the only network endpoint allowed.
+- `dist.bats` drives `gen-dist.sh` via its offline hatches (`--releases-file`,
+  `--checksums-dir`) — use `run --separate-stderr` so the generator's "skipping"
+  warnings (stderr) don't corrupt the parsed `$output`.
 
 ## When to update tests
 
@@ -148,5 +181,8 @@ The canonical bin subpath asserted in tests is
 | New exit code | `exit-codes.bats` — at least one triggering scenario |
 | Stdout/stderr change | `print-path.bats` — verify the discipline still holds |
 | New flag | `env-knobs.bats` — long form parses, short form (if any) parses |
-| Bin-path / bootstrap-command / env-file change | flip the path string in all three `.bats`, update the `server_stub_body` argv assertion, update this file |
+| Bin-path / `self setup` argv change | flip the path string in all suites, update the `server_stub_body` + the argv assertions, update this file |
 | New archive layout | add a `server_build_fixture ... <layout>` variant + a test |
+| Latest-resolution / manifest format change | `env-knobs.bats` (latest via `dist.json`) + `exit-codes.bats` (dead manifest → exit 3, message contains `latest version`) + `dist.bats` (generator shape) |
+| `__OCX_TESTING_INSTALL_BINARY` behavior change | `env-knobs.bats` (happy: no download, binary placed, `--offline self setup` argv) + `exit-codes.bats` (bad → exit 2) + `print-path.bats` (PRINT_PATH honored) |
+| New exotic installer behavior | the matching `tests/install/{nu,fish,elvish}/` suite |

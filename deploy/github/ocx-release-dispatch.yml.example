@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------------------
+# REFERENCE SNIPPET — belongs in the OTHER repo (ocx-sh/ocx), not here.
+#
+# setup.ocx.sh's release index (releases.json) tracks the OCX product versions
+# published by ocx-sh/ocx. To rebuild that index promptly when a new OCX
+# release ships, ocx-sh/ocx fires a GitHub `repository_dispatch` event at the
+# setup.ocx.sh repo. The job below is what ocx-sh/ocx adds to ITS release
+# workflow (e.g. as a final step/job after the GitHub release is published).
+#
+# Token: SETUP_OCX_DISPATCH_TOKEN is a token scoped to the setup.ocx.sh repo,
+#   stored as a secret in ocx-sh/ocx (NOT in this repo). Use either:
+#     - a fine-grained PAT scoped to setup.ocx.sh with
+#       `contents: read` + `actions: write`, or
+#     - a classic PAT with the `repo` scope.
+#   It only needs to trigger workflows on setup.ocx.sh; nothing else.
+#
+# Target: set the API URL to the setup.ocx.sh GitHub repo slug. The placeholder
+#   below is `ocx-sh/setup.ocx.sh` — replace it with the real slug if different.
+#
+# Fallback: this dispatch is best-effort. update-releases-index.yml in
+#   setup.ocx.sh also runs on an hourly cron, so if this dispatch is absent or
+#   fails, the index still catches up within the hour. The cron is the safety
+#   net; the dispatch is the fast path.
+# ---------------------------------------------------------------------------
+
+name: Notify setup.ocx.sh of OCX release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify-setup-ocx:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch ocx-released to setup.ocx.sh
+        env:
+          # Token scoped to setup.ocx.sh (fine-grained: contents:read +
+          # actions:write, or classic: repo). Stored in ocx-sh/ocx secrets.
+          SETUP_OCX_DISPATCH_TOKEN: ${{ secrets.SETUP_OCX_DISPATCH_TOKEN }}
+          # The released tag, e.g. v0.3.3.
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          curl -fsSL -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${SETUP_OCX_DISPATCH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/ocx-sh/setup.ocx.sh/dispatches \
+            -d "{\"event_type\":\"ocx-released\",\"client_payload\":{\"version\":\"${RELEASE_TAG}\"}}"

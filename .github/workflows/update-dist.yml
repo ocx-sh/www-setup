@@ -1,0 +1,44 @@
+name: update-dist
+
+on:
+  repository_dispatch:
+    types: [ocx-released]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dist-manifest
+  cancel-in-progress: false
+
+jobs:
+  publish-dist:
+    runs-on: ubuntu-latest
+    environment: setup.ocx.sh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Log dispatch payload
+        if: github.event_name == 'repository_dispatch'
+        run: echo "Refreshing dist manifest for ocx version ${{ github.event.client_payload.version }}"
+
+      - name: Configure SSH
+        env:
+          SETUP_OCX_DEPLOY_KEY: ${{ secrets.SETUP_OCX_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SETUP_OCX_DEPLOY_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H setup.ocx.sh >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Publish dist manifest
+        env:
+          SETUP_OCX_HOST: setup.ocx.sh
+          SSH_KEY: /home/runner/.ssh/id_ed25519
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/publish-dist.sh

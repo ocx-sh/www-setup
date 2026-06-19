@@ -1,33 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
-#
-# activate.sh — SHELL-axis activation test for sh/install.sh inside a distro
-# container. Unlike smoke.sh (which bakes OCX_NO_MODIFY_PATH=1 and only checks
-# print-path), this test runs the installer with profile modification ENABLED
-# and then launches the TARGET shell as a login/interactive shell to verify that
-# the generated env shim + profile edit (or per-shell autoload) actually puts
-# ocx on PATH.
-#
-# This is the test that catches per-shell shim breakage and the nushell
-# dynamic-"source" risk: if the shell starts but ocx is NOT on PATH, the test
-# fails loudly and distinguishes "activation did not happen" from
-# "binary missing".
-#
-# Usage:
-#   tests/docker/activate.sh <shell> [version]
-#
-# Args:
-#   $1  shell to test: bash dash zsh ksh fish nu (nushell) elvish pwsh
-#   $2  version to install (default: latest)
-#
-# Exit codes (mirroring install.sh's contract where meaningful):
-#   0  activation verified
-#   1  generic failure
-#   2  argument validation
-#   3  installer failed (could not place binary)
-#   8  shell started but ocx NOT on PATH (activation did not happen)
-#   9  ocx on PATH but does not run (binary broken)
 
 # SC2016: the per-shell probe snippets are intentionally single-quoted so they
 # are interpreted by the TARGET shell (bash/zsh/fish/nu/elvish), not the outer
@@ -67,9 +40,11 @@ OCX_BIN_DIR="${OCX_HOME}/${OCX_BIN_SUBPATH}"
 OCX_BIN="${OCX_BIN_DIR}/ocx"
 
 # Profile modification MUST be enabled for this test. Defensively clear the
-# skip knobs the smoke containers may set in the environment.
+# skip knobs the smoke containers may set in the environment. (Activation in the
+# thin model is performed by `ocx self setup`, which the installer invokes; it
+# requires a REAL ocx binary, so this path is exercised with OCX_TEST_BINARY.)
 unset OCX_NO_MODIFY_PATH 2>/dev/null || :
-unset OCX_INSTALL_SKIP_SELF_INIT 2>/dev/null || :
+unset OCX_INSTALL_NO_SETUP 2>/dev/null || :
 
 log() { echo ">>> [activate] $*"; }
 fail() {
@@ -125,8 +100,18 @@ esac
 export SHELL
 
 # --- Step (a): run the installer with profile modification ENABLED ---
+# When a binary is injected via __OCX_TESTING_INSTALL_BINARY, the installer
+# takes its network-free path: it copies that binary to the canonical bin dir,
+# derives the version from it, skips download/checksum/extract/bootstrap, and
+# still generates the env shims + profile edits (so activation + completion can
+# be exercised). The --version flag is irrelevant on that path.
 log "running installer (profile modification enabled)..."
-if [ "$VERSION" = "latest" ]; then
+if [ -n "${__OCX_TESTING_INSTALL_BINARY:-}" ]; then
+    log "injection: __OCX_TESTING_INSTALL_BINARY=${__OCX_TESTING_INSTALL_BINARY}"
+    [ -f "${__OCX_TESTING_INSTALL_BINARY}" ] ||
+        fail 2 "__OCX_TESTING_INSTALL_BINARY does not point to a file: ${__OCX_TESTING_INSTALL_BINARY}"
+    sh /work/install.sh
+elif [ "$VERSION" = "latest" ]; then
     sh /work/install.sh
 else
     sh /work/install.sh --version "$VERSION"
@@ -159,17 +144,31 @@ run_probe() {
 
 case "$SHELL_UNDER_TEST" in
     bash)
+        # Completion introspection: `complete -p ocx` prints the registered
+        # completion spec for ocx (e.g. "complete -F _ocx ocx"); it fails / is
+        # empty when nothing is registered. Run it AFTER the shim has sourced so
+        # the `complete -F _ocx ocx` line the installer's shim emits has taken.
         run_probe bash -lic '
             p="$(command -v ocx || true)"
             echo "OCX_RESOLVED=${p}"
             if [ -n "$p" ]; then ocx about >/dev/null 2>&1 || ocx version >/dev/null 2>&1; fi
+            c="$(complete -p ocx 2>/dev/null || true)"
+            echo "OCX_COMPLETION=${c}"
         '
         ;;
     zsh)
+        # Completion introspection: zsh registers completers in the $_comps
+        # associative array. Initialize the completion system (compinit -u skips
+        # the insecure-dir check, which trips in containers with world-writable
+        # dirs), then print the key for ocx if present. A non-empty key means a
+        # completer is registered for ocx.
         run_probe zsh -lic '
             p="$(command -v ocx || true)"
             echo "OCX_RESOLVED=${p}"
             if [ -n "$p" ]; then ocx about >/dev/null 2>&1 || ocx version >/dev/null 2>&1; fi
+            autoload -Uz compinit && compinit -u >/dev/null 2>&1
+            c="$(print -l ${(k)_comps[ocx]} 2>/dev/null || true)"
+            echo "OCX_COMPLETION=${c}"
         '
         ;;
     dash | ksh)
@@ -185,12 +184,19 @@ case "$SHELL_UNDER_TEST" in
         '
         ;;
     fish)
+        # Completion introspection: `complete -C 'ocx '` asks fish to produce
+        # the completion candidates for the partial command line "ocx " using
+        # whatever completer is registered. Non-empty output means ocx
+        # completion is wired up. Join the (possibly multi-line) candidate list
+        # into a single sentinel value with `string join`.
         run_probe fish -lc '
             set -l p (command -v ocx; or true)
             echo "OCX_RESOLVED=$p"
             if test -n "$p"
                 ocx about >/dev/null 2>&1; or ocx version >/dev/null 2>&1
             end
+            set -l c (complete -C "ocx " 2>/dev/null | string join "|"; or true)
+            echo "OCX_COMPLETION=$c"
         '
         ;;
     nu | nushell)
@@ -209,6 +215,11 @@ case "$SHELL_UNDER_TEST" in
         # `which ocx` returns a (possibly empty) table; extract the path column
         # defensively so a version drift in column shape degrades to an empty
         # path (-> exit 8) rather than a parse error.
+        # Completion is BEST-EFFORT for nushell: nushell has NO clap_complete
+        # backend, so the shim activates with --no-completion and the binary
+        # emits no completer. We therefore only assert: shim sources cleanly +
+        # ocx on PATH. The OCX_COMPLETION sentinel is emitted empty (the shared
+        # evaluator does not require completion for nushell).
         _nu_autoload="${XDG_DATA_HOME:-$HOME/.local/share}/nushell/vendor/autoload/ocx.nu"
         run_probe nu -c "
             source \"${_nu_autoload}\"
@@ -216,6 +227,7 @@ case "$SHELL_UNDER_TEST" in
             let p = (try { if ((\$t | length) > 0) { \$t | get 0 | get path } else { \"\" } } catch { \"\" })
             print \$\"OCX_RESOLVED=(\$p)\"
             if (\$p | is-not-empty) { try { ocx about | ignore } }
+            print \"OCX_COMPLETION=\"
         "
         ;;
     elvish)
@@ -227,6 +239,12 @@ case "$SHELL_UNDER_TEST" in
         # only exists in interactive mode). Use the builtin search-external (no
         # /usr/bin/which dependency) guarded by has-external so a missing ocx
         # degrades to an empty path (-> exit 8) rather than an exception.
+        # Completion introspection is BEST-EFFORT for elvish: the real
+        # `self activate --shell=elvish --completion` block sets
+        # edit:completion:arg-completer[ocx], which only exists in INTERACTIVE
+        # elvish. We probe for it but never fail on its absence (the shared
+        # evaluator treats elvish completion as best-effort). The load-bearing
+        # assertion for elvish remains: shim sourced cleanly + ocx on PATH.
         _elv_probe='
             var p = ""
             if (has-external ocx) {
@@ -236,6 +254,13 @@ case "$SHELL_UNDER_TEST" in
             if (not-eq $p "") {
                 try { ocx about > /dev/null 2>&1 } catch e { }
             }
+            var c = ""
+            try {
+                if (has-key $edit:completion:arg-completer ocx) {
+                    set c = "registered"
+                }
+            } catch e { }
+            echo "OCX_COMPLETION="$c
         '
         run_probe sh -c 'printf "%s\nexit\n" "$1" | "$2" -i 2>/dev/null' \
             _ "$_elv_probe" "$SHELL_BIN"
@@ -302,6 +327,32 @@ esac
 
 if [ "$PROBE_RC" -ne 0 ]; then
     fail 9 "$SHELL_UNDER_TEST: ocx is on PATH at '$RESOLVED' but failed to run (exit $PROBE_RC) — binary broken, not an activation problem"
+fi
+
+# --- Step (c): completion-table introspection (shared) ---
+# For completion-CAPABLE shells (bash, zsh, fish) the installer's shim must
+# register an ocx completer; an empty completion table means the shim passed the
+# wrong --shell/--completion or the completer failed to register -> exit 10.
+# elvish + nushell completion is BEST-EFFORT (interactive-only / no backend), so
+# an empty value there is logged but never fails the test. dash/ksh have no
+# completion model at all and emit no sentinel.
+completion_required() {
+    case "$1" in
+        bash | zsh | fish) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Only shells whose probe emits an OCX_COMPLETION sentinel are evaluated.
+if printf '%s\n' "$PROBE_OUT" | grep -q '^OCX_COMPLETION='; then
+    COMPLETION=$(printf '%s\n' "$PROBE_OUT" | sed -n 's/^OCX_COMPLETION=//p' | head -n1)
+    if [ -n "$COMPLETION" ]; then
+        log "completion registered for $SHELL_UNDER_TEST: $COMPLETION"
+    elif completion_required "$SHELL_UNDER_TEST"; then
+        fail 10 "$SHELL_UNDER_TEST: ocx is on PATH and runs, but NO completion is registered (shim passed wrong --shell/--completion or completer did not register)"
+    else
+        log "completion not registered for $SHELL_UNDER_TEST (best-effort shell — OK)"
+    fi
 fi
 
 log "PASS: $SHELL_UNDER_TEST activates ocx at $RESOLVED and 'ocx about' runs"

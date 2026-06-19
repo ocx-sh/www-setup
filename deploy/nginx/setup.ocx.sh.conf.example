@@ -1,0 +1,126 @@
+# setup.ocx.sh — nginx server block (EXAMPLE / reference)
+#
+# This file is NOT applied by this repo's release pipeline. The live nginx
+# config is maintained out-of-band on the host that serves setup.ocx.sh. This
+# example documents the routing contract the installers + publish pipeline
+# depend on, so the two never drift.
+#
+# Routing contract:
+#   - Bare /sh, /pwsh, /nu, /fish, /elvish (and each /<shell>/next) are served
+#     DIRECTLY via `try_files` from the on-disk artifacts the publish pipeline
+#     uploads — no redirect, no file duplication. `curl -fsSL
+#     https://setup.ocx.sh/sh | sh`, `irm https://setup.ocx.sh/pwsh | iex`,
+#     `curl -fsSL https://setup.ocx.sh/nu | nu`, etc. each resolve to the
+#     latest-stable installer for that shell; the bytes are the same file served
+#     under the pinned and /next paths, just exposed at a friendly URL.
+#   - /dist is a friendly alias for /dist.json (the self-hosted distribution
+#     manifest the installers read via OCX_INSTALL_DIST_URL to resolve "latest"
+#     and the per-target sha256 + download URL). /releases is a legacy alias
+#     pointing at the same manifest.
+#   - Pinned, immutable copies live at /<shell>/<VERSION>/install.<ext> and are
+#     served straight from the static root.
+#   - /docs/ and /actions/ are PROXIED upstream (pre-existing forwards owned by
+#     the host config, reproduced here for completeness). Never publish repo
+#     artifacts under those prefixes — nginx reroutes them.
+#
+# Static root layout (uploaded by scripts/publish-installers.sh):
+#   $root/sh/install.sh                 latest stable (mutable pointer)
+#   $root/sh/next/install.sh            latest prerelease (mutable pointer)
+#   $root/sh/<VERSION>/install.sh       pinned (immutable, append-only)
+#   $root/pwsh/install.ps1              latest stable (+ next/ + <VERSION>/)
+#   $root/nu/install.nu                 latest stable (+ next/ + <VERSION>/)
+#   $root/fish/install.fish             latest stable (+ next/ + <VERSION>/)
+#   $root/elvish/install.elv            latest stable (+ next/ + <VERSION>/)
+#   $root/dist.json                     distribution manifest (regenerated every release)
+
+server {
+    listen       443 ssl;
+    listen       [::]:443 ssl;
+    server_name  setup.ocx.sh;
+
+    # TLS material managed out-of-band (certbot / ACME).
+    # ssl_certificate     /etc/letsencrypt/live/setup.ocx.sh/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/setup.ocx.sh/privkey.pem;
+
+    root  /srv/setup.ocx.sh;
+
+    # --- Bare friendly shortcuts (served via try_files; no redirect) ---------
+
+    location = /sh {
+        try_files /sh/install.sh =404;
+        default_type text/x-shellscript;
+    }
+
+    location = /sh/next {
+        try_files /sh/next/install.sh =404;
+        default_type text/x-shellscript;
+    }
+
+    location = /pwsh {
+        try_files /pwsh/install.ps1 =404;
+        default_type text/plain;
+    }
+
+    location = /pwsh/next {
+        try_files /pwsh/next/install.ps1 =404;
+        default_type text/plain;
+    }
+
+    location = /nu {
+        try_files /nu/install.nu =404;
+        default_type text/plain;
+    }
+
+    location = /nu/next {
+        try_files /nu/next/install.nu =404;
+        default_type text/plain;
+    }
+
+    location = /fish {
+        try_files /fish/install.fish =404;
+        default_type text/plain;
+    }
+
+    location = /fish/next {
+        try_files /fish/next/install.fish =404;
+        default_type text/plain;
+    }
+
+    location = /elvish {
+        try_files /elvish/install.elv =404;
+        default_type text/plain;
+    }
+
+    location = /elvish/next {
+        try_files /elvish/next/install.elv =404;
+        default_type text/plain;
+    }
+
+    location = /dist {
+        try_files /dist.json =404;
+        default_type application/json;
+    }
+
+    # Legacy alias — kept pointing at the new manifest.
+    location = /releases {
+        try_files /dist.json =404;
+        default_type application/json;
+    }
+
+    # --- Upstream forwards (pre-existing; owned by the host config) -----------
+
+    location /docs/ {
+        proxy_pass https://ocx.sh/docs/;
+    }
+
+    location /actions/ {
+        # Forwarded to GitHub Marketplace / GitLab CI Catalog listings.
+        proxy_pass https://ocx.sh/actions/;
+    }
+
+    # --- Everything else: static files (pinned versions, dist.json, etc.) -----
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}

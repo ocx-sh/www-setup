@@ -12,3 +12,4 @@ node_modules/
 .task/
 target/
 .serena/
+.claude/artifacts/

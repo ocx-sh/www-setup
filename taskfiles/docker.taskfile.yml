@@ -1,24 +1,29 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 #
-# Real-distro integration matrix. Builds a thin image per distro, mounts
-# sh/install.sh, runs it against a real upstream release, asserts the
-# resulting `ocx --version` exit code. Multi-arch via Buildx + QEMU.
+# Real-distro integration matrix. Builds a thin image per distro (all five
+# src/install.* copied in), runs the chosen installer (INSTALLER axis: sh/nu/
+# fish/elvish) against an injected stub or a real upstream release, and asserts
+# the print-path + binary placement. Multi-arch via Buildx + QEMU.
 
 version: '3'
 
 tasks:
   integration:
-    desc: Run installer in a single distro/platform combination (DISTRO + PLATFORM)
+    desc: Run an installer in a single distro/platform combo (DISTRO + PLATFORM [+ INSTALLER])
     requires:
       vars:
         - name: DISTRO
           enum: [alpine, fedora, ubuntu]
         - name: PLATFORM
           enum: [linux/amd64, linux/arm64]
+    vars:
+      VERSION: '{{.VERSION | default "latest"}}'
+      INSTALLER: '{{.INSTALLER | default "sh"}}'
     preconditions:
       - sh: docker buildx version
         msg: 'docker buildx required (install docker-buildx-plugin or Docker Desktop)'
-    cmd: tests/docker/run.sh "{{.DISTRO}}" "{{.PLATFORM}}"
+    # run.sh: <distro> <platform> [version] [shell-axis] [installer-axis]
+    cmd: tests/docker/run.sh "{{.DISTRO}}" "{{.PLATFORM}}" "{{.VERSION}}" "" "{{.INSTALLER}}"
 
   integration:all:
     desc: Run installer across full matrix (alpine|fedora|ubuntu x linux/amd64|linux/arm64)
@@ -35,6 +40,14 @@ tasks:
         vars: { DISTRO: ubuntu, PLATFORM: linux/amd64 }
       - task: integration
         vars: { DISTRO: ubuntu, PLATFORM: linux/arm64 }
+
+  integration:installers:all:
+    desc: Run each installer (sh/nu/fish/elvish) on ubuntu/linux/amd64 (INSTALLER axis)
+    cmds:
+      - { task: integration, vars: { DISTRO: ubuntu, PLATFORM: linux/amd64, INSTALLER: sh } }
+      - { task: integration, vars: { DISTRO: ubuntu, PLATFORM: linux/amd64, INSTALLER: nu } }
+      - { task: integration, vars: { DISTRO: ubuntu, PLATFORM: linux/amd64, INSTALLER: fish } }
+      - { task: integration, vars: { DISTRO: ubuntu, PLATFORM: linux/amd64, INSTALLER: elvish } }
 
   integration:shell:
     desc: Run the SHELL-axis activation test (DISTRO + PLATFORM + SHELL)

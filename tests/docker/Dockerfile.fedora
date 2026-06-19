@@ -20,11 +20,15 @@ RUN dnf install -y --setopt=install_weak_deps=False \
     && dnf clean all
 
 WORKDIR /work
-COPY sh/install.sh /work/install.sh
+COPY src/install.sh /work/install.sh
+COPY src/install.ps1 /work/install.ps1
+COPY src/install.nu /work/install.nu
+COPY src/install.fish /work/install.fish
+COPY src/install.elv /work/install.elv
 COPY tests/docker/smoke.sh /work/smoke.sh
 COPY tests/docker/install-shells.sh /work/install-shells.sh
 COPY tests/docker/activate.sh /work/activate.sh
-RUN chmod +x /work/install.sh /work/smoke.sh /work/install-shells.sh /work/activate.sh
+RUN chmod +x /work/install.* /work/smoke.sh /work/install-shells.sh /work/activate.sh
 
 # Provision every target shell at build time (bash/dash/zsh/ksh/fish/nu/elvish/pwsh).
 RUN /work/install-shells.sh

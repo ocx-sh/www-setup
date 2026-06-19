@@ -1,30 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
-#
-# install-shells.sh — provision the shells the docker SHELL-axis activation
-# tests exercise. Detects the distro from /etc/os-release and installs the
-# requested shells via the native package manager, falling back to a pinned
-# GitHub release tarball for shells not packaged in the distro repos.
-#
-# Usage:
-#   tests/docker/install-shells.sh                 # install ALL target shells
-#   tests/docker/install-shells.sh bash fish nu    # install a subset
-#
-# Target shells (audit §6 / Appendix D):
-#   bash dash zsh ksh fish nu (nushell) elvish pwsh
-#
-# Provisioning matrix (see also the printed summary):
-#   bash/zsh/fish : native pkg mgr (apk/dnf/apt)
-#   dash          : ubuntu native; alpine = busybox ash (symlinked); fedora =
-#                   busybox-provided ash symlinked (dash is not packaged)
-#   ksh           : alpine = loksh/mksh; fedora = ksh; ubuntu = ksh/mksh
-#   elvish        : apk community / dnf / apt where packaged, else pinned tarball
-#   nu (nushell)  : NOT in any distro repo — pinned GitHub release tarball
-#   pwsh          : NOT in default Linux repos — pinned GitHub release tarball
-#
-# Idempotent. Package-manager refresh is quiet. Prints a one-line summary of
-# what was installed plus each shell's resolved path.
 
 set -eu
 
