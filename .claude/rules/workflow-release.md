@@ -32,10 +32,10 @@ Both jobs run on every `v*` tag (prereleases included). There is no mirror-to-Gi
 
 Channel routing keys off the tag string (`-` present → prerelease). For each installer `<shell>`/`<ext>`:
 
-| Tag shape | Example | GH release | Pointer overwritten | Pinned copy |
+| Tag shape | Example | GH release | Pointer dir overwritten | Pinned copy |
 |---|---|---|---|---|
-| stable | `v0.5.0` | normal | `<shell>/install.<ext>` (bare `/<shell>`) | `<shell>/0.5.0/` |
-| prerelease | `v0.5.0-rc.1` | `prerelease: true` | `<shell>/next/install.<ext>` (stable pointers untouched) | `<shell>/0.5.0-rc.1/` |
+| stable | `v0.5.0` | normal | `latest/install.<ext>` (served at bare `/<shell>`) | `archive/0.5.0/` |
+| prerelease | `v0.5.0-rc.1` | `prerelease: true` | `next/install.<ext>` (`latest/` untouched) | `archive/0.5.0-rc.1/` |
 
 Every installer release (either channel) also refreshes `dist.json` — but note the manifest is sourced from the **`ocx-sh/ocx` Releases API**, not this repo's tags, so its contents track OCX product versions independently of the installer-script tag you just pushed (see the Cross-repo manifest section below). Validate locally with `task publish:dry-run` (stable) or `task publish:dev-dry-run` (prerelease).
 

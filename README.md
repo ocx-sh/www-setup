@@ -20,14 +20,14 @@ https://setup.ocx.sh/dist           # dist.json — the distribution manifest th
 
 Each installer is a **thin bootstrap**: it detects the platform, resolves the release from the manifest, downloads + verifies the archive against the manifest's inline `sha256`, then hands off to the downloaded binary's `ocx self setup` — which owns the package-store install, the per-shell env shims, and the managed shell-profile activation blocks.
 
-The bare paths are served directly (nginx `try_files`, no redirect) from the latest-stable installer. The pre-release ("next") channel and pinned, immutable copies live at:
+The bare paths are nginx rewrites onto the latest-stable installer. The pre-release ("next") channel and pinned, immutable copies are reachable at the same friendly per-shell prefix:
 
 ```
-https://setup.ocx.sh/<shell>/next/install.<ext>      # next (latest prerelease)
-https://setup.ocx.sh/<shell>/<VERSION>/install.<ext>  # pinned, immutable
+https://setup.ocx.sh/<shell>/next          # next (latest prerelease)  [alias: /<shell>/canary]
+https://setup.ocx.sh/<shell>/<VERSION>     # pinned, immutable (e.g. /sh/0.5.0)
 ```
 
-`<VERSION>` is the semver string without a leading `v` (e.g. `0.5.0`); `<ext>` is `sh`, `ps1`, `nu`, `fish`, or `elv`.
+`<VERSION>` is the semver string without a leading `v` (e.g. `0.5.0`). The canonical, immutable artifact for a release lives at `https://setup.ocx.sh/archive/<VERSION>/install.<ext>` (`<ext>` ∈ `sh ps1 nu fish elv`) — the per-shell URLs above are nginx rewrites onto it.
 
 The GitHub Action and GitLab Function listings live in **separate repositories** so they can publish to the native GitHub Marketplace and GitLab CI Catalog. Documentation paths (`/docs/*`) and action paths (`/actions/*`) on `setup.ocx.sh` are forwarded by nginx to those upstream surfaces.
 
@@ -69,7 +69,7 @@ OCX_INSTALL_VERSION=0.5.0 curl -fsSL https://setup.ocx.sh/sh | sh
 ### Pinned install URL (recommended for CI)
 
 ```sh
-curl -fsSL https://setup.ocx.sh/sh/0.5.0/install.sh | sh
+curl -fsSL https://setup.ocx.sh/sh/0.5.0 | sh
 ```
 
 The installers resolve "latest" by reading the self-hosted distribution manifest at `https://setup.ocx.sh/dist.json` — there is **no GitHub API dependency** in the install path. The manifest lists the published OCX product versions (from `ocx-sh/ocx`) with an inline checksum and download URL per platform; override it with `OCX_INSTALL_DIST_URL`.

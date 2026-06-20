@@ -24,11 +24,11 @@ src/install.ps1              PowerShell installer (Windows + pwsh; PS 5.1 floor)
 src/install.nu               Nushell installer (env-driven; cross-platform)
 src/install.fish             fish installer (unix-only)
 src/install.elv              Elvish installer (cross-platform)
-scripts/publish-installers.sh   Table-driven rsync of all 5 installers → setup.ocx.sh, then publish-dist.sh
+scripts/publish-installers.sh   rsync all 5 installers → setup.ocx.sh (archive/<VERSION>/ + latest|next/), then publish-dist.sh
 scripts/gen-dist.sh             Generate dist.json (manifest) from the ocx-sh/ocx Releases API (inline sha256)
 scripts/publish-dist.sh         Regenerate + rsync dist.json (overwrite, clobber-safe)
 external/                    Vendored Bats submodules (bats-core, bats-support, bats-assert)
-deploy/nginx/                Reference nginx server block (bare /sh /pwsh /nu /fish /elvish /dist try_files)
+deploy/nginx/                Reference nginx server block (/sh … regex-rewrite onto archive/ latest/ next/, + /dist)
 tests/install/*.bats         Bats env-knob / exit-code / print-path / dist suites (sh)
 tests/install/{nu,fish,elvish}/  Per-shell installer suites (skip where the shell is absent)
 tests/install/ps1/*.Tests.ps1   Pester equivalents

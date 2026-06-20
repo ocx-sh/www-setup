@@ -9,10 +9,10 @@ Guidance for Claude Code when working in this repository.
 `setup.ocx.sh` is the canonical website hosting the **shell installers** that bring [OCX](https://ocx.sh) to CI runners, developer machines, and Linux servers. There are **five thin installers**, one per supported shell entrypoint (`<shell>` ∈ `sh pwsh nu fish elvish`; `<ext>` ∈ `sh ps1 nu fish elv`):
 
 ```
-setup.ocx.sh/<shell>                          # bare → latest-stable install.<ext> (nginx try_files)
-setup.ocx.sh/<shell>/next/install.<ext>       # latest-prerelease ("next") pointer
-setup.ocx.sh/<shell>/<VERSION>/install.<ext>  # pinned (immutable)
-setup.ocx.sh/dist                             # → dist.json distribution manifest (OCX_INSTALL_DIST_URL)
+setup.ocx.sh/<shell>            # bare → latest-stable installer (nginx rewrite → latest/install.<ext>)
+setup.ocx.sh/<shell>/next       # latest-prerelease ("next"); alias /<shell>/canary
+setup.ocx.sh/<shell>/<VERSION>  # pinned (immutable) → archive/<VERSION>/install.<ext>
+setup.ocx.sh/dist               # → dist.json distribution manifest (OCX_INSTALL_DIST_URL)
 ```
 
 Each installer is a **thin bootstrap**: detect platform → resolve the release from `dist.json` → download + verify the archive against the manifest's inline `sha256` → hand off to the downloaded binary's `ocx self setup` (which owns the package-store install, the per-shell env shims, and the managed shell-profile activation blocks — the installers no longer write any of that themselves). This repo owns those five installer files (and their release pipeline + the manifest). Latest-version resolution reads the self-hosted `dist.json` (no GitHub API, no `GITHUB_TOKEN` in the install path). `dist.json` itself is generated **from the `ocx-sh/ocx` GitHub Releases API** (CI-side, with `GITHUB_TOKEN`), inlining a per-target checksum + download URL, so it lists OCX *product* versions — decoupled from this repo's own `v*` tags, which version the installer scripts. The GitHub Action lives in `ocx-sh/setup-ocx` (GitHub Marketplace); the GitLab Function lives in its own repo (GitLab CI Catalog). Documentation paths (`/docs/...`) and action paths (`/actions/...`) on `setup.ocx.sh` are forwarded by nginx to those upstreams.
@@ -26,11 +26,11 @@ Each installer is a **thin bootstrap**: detect platform → resolve the release 
 | `src/install.nu` | Nushell installer (env-driven; cross-platform) |
 | `src/install.fish` | fish installer (unix-only) |
 | `src/install.elv` | Elvish installer (cross-platform) |
-| `scripts/publish-installers.sh` | Table-driven rsync of all five `src/install.*` → `setup.ocx.sh:<prefix>/{<VERSION>,latest,next}/` (channel-routed), then `publish-dist.sh` |
+| `scripts/publish-installers.sh` | rsync of all five `src/install.*` → `setup.ocx.sh:archive/<VERSION>/` (immutable) + the `latest/` or `next/` pointer dir (channel-routed), then `publish-dist.sh` |
 | `scripts/gen-dist.sh` | Generate `dist.json` (distribution manifest) from the **`ocx-sh/ocx` GitHub Releases API**; targets DERIVED from each release's `sha256.sum` (inline per-target checksum + URL); uses `GITHUB_TOKEN` in CI |
 | `scripts/publish-dist.sh` | Regenerate + rsync `dist.json` to `setup.ocx.sh:/dist.json` (overwrite, clobber-safe) |
 | `external/` | Vendored Bats as git submodules (`bats-core`, `bats-support`, `bats-assert`) |
-| `deploy/nginx/` | Reference nginx server block documenting the bare `/sh /pwsh /nu /fish /elvish /dist` try_files routing |
+| `deploy/nginx/` | Reference nginx server block: the per-shell `/sh /pwsh /nu /fish /elvish` (+ `/next`, `/<VERSION>`) regex-rewrite layer onto `archive/ latest/ next/`, plus `/dist` |
 | `deploy/github/` | Reference snippet (`ocx-release-dispatch.yml.example`) the `ocx-sh/ocx` repo adds to its release workflow to dispatch `ocx-released` at this repo |
 | `tests/install/*.bats` | Bats env-knob, exit-code, print-path, dist suites (sh) |
 | `tests/install/{nu,fish,elvish}/*.bats` | Per-shell installer suites (gate on shell presence) |
