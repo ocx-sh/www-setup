@@ -10,6 +10,7 @@ The README is the front door for `curl | <shell>` users. Update when:
 - **Env-var matrix** — an `OCX_INSTALL_*` knob added, removed, or renamed in any `src/install.*` (the matrix omits internal/test-only hatches like `__OCX_TESTING_INSTALL_BINARY`)
 - **Exit-code table** — code added, removed, or its meaning changes
 - **Distribution manifest / channels** — `OCX_INSTALL_DIST_URL`, the `/dist` manifest, or the stable/`next` channel layout changes
+- **URL layout** — the version-major on-disk dirs (`archive/<VERSION>/`, `latest/`, `next/`) or the nginx per-shell rewrite layer change (keep `deploy/nginx/setup.ocx.sh.conf.example` + `.claude/rules/publish.md` in sync)
 - **Stdout/stderr contract** — discipline changes (which would be a major version bump)
 
 ## CONTRIBUTING.md

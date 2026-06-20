@@ -6,19 +6,28 @@ The installer-publish pipeline owns one job: keep `setup.ocx.sh` serving the lat
 
 Five entrypoints, one per shell (`<shell>` ∈ `sh pwsh nu fish elvish`; `<ext>` ∈ `sh ps1 nu fish elv`):
 
+**On-disk layout** (version-major — what the publish pipeline uploads):
+
 ```
-setup.ocx.sh/<shell>                          # bare shortcut → <shell>/install.<ext> (nginx try_files)
-setup.ocx.sh/<shell>/install.<ext>            # latest STABLE pointer (mutable)
-setup.ocx.sh/<shell>/next/install.<ext>       # latest PRERELEASE ("next") pointer (mutable)
-setup.ocx.sh/<shell>/<VERSION>/install.<ext>  # pinned (immutable, append-only)
-setup.ocx.sh/dist                             # bare shortcut → dist.json (nginx try_files)
+setup.ocx.sh/archive/<VERSION>/install.<ext>  # pinned (immutable, append-only); all 5 installers per release
+setup.ocx.sh/latest/install.<ext>             # STABLE channel pointer (mutable, overwritten)
+setup.ocx.sh/next/install.<ext>               # PRERELEASE ("next") channel pointer (mutable, overwritten)
 setup.ocx.sh/dist.json                        # distribution manifest (overwritten every release)
-setup.ocx.sh/releases                         # legacy alias → dist.json
+```
+
+**Friendly per-shell URLs** (nginx rewrites onto the dirs above; no files of their own):
+
+```
+setup.ocx.sh/<shell>            # → latest/install.<ext>
+setup.ocx.sh/<shell>/next       # → next/install.<ext>                (alias: /<shell>/canary)
+setup.ocx.sh/<shell>/<VERSION>  # → archive/<VERSION>/install.<ext>   (optional trailing /install.<ext>)
+setup.ocx.sh/dist               # → dist.json
+setup.ocx.sh/releases           # legacy alias → dist.json
 ```
 
 `<VERSION>` is the semver string without a leading `v` (e.g. `2.0.1`, not `v2.0.1`).
 
-The bare `/<shell>` and `/dist` paths are served directly by nginx `try_files` (no redirect, no file duplication). The nginx routing contract is mirrored in `deploy/nginx/setup.ocx.sh.conf.example` — keep the two in sync. The host's live nginx config is authoritative; the example is reference.
+The per-shell `/<shell>` URLs carry no files of their own — regex `location`s rewrite them onto `latest/`, `next/`, and `archive/<VERSION>/`; `/dist` is a `try_files` alias for `dist.json`. The `canary` segment is an nginx alias for `next` (the pipeline only ever writes the `next/` dir). The nginx routing contract is mirrored in `deploy/nginx/setup.ocx.sh.conf.example` — keep the two in sync. The host's live nginx config is authoritative; the example is reference.
 
 ### `dist.json` (the distribution manifest)
 
@@ -58,17 +67,18 @@ Never publish a file under a path that nginx will reroute — it just confuses c
 
 ## Channel routing (see `scripts/publish-installers.sh`)
 
-`publish-installers.sh` is **table-driven** over the five `src/install.*` files (each mapped to its URL prefix + filename). The channel is derived from `VERSION`: a `-` (prerelease) → `next`; otherwise `stable`.
+`publish-installers.sh` iterates the five `src/install.*` files; all five from one release land in the same `archive/<VERSION>/` dir. The channel is derived from `VERSION`: a `-` (prerelease) → pointer dir `next`; otherwise `latest`.
 
-- **Always** publish the pinned immutable copy: `<prefix>/<VERSION>/install.<ext>`.
-- **stable** → also overwrite the latest pointers `<prefix>/install.<ext>`.
-- **next** → overwrite `<prefix>/next/install.<ext>`; do **not** touch the stable pointers.
+- **Always** publish the pinned immutable copies: `archive/<VERSION>/install.<ext>` (all five).
+- **stable** → also overwrite the `latest/install.<ext>` pointers.
+- **next** → overwrite the `next/install.<ext>` pointers; do **not** touch `latest/`.
+- The remote dirs (`archive/<VERSION>` + the pointer dir) are created up front via `ssh mkdir -p` — no rsync `--mkpath` host-version dependency.
 - Every installer release also refreshes `dist.json` via `scripts/publish-dist.sh` (which calls `scripts/gen-dist.sh` against the `ocx-sh/ocx` Releases API). The manifest is otherwise kept current by `.github/workflows/update-dist.yml` (dispatch + hourly cron + manual), independently of installer releases.
 
 ## rsync flags (see `scripts/publish-installers.sh`)
 
 - Pinned versioned uploads use `--ignore-existing` so a re-run of a release tag never silently overwrites a previously published artifact. If you ever need to overwrite, do it by hand, then audit the cache invalidation downstream.
-- Latest + `next` pointers and `dist.json` overwrite freely. They **never** use `--delete` — adjacent versioned dirs must be preserved.
+- The `latest/` + `next/` pointers and `dist.json` overwrite freely. They **never** use `--delete` — the `archive/` versioned dirs must be preserved.
 - `dist.json` is staged to a mktemp file first (`publish-dist.sh`); the generator is clobber-safe (exits non-zero on any fetch/parse/checksum failure and never emits a partial manifest), and `set -e` aborts the upload before the live `dist.json` is touched.
 - All transfers happen over SSH with a deploy key (`SETUP_OCX_DEPLOY_KEY` secret) bound to the `setup.ocx.sh` environment. The key is single-purpose; it has no shell, no sudo, no read access outside the docroot.
 
@@ -76,23 +86,24 @@ Never publish a file under a path that nginx will reroute — it just confuses c
 
 Latest is a **convenience** for `curl ... | <shell>`; production CI pins (via `OCX_INSTALL_VERSION` or a pinned `<VERSION>` URL). Therefore:
 
-- A bug in an installer published to `<VERSION>/` requires a new version (you can't unpublish — immutable). The latest pointer should be moved off the bad version immediately.
-- The stable pointer (`<shell>/install.<ext>`, served bare at `/<shell>`) always tracks the highest **stable** semver tag with a release, never a prerelease. Prereleases land on the `next` channel only.
-- `dist.json` lists both channels (newest-first). The installers' latest-resolution selects the first `stable` entry; `next` consumers pin the `/<shell>/next` pointer (or a pinned `<VERSION>`).
+- A bug in an installer published to `archive/<VERSION>/` requires a new version (you can't unpublish — immutable). The `latest/` pointer should be moved off the bad version immediately.
+- The stable pointer (`latest/install.<ext>`, served at the bare `/<shell>`) always tracks the highest **stable** semver tag with a release, never a prerelease. Prereleases land on the `next` channel only.
+- `dist.json` lists both channels (newest-first). The installers' latest-resolution selects the first `stable` entry; `next` consumers use the `/<shell>/next` URL (or a pinned `<VERSION>`).
 
 ## Pre-release smoke
 
 Before tagging:
 
 ```sh
-task publish:dry-run        # stable: rsync --dry-run, no upload
-task publish:dev-dry-run    # prerelease/next: validates the next/ rsync paths + manifest gen
+task publish:dry-run        # stable: validate archive/ + latest/ targets offline (no upload)
+task publish:dev-dry-run    # prerelease/next: validate archive/ + next/ targets offline (no upload)
+task dist                   # validate the dist.json manifest (live ocx-sh/ocx Releases API)
 ```
 
 After tagging, the release workflow handles upload. Verify post-release:
 
 ```sh
-curl -fsSL https://setup.ocx.sh/sh/<VERSION>/install.sh | sh -s -- --version
-curl -fsSL https://setup.ocx.sh/sh                      | sh   # bare stable
-curl -fsSL https://setup.ocx.sh/dist                            # distribution manifest
+curl -fsSL https://setup.ocx.sh/sh/<VERSION>  | sh -s -- --version   # pinned
+curl -fsSL https://setup.ocx.sh/sh            | sh                   # bare stable
+curl -fsSL https://setup.ocx.sh/dist                                # distribution manifest
 ```

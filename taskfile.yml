@@ -91,16 +91,16 @@ tasks:
       - task: test:pester
 
   publish:dry-run:
-    desc: Validate publish-installers.sh STABLE rsync paths + index gen (no upload).
+    desc: Validate publish-installers.sh STABLE archive/+latest rsync targets, offline (no upload; run 'task dist' for the manifest).
     vars:
       # Strip any leading v AND any prerelease suffix so this always exercises
-      # the stable channel (sh/install.sh + pwsh/install.ps1 pointers).
+      # the stable channel (the latest/install.* pointers).
       VERSION:
         sh: 'ocx run git-cliff -- git-cliff --bumped-version 2>/dev/null | sed "s/^v//; s/-.*//" || echo "0.0.0"'
     cmd: DRY_RUN=1 VERSION={{.VERSION}} SSH_KEY=/dev/null SETUP_OCX_HOST=setup.ocx.sh scripts/publish-installers.sh
 
   publish:dev-dry-run:
-    desc: Validate publish-installers.sh NEXT (prerelease) rsync paths + index gen (no upload).
+    desc: Validate publish-installers.sh NEXT (prerelease) archive/+next rsync targets, offline (no upload; run 'task dist' for the manifest).
     vars:
       # Force a prerelease VERSION so the next/ channel pointers are exercised.
       # Override with VERSION=X.Y.Z-rc.N on the CLI.

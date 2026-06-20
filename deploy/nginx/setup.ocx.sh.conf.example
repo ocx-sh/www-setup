@@ -6,32 +6,45 @@
 # depend on, so the two never drift.
 #
 # Routing contract:
-#   - Bare /sh, /pwsh, /nu, /fish, /elvish (and each /<shell>/next) are served
-#     DIRECTLY via `try_files` from the on-disk artifacts the publish pipeline
-#     uploads — no redirect, no file duplication. `curl -fsSL
-#     https://setup.ocx.sh/sh | sh`, `irm https://setup.ocx.sh/pwsh | iex`,
-#     `curl -fsSL https://setup.ocx.sh/nu | nu`, etc. each resolve to the
-#     latest-stable installer for that shell; the bytes are the same file served
-#     under the pinned and /next paths, just exposed at a friendly URL.
+#   - The per-shell URLs are a REWRITE layer: the friendly /sh, /pwsh, /nu,
+#     /fish, /elvish (and /<shell>/next, /<shell>/<VERSION>) carry no files of
+#     their own — regex `location`s map them onto the version-major on-disk dirs
+#     (latest/, next/, archive/<VERSION>/) the publish pipeline uploads. So
+#     `curl -fsSL https://setup.ocx.sh/sh | sh`, `irm https://setup.ocx.sh/pwsh |
+#     iex`, `curl -fsSL https://setup.ocx.sh/nu | nu`, etc. each resolve to the
+#     latest-stable installer for that shell; /<shell>/next (alias
+#     /<shell>/canary) resolves to the prerelease; /<shell>/<VERSION> (optionally
+#     with a trailing /install.<ext>) resolves to the pinned copy.
+#   - The canonical pinned artifact is /archive/<VERSION>/install.<ext>, served
+#     straight from the static root (curl -O friendly).
 #   - /dist is a friendly alias for /dist.json (the self-hosted distribution
 #     manifest the installers read via OCX_INSTALL_DIST_URL to resolve "latest"
 #     and the per-target sha256 + download URL). /releases is a legacy alias
 #     pointing at the same manifest.
-#   - Pinned, immutable copies live at /<shell>/<VERSION>/install.<ext> and are
-#     served straight from the static root.
 #   - /docs/ and /actions/ are PROXIED upstream (pre-existing forwards owned by
 #     the host config, reproduced here for completeness). Never publish repo
 #     artifacts under those prefixes — nginx reroutes them.
 #
 # Static root layout (uploaded by scripts/publish-installers.sh):
-#   $root/sh/install.sh                 latest stable (mutable pointer)
-#   $root/sh/next/install.sh            latest prerelease (mutable pointer)
-#   $root/sh/<VERSION>/install.sh       pinned (immutable, append-only)
-#   $root/pwsh/install.ps1              latest stable (+ next/ + <VERSION>/)
-#   $root/nu/install.nu                 latest stable (+ next/ + <VERSION>/)
-#   $root/fish/install.fish             latest stable (+ next/ + <VERSION>/)
-#   $root/elvish/install.elv            latest stable (+ next/ + <VERSION>/)
-#   $root/dist.json                     distribution manifest (regenerated every release)
+#   $root/archive/<VERSION>/install.sh      pinned (immutable, append-only)
+#   $root/archive/<VERSION>/install.ps1     …and .nu / .fish / .elv, all 5 per release
+#   $root/latest/install.*                  stable channel pointer (overwritten)
+#   $root/next/install.*                    prerelease channel pointer (overwritten)
+#   $root/dist.json                         distribution manifest (regenerated every release)
+
+# --- Shell-segment map (http context; place alongside the server block) --------
+# Translate the captured /<shell> segment to the installer filename. Evaluated
+# lazily, so the $shellseg named-capture set by the regex locations below is
+# available when this resolves — and it is consumed by try_files, which (unlike
+# default_type) expands variables. Content-type is served as a static text/plain
+# in each location (immaterial for `curl | <shell>`, and inline-viewable).
+map $shellseg $ocx_file {
+    sh      install.sh;
+    pwsh    install.ps1;
+    nu      install.nu;
+    fish    install.fish;
+    elvish  install.elv;
+}
 
 server {
     listen       443 ssl;
@@ -44,56 +57,27 @@ server {
 
     root  /srv/setup.ocx.sh;
 
-    # --- Bare friendly shortcuts (served via try_files; no redirect) ---------
+    # --- Per-shell friendly URLs (rewrite layer onto the version-major dirs) --
+    # Regex locations are tried in order, first match wins. Order matters: bare
+    # pointer, then next/canary, then the pinned version (anchored to a leading
+    # digit so it can't swallow `next`/`canary`).
 
-    location = /sh {
-        try_files /sh/install.sh =404;
-        default_type text/x-shellscript;
-    }
-
-    location = /sh/next {
-        try_files /sh/next/install.sh =404;
-        default_type text/x-shellscript;
-    }
-
-    location = /pwsh {
-        try_files /pwsh/install.ps1 =404;
+    # /sh /pwsh /nu /fish /elvish  ->  latest/ (stable pointer)
+    location ~ ^/(?<shellseg>sh|pwsh|nu|fish|elvish)/?$ {
         default_type text/plain;
+        try_files /latest/$ocx_file =404;
     }
 
-    location = /pwsh/next {
-        try_files /pwsh/next/install.ps1 =404;
+    # /sh/next  and  /sh/canary  ->  next/ (prerelease pointer); optional /install.<ext>
+    location ~ ^/(?<shellseg>sh|pwsh|nu|fish|elvish)/(?:next|canary)(?:/install\.[a-z0-9]+)?/?$ {
         default_type text/plain;
+        try_files /next/$ocx_file =404;
     }
 
-    location = /nu {
-        try_files /nu/install.nu =404;
+    # /sh/<VERSION>  ->  archive/<VERSION>/ (pinned); optional trailing /install.<ext>
+    location ~ ^/(?<shellseg>sh|pwsh|nu|fish|elvish)/(?<ocxver>[0-9][^/]*)(?:/install\.[a-z0-9]+)?/?$ {
         default_type text/plain;
-    }
-
-    location = /nu/next {
-        try_files /nu/next/install.nu =404;
-        default_type text/plain;
-    }
-
-    location = /fish {
-        try_files /fish/install.fish =404;
-        default_type text/plain;
-    }
-
-    location = /fish/next {
-        try_files /fish/next/install.fish =404;
-        default_type text/plain;
-    }
-
-    location = /elvish {
-        try_files /elvish/install.elv =404;
-        default_type text/plain;
-    }
-
-    location = /elvish/next {
-        try_files /elvish/next/install.elv =404;
-        default_type text/plain;
+        try_files /archive/$ocxver/$ocx_file =404;
     }
 
     location = /dist {
