@@ -1,0 +1,11 @@
+# cocogitto configuration — https://docs.cocogitto.io/reference/config/
+#
+# cog is used ONLY by the `cog check` CI gate (.github/workflows/verify.yml).
+# Versioning and changelog generation are owned by git-cliff (see cliff.toml),
+# not `cog bump`, so the defaults for everything else are fine.
+#
+# Ignore merge commits so `cog check` passes on pull requests: GitHub's
+# pull_request event checks out the synthetic `refs/pull/N/merge` ref, whose
+# "Merge <sha> into <sha>" commit is not a Conventional Commit. This also keeps
+# a merge commit that lands on `main` from failing the push-triggered check.
+ignore_merge_commits = true
