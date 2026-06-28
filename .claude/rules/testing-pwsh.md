@@ -26,11 +26,15 @@ fixture HTTP server so the suites stay DRY.
 
 Things the harness gets right that a naive `python -m http.server` does not:
 
-1. **FLAT archive layout.** The release `.zip` puts `ocx.exe` at the archive
-   root (no `ocx-<target>/` wrapper dir), matching the real cargo-dist release —
-   and the only layout that resolves on a non-Windows pwsh host (`Join-Path`
-   treats `\` as a literal on Linux, so the nested `ocx-<target>\ocx.exe`
-   candidate never matches there; only the flat `ocx.exe` candidate hits).
+1. **Platform-appropriate FLAT archive.** install.ps1 is cross-platform, so the
+   fixture builds the archive the host installer expects: on Windows a `.zip` with
+   `ocx.exe` at the root (`Compress-Archive`); on Unix a `.tar.xz` with an
+   executable `ocx` at the root (`tar -cJf`, chmod +x). Both are FLAT (no
+   `ocx-<target>/` wrapper dir), matching the real cargo-dist release. The target,
+   binary name, and extension come from `Resolve-FixtureTarget` /
+   `Get-FixtureBinName` / `Get-FixtureArchiveExt`, which mirror install.ps1's own
+   `Detect-Architecture` so the fixture filename matches exactly what the installer
+   requests. (Manual fixtures that build their own archive use `New-OcxArchive`.)
 2. **`dist.json` manifest with `application/json`.** The harness serves a
    `dist.json` (a single object with FLAT leaf objects; one stable `0.0.0`
    release with an inline `sha256` + a DUMMY `url`) so `ConvertFrom-Json` in
@@ -59,42 +63,51 @@ download-skip hatch (mirrors sh). When set, `Install-LocalTestBinary` validates
 the path (`Err` exit **2** on miss — message contains `__OCX_TESTING_INSTALL_BINARY`),
 copies it to the canonical bin dir, skips download/checksum/extract/manifest, then
 either runs `<bin> --offline self setup` (default) or, under `-NoSetup`, places
-the binary only; it honors `-PrintPath` / `OCX_INSTALL_PRINT_PATH`. Because the
-default path `& <bin> ...`s the copied stub, scenarios that need binary execution
-are gated `-Skip:(-not $IsWindows)` (the sh-shebang stub has no `+x` and is not a
-real PE off Windows); the bad-path → exit 2 and the file-placement / parse-only
-scenarios need no execution and stay un-gated.
+the binary only; it honors `-PrintPath` / `OCX_INSTALL_PRINT_PATH`. On Unix
+`Install-LocalTestBinary` chmod +x's the copied binary (the default path then
+`& <bin> ...`s it). Scenarios that need binary execution self-skip on Windows
+(`-Skip:($env:OS -eq 'Windows_NT')` — the sh-shebang stub is not a PE there); the
+bad-path → exit 2 and the file-placement / parse-only scenarios need no execution
+and stay un-gated.
 
-## Cross-platform execution (windows-latest vs ubuntu-pwsh)
+## Cross-platform execution (POSIX hosts vs windows-latest)
 
-The installer is Windows-only by intent, but most paths execute meaningfully on
-ubuntu-pwsh because `Detect-Architecture` keys off `RuntimeInformation` (returns
-the `*-pc-windows-msvc` target on any X64 host) and the suites set `OCX_HOME`
-explicitly. Tests that must **execute the stub / extracted `ocx.exe`** (the
-recorded `self setup` argv assertion, the exit-6 `self setup`-failure test, the
-fast-path version probe) are gated `-Skip:(-not $IsWindows)`; on Linux those
-scenarios self-skip. Scenarios that only check exit codes / file placement /
-parsing stay un-gated and must pass on ubuntu-pwsh.
+install.ps1 is **cross-platform**. On the POSIX hosts (ubuntu + macos) the suites
+exercise the **full** path — download → `.tar.xz` extract → `ocx` chmod →
+`self setup` hand-off — against the executable shell-script stub. On Windows the
+stub is named `ocx.exe` but is not a PE, so the scenarios that **execute** the
+stub (the recorded `self setup` argv assertion, the exit-6 `self setup`-failure
+test, the FORCE/idempotency version probe) self-skip there via
+`-Skip:($env:OS -eq 'Windows_NT')`. The skip keys off `$env:OS`, not `$IsWindows`
+(undefined under 5.1, and a local `$isLinux`/`$isMac` would collide with PS Core's
+read-only auto-vars). Windows execution coverage lives in the 5.1 smoke + the
+workflow_dispatch real-release jobs. Scenarios that only check exit codes / file
+placement / parsing stay un-gated and pass on every host (the placement-assert bin
+name is `Get-FixtureBinName`).
 
 `OCX_INSTALL_DOWNLOADER` has no Pester mirror by design — it is sh-only
-(install.ps1 always uses `Invoke-WebRequest`).
+(install.ps1 always uses `Invoke-WebRequest`, on every OS).
 
 ## PowerShell 5.1 (Desktop) vs. 7 in CI
 
 The installer is written 5.1-safe (no ternary, `??`, `&&`/`||` chains, `$IsWindows`
-auto-var, `-SkipCertificateCheck`, `-SslProtocol`). `test-installers.yml`:
+auto-var, `-SkipCertificateCheck`, `-SslProtocol`); the `$PSVersionTable.PSEdition
+-eq 'Desktop'` shortcut keeps a 5.1 host from ever evaluating the Core-only Unix
+branch. `test-installers.yml`:
 
-- On `windows-latest`, runs the Pester suite **and** a smoke install on **both**
-  hosts — Windows PowerShell 5.1 (`powershell.exe`) and PowerShell 7 (`pwsh`).
-  Install Pester v5 for the 5.1 host:
+- The `pester` job runs on **windows-latest + ubuntu-latest + macos-latest** (pwsh
+  7). The POSIX legs execute the full path; Windows runs the parse/placement
+  scenarios and self-skips the stub-execution ones.
+- On `windows-latest`, also runs a 5.1 smoke install (`powershell.exe`). Install
+  Pester v5 for a 5.1 host:
   `Install-Module Pester -MinimumVersion 5 -Force -Scope CurrentUser -SkipPublisherCheck`.
 - The 5.1 smoke install drives the test hatch:
   `powershell.exe -NoProfile -ExecutionPolicy Bypass -File src/install.ps1 -NoSetup -PrintPath -NoSmoketest`.
-- Keeps the ubuntu pwsh-7 leg + Bats on ubuntu/macos.
+- pwsh is also an INSTALLER-axis cell in `test-docker-matrix.yml` (alpine/fedora/
+  ubuntu × amd64/arm64) and has real-release dispatch jobs for linux + macos.
 
-The `-Skip:(-not $IsWindows)` gating governs which scenarios execute the
-copied/extracted binary: those run on the Windows hosts (both shells) and skip on
-the ubuntu-pwsh leg.
+The `-Skip:($env:OS -eq 'Windows_NT')` gating governs which scenarios execute the
+copied/extracted binary: those run on the POSIX hosts and self-skip on Windows.
 
 ## Parity with Bats
 
@@ -118,5 +131,5 @@ not the in-script exit 2 — is preserved. Exit code 7 (unsupported platform)
 cannot be triggered on an X64 host in either suite — it is exercised by
 `tests/docker/`.
 
-CI runs Bats on ubuntu + macos (vendored bats) and Pester on windows-latest (both
-`powershell.exe` 5.1 and `pwsh` 7) + ubuntu-latest with pwsh installed.
+CI runs Bats on ubuntu (vendored bats) and Pester on windows-latest (both
+`powershell.exe` 5.1 and `pwsh` 7) + ubuntu-latest + macos-latest (pwsh 7).

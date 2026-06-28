@@ -33,9 +33,9 @@ Describe 'install.ps1 exit codes' {
         $srvRoot = Join-Path $root 'srv'
         $srvDir = Join-Path $srvRoot 'releases/download/v0.0.0'
         New-Item -ItemType Directory -Path $srvDir -Force | Out-Null
-        $file = "ocx-$Target.zip"
+        $file = "ocx-$Target.$(Get-FixtureArchiveExt)"
         $archive = Join-Path $srvDir $file
-        Set-Content -Path $archive -Value 'not a real zip archive' -Encoding ASCII -NoNewline
+        Set-Content -Path $archive -Value 'not a real archive' -Encoding ASCII -NoNewline
         $sha = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLower()
         Write-OcxDist -SrvRoot $srvRoot -Target $Target -Sha $sha -Filename $file
         $srv = Start-FixtureServer -SrvRoot $srvRoot
@@ -51,7 +51,7 @@ Describe 'install.ps1 exit codes' {
         }
     }
 
-    It 'exit 5: archive missing ocx.exe' {
+    It 'exit 5: archive missing the ocx binary' {
         $root = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-ec-mb-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
         $srvRoot = Join-Path $root 'srv'
         $srvDir = Join-Path $srvRoot 'releases/download/v0.0.0'
@@ -59,9 +59,9 @@ Describe 'install.ps1 exit codes' {
         $build = Join-Path $root 'build'
         New-Item -ItemType Directory -Path $build -Force | Out-Null
         Set-Content -Path (Join-Path $build 'README.txt') -Value 'no binary here' -Encoding ASCII
-        $file = "ocx-$Target.zip"
+        $file = "ocx-$Target.$(Get-FixtureArchiveExt)"
         $archive = Join-Path $srvDir $file
-        Compress-Archive -Path (Join-Path $build '*') -DestinationPath $archive -Force
+        New-OcxArchive -BuildDir $build -OutFile $archive
         $sha = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLower()
         Write-OcxDist -SrvRoot $srvRoot -Target $Target -Sha $sha -Filename $file
         $srv = Start-FixtureServer -SrvRoot $srvRoot

@@ -259,24 +259,34 @@ install_nu() {
 install_pwsh() {
     command -v pwsh >/dev/null 2>&1 && return 0
     # PowerShell is NOT in default Linux repos — pinned GitHub release tarball.
-    # Best-effort: install.sh has no powershell profile hook on Linux, so the
-    # activation test treats pwsh as best-effort (see activate.sh).
     ensure_base_tools
-    # libicu is a hard runtime dep on most distros.
+    # Pick the right build per distro/arch. Alpine (musl) needs PowerShell's
+    # dedicated linux-musl-* build — the GLIBC tarball under a `gcompat` shim
+    # cannot even initialise a runspace (NullReferenceException in AstSearcher).
+    # Upstream ships linux-musl-x64 but NOT linux-musl-arm64, so pwsh on Alpine is
+    # amd64-only; on Alpine/arm64 we skip provisioning (the smoke + activation
+    # paths then `command -v pwsh`-skip cleanly).
+    _build=""
     case "$DISTRO_ID" in
         alpine)
-            # The PowerShell release tarball is a GLIBC binary linked against
-            # /lib64/ld-linux-x86-64.so.2, which does not exist on musl Alpine.
-            # `gcompat` provides the glibc loader shim so pwsh can launch at all;
-            # icu-libs/libgcc/libstdc++ are the runtime deps. Without gcompat the
-            # binary fails with "sh: pwsh: not found" (kernel ENOENT on the glibc
-            # interpreter). pwsh-on-Linux is best-effort per the audit.
-            pm_try gcompat icu-libs libgcc libstdc++ || pm_try icu-libs libgcc libstdc++ || :
+            if [ "$ARCH_PWSH" != "x64" ]; then
+                echo "install-shells.sh: PowerShell has no linux-musl-${ARCH_PWSH} build; skipping pwsh on Alpine/${ARCH_PWSH}" >&2
+                return 0
+            fi
+            _build="linux-musl-x64"
+            # Runtime deps for the musl build (no gcompat — it is a native musl binary).
+            pm_try icu-libs libgcc libstdc++ || :
             ;;
-        fedora) pm_try libicu || : ;;
-        ubuntu | debian) pm_try libicu74 || pm_try libicu72 || pm_try libicu70 || : ;;
+        fedora)
+            _build="linux-${ARCH_PWSH}"
+            pm_try libicu || :
+            ;;
+        ubuntu | debian)
+            _build="linux-${ARCH_PWSH}"
+            pm_try libicu74 || pm_try libicu72 || pm_try libicu70 || :
+            ;;
     esac
-    _name="powershell-${PWSH_VERSION}-linux-${ARCH_PWSH}.tar.gz"
+    _name="powershell-${PWSH_VERSION}-${_build}.tar.gz"
     _url="https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VERSION}/${_name}"
     _dest="/opt/microsoft/powershell/7"
     _tmp=$(mktemp -d)
