@@ -154,7 +154,8 @@ fn ocx-safe-extract {|archive dest|
     if (not-eq $bad '') {
         ocx-err "archive contains unsafe path: "$bad 5
     }
-    if (not ?(e:tar xf $archive -C $dest --no-same-owner --no-same-permissions --no-overwrite-dir 2>/dev/null)) {
+    # Only flags accepted by BOTH GNU tar and macOS bsdtar (--no-overwrite-dir is GNU-only).
+    if (not ?(e:tar xf $archive -C $dest --no-same-owner --no-same-permissions 2>/dev/null)) {
         ocx-err "failed to extract "$archive" — ensure tar is available" 5
     }
 }

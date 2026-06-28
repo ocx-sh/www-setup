@@ -333,8 +333,10 @@ verify_checksum() {
 # Two-pass extraction. Pass 1: reject any member that escapes the destination
 # via an absolute path or a ".." traversal component. Pass 2: reject any
 # symlink/hardlink whose target escapes the tree. Then extract with
-# ownership/permission/overwrite hardening flags. The scans are authoritative;
-# the inline checksum is the primary integrity guard.
+# ownership/permission hardening flags. The scans are authoritative; the inline
+# checksum is the primary integrity guard. NB: only flags accepted by BOTH GNU
+# tar and macOS bsdtar are used — --no-overwrite-dir is GNU-only and would abort
+# bsdtar, and the fresh mktemp dest has no pre-existing dirs for it to protect.
 safe_extract() {
     local _archive="$1" _dest="$2" _bad_entry _bad_target
 
@@ -368,7 +370,7 @@ safe_extract() {
     fi
 
     tar xf "$_archive" -C "$_dest" \
-        --no-same-owner --no-same-permissions --no-overwrite-dir 2>/dev/null ||
+        --no-same-owner --no-same-permissions 2>/dev/null ||
         err "failed to extract ${_archive} — ensure tar and xz-utils are installed" 5
 }
 

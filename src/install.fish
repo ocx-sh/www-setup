@@ -199,7 +199,8 @@ function __ocx_safe_extract --argument-names archive dest
     if test -n "$bad"
         __ocx_err "archive contains unsafe path: $bad" 5
     end
-    if not tar xf $archive -C $dest --no-same-owner --no-same-permissions --no-overwrite-dir 2>/dev/null
+    # Only flags accepted by BOTH GNU tar and macOS bsdtar (--no-overwrite-dir is GNU-only).
+    if not tar xf $archive -C $dest --no-same-owner --no-same-permissions 2>/dev/null
         __ocx_err "failed to extract $archive — ensure tar and xz-utils are installed" 5
     end
 end

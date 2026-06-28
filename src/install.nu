@@ -149,7 +149,8 @@ def __ocx-safe-extract [archive: string, dest: string, target: string] {
         __ocx-err $"archive contains unsafe path: ($bad | first)" 5
     }
     let ok = try {
-        ^tar xf $archive -C $dest --no-same-owner --no-same-permissions --no-overwrite-dir
+        # Only flags accepted by BOTH GNU tar and macOS bsdtar (--no-overwrite-dir is GNU-only).
+        ^tar xf $archive -C $dest --no-same-owner --no-same-permissions
         true
     } catch {
         false
