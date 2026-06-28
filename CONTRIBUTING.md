@@ -11,7 +11,7 @@ Thanks for helping land changes to the canonical OCX installer scripts.
   git submodule update --init --recursive    # or: task test:bootstrap
   ```
   The test tasks depend on this; a fresh clone resolves Bats without a manual step.
-- `pwsh` — PowerShell 7+. Needed for Pester tests and PSScriptAnalyzer. `src/install.ps1` targets a **Windows PowerShell 5.1 Desktop floor** (no ternary, `??`, `&&`/`||` chains, `$IsWindows` auto-var, `-SkipCertificateCheck`, `-SslProtocol`); CI smoke-installs it under both `powershell.exe` (5.1) and `pwsh` (7) on Windows.
+- `pwsh` — PowerShell 7+. Needed for Pester tests and PSScriptAnalyzer. `src/install.ps1` is **cross-platform** (Windows + Linux + macOS) but still targets a **Windows PowerShell 5.1 Desktop floor** on Windows (no ternary, `??`, `&&`/`||` chains, `$IsWindows` auto-var, `-SkipCertificateCheck`, `-SslProtocol`); on Unix it needs `tar` + `xz-utils` for extraction. CI runs Pester on windows-latest + ubuntu-latest + macos-latest and smoke-installs under both `powershell.exe` (5.1) and `pwsh` (7) on Windows.
 - **Exotic shells** — `nu` (Nushell), `fish`, `elvish` are provisioned via the OCX toolchain (`ocx.toml`: `ocx.sh/nushell`, `ocx.sh/fish`, `ocx.sh/elvish`). Their lint gates are `nu --ide-check`, `fish -n` + `fish_indent --check`, and `elvish -compileonly`. The fish suite runs locally; nu/elvish are exercised in the docker matrix.
 - `python3` — used by the Bats fixture HTTPS server.
 - `docker` with `buildx` and (for non-native arches) QEMU binfmt handlers — required for `tests/docker/`. Run `task docker:qemu:register` to install handlers on Linux hosts.
@@ -20,7 +20,7 @@ Thanks for helping land changes to the canonical OCX installer scripts.
 
 ```
 src/install.sh               POSIX installer (bash/zsh/ash/ksh/dash; Linux + macOS)
-src/install.ps1              PowerShell installer (Windows + pwsh; PS 5.1 floor)
+src/install.ps1              PowerShell installer (cross-platform; PS 5.1 floor on Windows, PS 7+ on Unix)
 src/install.nu               Nushell installer (env-driven; cross-platform)
 src/install.fish             fish installer (unix-only)
 src/install.elv              Elvish installer (cross-platform)

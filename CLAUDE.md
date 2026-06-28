@@ -22,7 +22,7 @@ Each installer is a **thin bootstrap**: detect platform → resolve the release 
 | Path | Responsibility |
 |---|---|
 | `src/install.sh` | Canonical POSIX installer (bash/zsh/ash/ksh/dash). Env knobs `OCX_INSTALL_*`, exit codes 0–7, stderr-only logging, thin `ocx self setup` hand-off |
-| `src/install.ps1` | PowerShell installer (Windows; PS 5.1 Desktop floor). Mirrors the sh contract |
+| `src/install.ps1` | PowerShell installer (cross-platform: Windows PS 5.1 Desktop floor + 7; Linux/macOS PS 7+). `.zip`/`ocx.exe` on Windows, `.tar.xz`/`ocx` on Unix. Mirrors the sh contract |
 | `src/install.nu` | Nushell installer (env-driven; cross-platform) |
 | `src/install.fish` | fish installer (unix-only) |
 | `src/install.elv` | Elvish installer (cross-platform) |
@@ -86,8 +86,8 @@ Pick the most specific code when calling `err()`. Reusing codes across unrelated
 ## Testing tiers
 
 1. **Bats** (`tests/install/*.bats` + `tests/install/{nu,fish,elvish}/`) — VENDORED bats (`external/bats-core/bin/bats`; run `git submodule update --init --recursive` first). A fixture HTTPS server (python3 + ssl) serves `dist.json` + the archive; exercises env knobs, exit-code paths, stdout/stderr discipline, the `ocx self setup` hand-off argv, and `gen-dist.sh` (`dist.bats`). Per-shell suites skip where the shell is absent.
-2. **Pester** (`tests/install/ps1/*.Tests.ps1`) — symmetric coverage for the PowerShell installer.
-3. **Docker matrix** (`tests/docker/run.sh`) — real distros × arch × **installer** (new INSTALLER axis: sh/nu/fish/elvish), network-free via an injected stub:
+2. **Pester** (`tests/install/ps1/*.Tests.ps1`) — symmetric coverage for the PowerShell installer. Runs on windows-latest **+ ubuntu-latest + macos-latest** (install.ps1 is cross-platform; the download→extract→`self setup` path executes on the POSIX hosts, self-skips on Windows where the shell-script stub is not a PE).
+3. **Docker matrix** (`tests/docker/run.sh`) — real distros × arch × **installer** (INSTALLER axis: sh/nu/fish/elvish/**pwsh**), network-free via an injected stub:
    - **Alpine** (musl) — `linux/amd64`, `linux/arm64`
    - **Fedora** (glibc, dnf) — `linux/amd64`, `linux/arm64`
    - **Ubuntu** (glibc, apt) — `linux/amd64`, `linux/arm64`

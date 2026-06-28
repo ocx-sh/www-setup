@@ -6,9 +6,9 @@
 # -PrintPath), in which case the FINAL stdout line is the absolute bin dir.
 #
 # We split the streams with `2>$errFile`, so $out is pure stdout. These tests use
-# OCX_INSTALL_NO_SETUP (and the test hatch) so they never execute the extracted
-# .zip binary — that has no +x on a non-Windows pwsh host — keeping the discipline
-# assertions meaningful on ubuntu-pwsh as well as windows-latest.
+# OCX_INSTALL_NO_SETUP (and the test hatch) so they assert the stdout/stderr
+# discipline without depending on the binary executing — meaningful on Windows,
+# ubuntu, and macos alike.
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot 'Fixture.psm1') -Force

@@ -2,24 +2,82 @@
 # Imported via `Import-Module $PSScriptRoot/Fixture.psm1 -Force` from each suite.
 #
 # PowerShell analogue of tests/install/helpers/server.bash: it builds a fake
-# release tree (FLAT zip archive + a dist.json manifest with an INLINE sha256)
-# and spins a `python http.server` against it so install.ps1 runs end-to-end
-# without network access.
+# release tree (a platform-appropriate archive + a dist.json manifest with an
+# INLINE sha256) and spins a `python http.server` against it so install.ps1 runs
+# end-to-end without network access.
 #
 # The installer resolves latest + the per-target checksum/URL from dist.json.
 # The manifest `url` is a dummy (example.invalid); suites set OCX_INSTALL_MIRROR_URL
 # to $Server.MirrorUrl so the archive download is redirected to the fixture
 # (mirror rewrites url -> <MirrorUrl>/<tag>/<filename>).
 #
-# Layout: the archive is FLAT (ocx.exe at the root). Detect-Architecture returns
-# x86_64-pc-windows-msvc for any X64 host (it keys off RuntimeInformation), so the
-# fixture target is always x86_64-pc-windows-msvc and the suites run meaningfully
-# on ubuntu-pwsh as well as windows-latest.
+# Cross-platform: install.ps1 is now a cross-platform installer. Detect-Architecture
+# returns the real host target (*-pc-windows-msvc on Windows, *-unknown-linux-{gnu,musl}
+# on Linux, *-apple-darwin on macOS) and the binary is ocx.exe on Windows / ocx on
+# Unix. The fixture mirrors that: on Windows it builds a FLAT .zip with ocx.exe at
+# the root; on Unix it builds a FLAT .tar.xz with an executable `ocx` at the root
+# (so the full download -> extract -> `self setup` hand-off path EXECUTES on the
+# POSIX hosts — ubuntu + macos). The stub is a `#!/bin/sh` script; on Windows it is
+# not a PE, so suites that execute it self-skip there (see -Skip:($env:OS -eq
+# 'Windows_NT')). Windows execution coverage lives in the 5.1 smoke + real-release
+# dispatch jobs.
 
-$script:Target = 'x86_64-pc-windows-msvc'
+# --- Platform predicates (mirror install.ps1) ---
+
+function Test-FixtureIsWindows {
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { return $true }
+    return [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+        [System.Runtime.InteropServices.OSPlatform]::Windows)
+}
+
+# Resolve the host target triple, mirroring install.ps1 Detect-Architecture so the
+# fixture archive name matches exactly what the installer will request.
+function Resolve-FixtureTarget {
+    if (Test-FixtureIsWindows) {
+        switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
+            'X64'   { return 'x86_64-pc-windows-msvc' }
+            'Arm64' { return 'aarch64-pc-windows-msvc' }
+            default { throw "unsupported test host architecture" }
+        }
+    }
+    $arch = $null
+    switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
+        'X64'   { $arch = 'x86_64' }
+        'Arm64' { $arch = 'aarch64' }
+        default { throw "unsupported test host architecture" }
+    }
+    if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+            [System.Runtime.InteropServices.OSPlatform]::OSX)) {
+        return "$arch-apple-darwin"
+    }
+    # Linux libc, same ordering as install.ps1.
+    $libc = 'gnu'
+    if (Get-Command ldd -ErrorAction SilentlyContinue) {
+        $lddOut = ''
+        try { $lddOut = (& ldd --version 2>&1 | Out-String) } catch { $lddOut = '' }
+        if ($lddOut -match 'musl') { $libc = 'musl' }
+    }
+    elseif (Get-ChildItem -Path '/lib/ld-musl-*.so.1' -ErrorAction SilentlyContinue) { $libc = 'musl' }
+    elseif (Test-Path '/etc/alpine-release') { $libc = 'musl' }
+    return "$arch-unknown-linux-$libc"
+}
+
+$script:Target = Resolve-FixtureTarget
 
 function Get-FixtureTarget {
     return $script:Target
+}
+
+# Binary name in the release archive + at the canonical bin dir.
+function Get-FixtureBinName {
+    if (Test-FixtureIsWindows) { return 'ocx.exe' }
+    return 'ocx'
+}
+
+# Archive extension for the host platform (.zip on Windows, .tar.xz on Unix).
+function Get-FixtureArchiveExt {
+    if (Test-FixtureIsWindows) { return 'zip' }
+    return 'tar.xz'
 }
 
 function Wait-FixturePort {
@@ -46,22 +104,23 @@ function Get-PythonExe {
     throw 'No python3/python interpreter found on PATH for the fixture server.'
 }
 
-# Write the stub `ocx.exe` into $BuildDir.
+# Write the stub `ocx`/`ocx.exe` into $BuildDir.
 #   - default: answers `version` -> 0.0.0, `about`, and the `ocx self setup`
 #     hand-off (records "$*" to $ArgvLog when set, exits 0).
 #   - $FailSelfSetup: the `self setup` hand-off exits 9 (drives the exit-6 path).
-# The stub is a `#!/bin/sh` script (named ocx.exe). On Windows it is invoked as a
-# real exe; on Linux a shebang + a caller chmod makes `& <bin>` runnable — but the
-# DOWNLOAD path extracts via .NET zip (no +x on Linux), so suites that execute the
-# extracted binary self-skip off Windows (see -Skip:(-not $IsWindows)).
+# The stub is a `#!/bin/sh` script. On Unix it is named `ocx` and chmod +x so the
+# extracted/copied binary runs; on Windows it is named `ocx.exe` but is not a PE,
+# so suites that execute it self-skip there.
 function New-OcxStub {
     param(
         [Parameter(Mandatory)][string]$BuildDir,
         [string]$ArgvLog,
+        [string]$BinName,
         [switch]$FailSelfSetup
     )
+    if (-not $BinName) { $BinName = Get-FixtureBinName }
     New-Item -ItemType Directory -Path $BuildDir -Force | Out-Null
-    $stubPath = Join-Path $BuildDir 'ocx.exe'
+    $stubPath = Join-Path $BuildDir $BinName
 
     $record = ''
     if ($ArgvLog) {
@@ -78,7 +137,25 @@ function New-OcxStub {
             "  *) echo 'stub ocx' ;;`n" +
             "esac`n"
     [System.IO.File]::WriteAllText($stubPath, $body)
+    if (-not (Test-FixtureIsWindows)) { & chmod +x $stubPath 2>$null }
     return $stubPath
+}
+
+# Build a FLAT release archive from the contents of $BuildDir (binary at the root)
+# into $OutFile. .zip via Compress-Archive on Windows; .tar.xz via `tar -cJf` on
+# Unix (libarchive xz). Mirrors the real cargo-dist layout per platform.
+function New-OcxArchive {
+    param(
+        [Parameter(Mandatory)][string]$BuildDir,
+        [Parameter(Mandatory)][string]$OutFile
+    )
+    if (Test-FixtureIsWindows) {
+        Compress-Archive -Path (Join-Path $BuildDir '*') -DestinationPath $OutFile -Force
+        return
+    }
+    # `-C $BuildDir .` => flat members (./ocx) extracting to the archive root.
+    & tar -cJf $OutFile -C $BuildDir .
+    if ($LASTEXITCODE -ne 0) { throw "tar -cJf failed building $OutFile (ensure tar + xz are installed)" }
 }
 
 # Build a standalone local test binary for the __OCX_TESTING_INSTALL_BINARY hatch
@@ -86,19 +163,12 @@ function New-OcxStub {
 function New-OcxTestBinary {
     param(
         [Parameter(Mandatory)][string]$Dir,
-        [string]$Name = 'ocx.exe',
+        [string]$Name,
         [string]$ArgvLog
     )
+    if (-not $Name) { $Name = Get-FixtureBinName }
     New-Item -ItemType Directory -Path $Dir -Force | Out-Null
-    $binPath = Join-Path $Dir $Name
-    New-OcxStub -BuildDir $Dir -ArgvLog $ArgvLog | Out-Null
-    if ($Name -ne 'ocx.exe') {
-        Move-Item -Path (Join-Path $Dir 'ocx.exe') -Destination $binPath -Force
-    }
-    if ($env:OS -ne 'Windows_NT') {
-        & chmod +x $binPath 2>$null
-    }
-    return $binPath
+    return (New-OcxStub -BuildDir $Dir -ArgvLog $ArgvLog -BinName $Name)
 }
 
 # Write a single-release dist.json under $SrvRoot. $Sha is the inline checksum
@@ -140,10 +210,9 @@ function New-OcxFixture {
     New-Item -ItemType Directory -Path $srvDir -Force | Out-Null
     $srvRoot = Join-Path $Root 'srv'
 
-    # FLAT archive: compress the *contents* of $build (ocx.exe at the root).
-    $archive = "ocx-$target.zip"
+    $archive = "ocx-$target.$(Get-FixtureArchiveExt)"
     $archivePath = Join-Path $srvDir $archive
-    Compress-Archive -Path (Join-Path $build '*') -DestinationPath $archivePath -Force
+    New-OcxArchive -BuildDir $build -OutFile $archivePath
 
     if ($TamperChecksum) {
         $hash = '0' * 64
@@ -222,6 +291,7 @@ function Get-ExpectedBinDir {
 }
 
 Export-ModuleMember -Function `
-    Get-FixtureTarget, New-OcxFixture, New-OcxStub, New-OcxTestBinary, Write-OcxDist, `
+    Get-FixtureTarget, Get-FixtureBinName, Get-FixtureArchiveExt, `
+    New-OcxFixture, New-OcxStub, New-OcxArchive, New-OcxTestBinary, Write-OcxDist, `
     Start-FixtureServer, Stop-FixtureServer, Get-ExpectedBinDir, `
-    Wait-FixturePort, Get-PythonExe
+    Wait-FixturePort, Get-PythonExe, Test-FixtureIsWindows

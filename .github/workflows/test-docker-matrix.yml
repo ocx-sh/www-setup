@@ -21,12 +21,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Per-installer smoke matrix: each of the four POSIX/exotic installers
-  # (sh/nu/fish/elvish — pwsh is Windows-only, covered by Pester) is run via its
-  # own interpreter against an INJECTED stub binary (network-free, deterministic).
-  # This proves each installer detects the platform, takes the test hatch, places
-  # the binary at the canonical bin dir, and honors print-path — across
-  # alpine/fedora/ubuntu × amd64/arm64 (linux arm64 via QEMU).
+  # Per-installer smoke matrix: each of the five thin installers (sh/nu/fish/elvish
+  # AND pwsh — install.ps1 is cross-platform) is run via its own interpreter
+  # against an INJECTED stub binary (network-free, deterministic). This proves each
+  # installer detects the platform, takes the test hatch, places the binary at the
+  # canonical bin dir, and honors print-path — across alpine/fedora/ubuntu ×
+  # amd64/arm64 (linux arm64 via QEMU). pwsh is provisioned per-distro by
+  # install-shells.sh (Alpine via the gcompat glibc shim; both x64/arm64).
   matrix:
     name: ${{ matrix.installer }} / ${{ matrix.distro }} / ${{ matrix.platform }}
     if: github.actor != 'dependabot[bot]'
@@ -34,9 +35,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        installer: [sh, nu, fish, elvish]
+        installer: [sh, nu, fish, elvish, pwsh]
         distro: [alpine, fedora, ubuntu]
         platform: [linux/amd64, linux/arm64]
+        exclude:
+          # PowerShell ships no linux-musl-arm64 build (through 7.5.x) and the
+          # glibc tarball under a gcompat shim cannot init a runspace, so pwsh on
+          # Alpine is amd64-only. The other four installers still run here.
+          - installer: pwsh
+            distro: alpine
+            platform: linux/arm64
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 

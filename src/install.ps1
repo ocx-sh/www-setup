@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 #
-# install.ps1 - OCX installer for Windows
+# install.ps1 - OCX installer for Windows, Linux, and macOS
 # https://ocx.sh
 #
-# Windows-only. This installer targets Windows PowerShell 5.1+ and PowerShell 7+
-# ON WINDOWS (the release targets are *-pc-windows-msvc and the binary is
-# ocx.exe). On Linux/macOS use the POSIX installer (src/install.sh); this script
-# intentionally does NOT support pwsh-on-Linux for real installs.
+# Cross-platform PowerShell installer. On Windows it targets Windows PowerShell
+# 5.1+ and PowerShell 7+ (release target *-pc-windows-msvc, binary ocx.exe). On
+# Linux/macOS it requires PowerShell 7+ (5.1 is Windows-only) and mirrors the
+# POSIX installer's targets (*-unknown-linux-{gnu,musl}, *-apple-darwin; binary
+# ocx). The Unix download path needs `tar` + `xz-utils` for archive extraction.
+# For a shell-native install on Unix, src/install.sh remains available.
 #
 # This is a THIN BOOTSTRAP. It detects the architecture, resolves the release
 # from the self-hosted distribution manifest (dist.json), downloads + verifies
@@ -59,6 +61,24 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# --- Host OS predicate (5.1-safe) ---
+
+# True on a Windows host. Windows PowerShell 5.1 is the Desktop edition and is
+# Windows-only, so the PSEdition shortcut returns $true WITHOUT ever evaluating
+# the .NET Core / 4.7.1-era RuntimeInformation API on a 5.1 host. Every
+# Unix-only construct below (IsOSPlatform(Linux/OSX), sysctl, ldd, tar, chmod,
+# /lib + /etc probes) is gated behind `-not $script:OcxIsWindows`, so a 5.1 host
+# never reaches them.
+function Test-IsWindowsHost {
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { return $true }
+    return [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+        [System.Runtime.InteropServices.OSPlatform]::Windows)
+}
+$script:OcxIsWindows = Test-IsWindowsHost
+
+# Binary name: ocx.exe on Windows, ocx on Unix.
+$OcxBinName = if ($script:OcxIsWindows) { 'ocx.exe' } else { 'ocx' }
+
 # --- Truthy helper ---
 
 function Test-Truthy {
@@ -91,8 +111,10 @@ $OcxInstallQuiet      = if (Test-Truthy $env:OCX_INSTALL_QUIET)       { $true } 
 $OcxInstallNoSmoketest = if (Test-Truthy $env:OCX_INSTALL_NO_SMOKETEST) { $true } else { [bool]$NoSmoketest }
 $OcxNoModifyPath      = if (Test-Truthy $env:OCX_NO_MODIFY_PATH)      { $true } else { [bool]$NoModifyPath }
 
-# Canonical CLI bin dir relative to OCX_HOME (real on-disk store layout).
-$OcxBinSubPath = 'symlinks\ocx.sh\ocx\cli\current\content\bin'
+# Canonical CLI bin dir relative to OCX_HOME (real on-disk store layout). Built
+# with the native separator so every downstream Join-Path is correctly separated
+# on both Windows (\) and Unix (/).
+$OcxBinSubPath = (@('symlinks', 'ocx.sh', 'ocx', 'cli', 'current', 'content', 'bin') -join [System.IO.Path]::DirectorySeparatorChar)
 
 # --- Output helpers (all go to STDERR) ---
 
@@ -116,6 +138,9 @@ function Warn {
 # --- Platform detection ---
 
 function Detect-Architecture {
+    if (-not $script:OcxIsWindows) { return Get-UnixTarget }
+
+    # --- Windows branch: OSArchitecture -> PROCESSOR_ARCHITECTURE fallback ---
     try {
         $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
         switch ($arch) {
@@ -137,6 +162,57 @@ function Detect-Architecture {
         'x86'   { Err '32-bit Windows is not supported. OCX requires a 64-bit system.' 7 }
         default { Err "Unsupported architecture: $procArch" 7 }
     }
+}
+
+# Resolve the <arch>-<os>-<libc/vendor> target on a non-Windows host (PS 7+).
+# Mirrors src/install.sh detect_target (Linux gnu/musl + Apple-Silicon Rosetta).
+function Get-UnixTarget {
+    # NB: do NOT name these $isMac/$isLinux - PowerShell variables are
+    # case-insensitive, so $isLinux would collide with the read-only auto-var
+    # $IsLinux on PS Core and throw.
+    $onMac = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+        [System.Runtime.InteropServices.OSPlatform]::OSX)
+    $onLinux = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+        [System.Runtime.InteropServices.OSPlatform]::Linux)
+    if (-not ($onMac -or $onLinux)) {
+        Err 'unsupported operating system (expected Windows, Linux, or macOS)' 7
+    }
+
+    $arch = $null
+    switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
+        'X64'   { $arch = 'x86_64' }
+        'Arm64' { $arch = 'aarch64' }
+        default {
+            Err "unsupported architecture: $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) (expected x86_64 or aarch64)" 7
+        }
+    }
+
+    if ($onMac) {
+        # Apple Silicon under Rosetta reports x86_64; prefer the native arm64
+        # binary (mirrors src/install.sh:202-207).
+        if ($arch -eq 'x86_64') {
+            $rosetta = ''
+            try { $rosetta = (& sysctl -n hw.optional.arm64 2>$null | Out-String).Trim() } catch { $rosetta = '' }
+            if ($rosetta -match '1') {
+                Say 'Detected Apple Silicon running under Rosetta - using native arm64 binary.'
+                $arch = 'aarch64'
+            }
+        }
+        return "$arch-apple-darwin"
+    }
+
+    # Linux libc: gnu default; musl on Alpine/musl. Ordering MUST mirror
+    # install.sh - when ldd exists it is authoritative; only when ldd is ABSENT
+    # do we fall back to the loader-file / alpine-release probes.
+    $libc = 'gnu'
+    if (Get-Command ldd -ErrorAction SilentlyContinue) {
+        $lddOut = ''
+        try { $lddOut = (& ldd --version 2>&1 | Out-String) } catch { $lddOut = '' }
+        if ($lddOut -match 'musl') { $libc = 'musl' }
+    }
+    elseif (Get-ChildItem -Path '/lib/ld-musl-*.so.1' -ErrorAction SilentlyContinue) { $libc = 'musl' }
+    elseif (Test-Path '/etc/alpine-release') { $libc = 'musl' }
+    return "$arch-unknown-linux-$libc"
 }
 
 # --- Download utilities ---
@@ -270,6 +346,59 @@ function Expand-ZipSafely {
     finally { $zip.Dispose() }
 }
 
+# Extract a .tar.* archive on a non-Windows host by shelling out to `tar`.
+# Managed tar is .NET 7+ only and there is no in-box xz support at any version,
+# so `tar` (which delegates to xz-utils) is the only portable path - and it is
+# already a hard dependency of install.sh. Ports install.sh's two-pass safety
+# guards (reject absolute / '..' members; reject link targets that escape).
+function Expand-TarSafely {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Destination
+    )
+
+    [System.IO.Directory]::CreateDirectory($Destination) | Out-Null
+
+    # Pass 1: reject absolute paths or '..' traversal members.
+    $entries = @()
+    try { $entries = & tar -tf $Path 2>$null } catch { $entries = @() }
+    if ($LASTEXITCODE -ne 0) {
+        throw 'failed to list archive - ensure tar and xz-utils are installed'
+    }
+    foreach ($e in $entries) {
+        if ($e -match '^/' -or $e -match '(^|/)\.\.(/|$)') {
+            throw "archive contains unsafe path: $e"
+        }
+    }
+
+    # Pass 2: reject symlink/hardlink members whose target escapes the tree.
+    $verbose = @()
+    try { $verbose = & tar -tvf $Path 2>$null } catch { $verbose = @() }
+    foreach ($line in $verbose) {
+        $idx = $line.IndexOf(' -> ')
+        if ($idx -lt 0) { continue }
+        $linkTarget = $line.Substring($idx + 4)
+        if ($linkTarget.StartsWith('/')) { throw "archive contains escaping link target: $linkTarget" }
+        $depth = 0
+        foreach ($part in $linkTarget.Split('/')) {
+            if ($part -eq '' -or $part -eq '.') { continue }
+            if ($part -eq '..') {
+                $depth--
+                if ($depth -lt 0) { throw "archive contains escaping link target: $linkTarget" }
+            }
+            else { $depth++ }
+        }
+    }
+
+    # Only flags accepted by BOTH GNU tar (Linux) and macOS bsdtar are used -
+    # --no-overwrite-dir is GNU-only and aborts bsdtar; the fresh extract dir has
+    # no pre-existing dirs for it to protect anyway.
+    & tar xf $Path -C $Destination --no-same-owner --no-same-permissions 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "failed to extract $Path - ensure tar and xz-utils are installed"
+    }
+}
+
 # --- OCX_HOME validation ---
 
 # Defence-in-depth: $OcxHome is embedded literally into the env shim + profile
@@ -283,6 +412,10 @@ function Assert-SafeOcxHome {
     if ($Path -match '\.\.[\\/]' -or $Path -match '[\\/]\.\.$' -or $Path -eq '..') {
         Err "OCX_HOME must not contain '..' components: $Path" 2
     }
+    # Parity note: install.sh additionally rejects & | < > and backslash. We omit
+    # backslash deliberately (it is the Windows path separator) and accept the
+    # narrower class here - OCX_HOME is embedded into PowerShell, not POSIX-sh,
+    # profile blocks by `ocx self setup`.
     if ($Path -match '["`$;\r\n\[\]()]') {
         Err "OCX_HOME contains characters unsafe for shell embedding: $Path" 2
     }
@@ -363,8 +496,12 @@ function Install-PlaceBinary {
     param([string]$Bin, [string]$OcxHome)
     $binDir = Join-Path $OcxHome $OcxBinSubPath
     New-Item -ItemType Directory -Path $binDir -Force | Out-Null
-    Copy-Item -Path $Bin -Destination (Join-Path $binDir 'ocx.exe') -Force
-    Say "Installed to $binDir\ocx.exe"
+    $dest = Join-Path $binDir $OcxBinName
+    Copy-Item -Path $Bin -Destination $dest -Force
+    if (-not $script:OcxIsWindows) {
+        try { & chmod +x $dest 2>$null } catch { Write-Verbose "chmod +x failed: $($_.Exception.Message)" }
+    }
+    Say "Installed to $dest"
 }
 
 # --- Test-mode install (internal, test-only) ---
@@ -380,8 +517,26 @@ function Install-LocalTestBinary {
     $binDir = Join-Path $OcxHome $OcxBinSubPath
     Say 'Test mode: installing local binary as the candidate (no download).'
     New-Item -ItemType Directory -Path $binDir -Force | Out-Null
-    Copy-Item -Path $Source -Destination (Join-Path $binDir 'ocx.exe') -Force
-    Say "Installed to $binDir\ocx.exe"
+    $dest = Join-Path $binDir $OcxBinName
+    Copy-Item -Path $Source -Destination $dest -Force
+    if (-not $script:OcxIsWindows) {
+        try { & chmod +x $dest 2>$null } catch { Write-Verbose "chmod +x failed: $($_.Exception.Message)" }
+    }
+    Say "Installed to $dest"
+}
+
+# --- Default OCX_HOME (cross-platform) ---
+
+# Resolve the default OCX_HOME: $OCX_HOME if set, else <user-profile>/.ocx.
+# GetFolderPath(UserProfile) returns %USERPROFILE% on Windows and $HOME on Unix
+# (works on .NET Framework AND .NET Core) - one expression, no per-OS branch.
+function Get-DefaultOcxHome {
+    if ($env:OCX_HOME) { return $env:OCX_HOME }
+    $base = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
+    if ([string]::IsNullOrEmpty($base)) {
+        $base = if ($script:OcxIsWindows) { $env:USERPROFILE } else { $env:HOME }
+    }
+    return Join-Path $base '.ocx'
 }
 
 # --- Success message ---
@@ -389,7 +544,7 @@ function Install-LocalTestBinary {
 function Print-Success {
     param([string]$InstalledVersion)
     if ($OcxInstallQuiet) { return }
-    $ocxHome = if ($env:OCX_HOME) { $env:OCX_HOME } else { Join-Path $env:USERPROFILE '.ocx' }
+    $ocxHome = Get-DefaultOcxHome
     [Console]::Error.WriteLine('')
     [Console]::Error.WriteLine("  ocx $InstalledVersion installed successfully!")
     [Console]::Error.WriteLine(@"
@@ -436,7 +591,7 @@ function Main {
         if ($callerVersion -and $callerVersion.Value) { $requestedVersion = $callerVersion.Value }
     }
 
-    $ocxHome = if ($env:OCX_HOME) { $env:OCX_HOME } else { Join-Path $env:USERPROFILE '.ocx' }
+    $ocxHome = Get-DefaultOcxHome
     Assert-SafeOcxHome -Path $ocxHome
     $installBinDir = Join-Path $ocxHome $OcxBinSubPath
 
@@ -448,7 +603,7 @@ function Main {
     # --- Internal test-mode hatch (UNDOCUMENTED) ---
     if ($env:__OCX_TESTING_INSTALL_BINARY) {
         Install-LocalTestBinary -Source $env:__OCX_TESTING_INSTALL_BINARY -OcxHome $ocxHome
-        $candBin = Join-Path $installBinDir 'ocx.exe'
+        $candBin = Join-Path $installBinDir $OcxBinName
         if ($OcxInstallNoSetup) {
             Say 'Skipping ocx self setup (OCX_INSTALL_NO_SETUP).'
         }
@@ -482,12 +637,12 @@ function Main {
 
     # Idempotent fast-path.
     $oldVersion = ''
-    $existingBin = Join-Path $installBinDir 'ocx.exe'
+    $existingBin = Join-Path $installBinDir $OcxBinName
     if (Test-Path $existingBin) {
         try { $oldVersion = & $existingBin version 2>$null } catch { Write-Verbose "version probe failed: $($_.Exception.Message)" }
     }
     if ($oldVersion -and ($oldVersion -eq $requestedVersion) -and -not $OcxInstallForce) {
-        Say "ocx v$requestedVersion already installed at $installBinDir\ocx.exe (set OCX_INSTALL_FORCE=1 to reinstall)"
+        Say "ocx v$requestedVersion already installed at $existingBin (set OCX_INSTALL_FORCE=1 to reinstall)"
         if ($OcxInstallPrintPath) { Write-Output $installBinDir }
         Export-GithubPath -OcxHome $ocxHome
         return
@@ -527,33 +682,48 @@ function Main {
         Verify-Checksum -FilePath $archivePath -Expected $sha
 
         $extractDir = Join-Path $tmpDir 'extracted'
-        try { Expand-ZipSafely -Path $archivePath -Destination $extractDir }
+        try {
+            if ($filename -match '\.zip$') {
+                Expand-ZipSafely -Path $archivePath -Destination $extractDir
+            }
+            elseif ($filename -match '\.tar(\.[A-Za-z0-9]+)?$') {
+                Expand-TarSafely -Path $archivePath -Destination $extractDir
+            }
+            else {
+                throw "unsupported archive format: $filename"
+            }
+        }
         catch { Err "Failed to extract $filename - $($_.Exception.Message)" 5 }
 
         $bin = $null
         $candidatePaths = @(
-            (Join-Path $extractDir "ocx-$target\ocx.exe"),
-            (Join-Path $extractDir 'ocx.exe')
+            (Join-Path (Join-Path $extractDir "ocx-$target") $OcxBinName),
+            (Join-Path $extractDir $OcxBinName)
         )
         foreach ($candidate in $candidatePaths) {
             if (Test-Path $candidate) { $bin = $candidate; break }
         }
-        if (-not $bin) { Err 'Could not find ocx.exe binary in archive.' 5 }
+        if (-not $bin) { Err "Could not find $OcxBinName binary in archive." 5 }
 
-        # The installer targets Windows, but on a non-Windows host (CI / tests) the
-        # zip-extracted binary lacks the executable bit - set it before the binary
-        # is smoke-tested or handed off to `self setup`. No-op on Windows.
-        if ($env:OS -ne 'Windows_NT') { & chmod +x $bin 2>$null }
+        # On a non-Windows host the extracted binary lacks the executable bit -
+        # set it before the binary is smoke-tested or handed off to `self setup`.
+        if (-not $script:OcxIsWindows) {
+            try { & chmod +x $bin 2>$null } catch { Write-Verbose "chmod +x failed: $($_.Exception.Message)" }
+        }
 
         if (-not $OcxInstallNoSmoketest) {
             try { $null = & $bin version 2>$null }
             catch { Warn 'Binary failed to execute - it may be blocked by antivirus or execution policy.' }
         }
 
-        # PATH shadowing warning (OrdinalIgnoreCase; trailing-sep anchored).
+        # PATH shadowing warning (trailing-sep anchored; case-insensitive on
+        # Windows, case-sensitive on Unix). Use the native separator so the
+        # prefix actually matches the resolved path on both OSes.
         $existingOcx = Get-Command ocx -ErrorAction SilentlyContinue
-        $ocxHomePrefix = $ocxHome.TrimEnd('\') + '\'
-        if ($existingOcx -and -not $existingOcx.Source.StartsWith($ocxHomePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $sep = [System.IO.Path]::DirectorySeparatorChar
+        $ocxHomePrefix = $ocxHome.TrimEnd('\', '/') + $sep
+        $cmp = if ($script:OcxIsWindows) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+        if ($existingOcx -and -not $existingOcx.Source.StartsWith($ocxHomePrefix, $cmp)) {
             Warn "An existing ocx was found at $($existingOcx.Source)"
             Warn 'The new install may be shadowed - check your PATH order.'
         }

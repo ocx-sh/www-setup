@@ -48,9 +48,11 @@ curl -fsSL https://setup.ocx.sh/elvish | elvish
 ```
 
 ```powershell
-# PowerShell (Windows):
+# PowerShell (Windows PowerShell 5.1+ on Windows; PowerShell 7+ on Linux / macOS):
 irm https://setup.ocx.sh/pwsh | iex
 ```
+
+On Linux/macOS the PowerShell installer needs `tar` + `xz-utils` on `PATH` for archive extraction (already present on most systems); for a shell-native install there, the POSIX `https://setup.ocx.sh/sh` one-liner is also available.
 
 ### Pinning a version
 

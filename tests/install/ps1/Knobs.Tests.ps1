@@ -6,14 +6,16 @@
 # dist.json (OCX_INSTALL_DIST_URL). The manifest url is a dummy; OCX_INSTALL_MIRROR_URL
 # redirects the download to the fixture server.
 #
-# Cross-platform gating: the fixture stub is a POSIX `#!/bin/sh` script named
-# ocx.exe, so it only EXECUTES on a POSIX host — never on Windows (it is not a
-# PE). Scenarios that execute the stub's `self setup` hand-off therefore run on
-# ubuntu-pwsh and self-skip on Windows. The skip keys off `$env:OS -eq
-# 'Windows_NT'` rather than `$IsWindows` because $IsWindows is undefined under
-# Windows PowerShell 5.1 (it would fail to skip there). A real native ocx is
-# exercised by the workflow_dispatch real-release jobs. Scenarios that only check
-# exit codes / file placement run everywhere.
+# Cross-platform gating: install.ps1 is cross-platform, but the fixture stub is a
+# POSIX `#!/bin/sh` script, so it only EXECUTES on a POSIX host (ubuntu + macos) —
+# never on Windows (it is not a PE). Scenarios that execute the stub (the `self
+# setup` hand-off, the idempotent version probe) therefore run on the POSIX hosts
+# and self-skip on Windows. The skip keys off `$env:OS -eq 'Windows_NT'` rather
+# than `$IsWindows` because $IsWindows is undefined under Windows PowerShell 5.1
+# (it would fail to skip there). Windows execution coverage lives in the 5.1 smoke
+# + the workflow_dispatch real-release jobs. Scenarios that only check exit codes /
+# file placement run everywhere; the bin name is ocx.exe on Windows / ocx on Unix
+# (Get-FixtureBinName).
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot 'Fixture.psm1') -Force
@@ -67,7 +69,7 @@ Describe 'install.ps1 env knobs' {
         $env:OCX_INSTALL_NO_SETUP = '1'
         & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
-        $bin = Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) 'ocx.exe'
+        $bin = Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) (Get-FixtureBinName)
         Test-Path $bin | Should -BeTrue
         (Test-Path $ArgvLog) | Should -BeFalse
         Test-Path (Join-Path $OcxHome 'env.ps1') | Should -BeFalse
@@ -112,7 +114,7 @@ Describe 'install.ps1 env knobs' {
         $LASTEXITCODE | Should -Be 3
     }
 
-    It 'OCX_INSTALL_FORCE reinstalls when same version present' -Skip:(-not $IsWindows) {
+    It 'OCX_INSTALL_FORCE reinstalls when same version present' -Skip:($env:OS -eq 'Windows_NT') {
         $env:OCX_INSTALL_NO_SETUP = '1'
         & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
@@ -127,7 +129,7 @@ Describe 'install.ps1 env knobs' {
         $env:OCX_INSTALL_NO_SETUP = '1'
         & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
-        Test-Path (Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) 'ocx.exe') | Should -BeTrue
+        Test-Path (Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) (Get-FixtureBinName)) | Should -BeTrue
     }
 
     It '__OCX_TESTING_INSTALL_BINARY records --offline self setup' -Skip:($env:OS -eq 'Windows_NT') {
@@ -137,7 +139,7 @@ Describe 'install.ps1 env knobs' {
             $env:__OCX_TESTING_INSTALL_BINARY = $stub
             & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
             $LASTEXITCODE | Should -Be 0
-            Test-Path (Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) 'ocx.exe') | Should -BeTrue
+            Test-Path (Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) (Get-FixtureBinName)) | Should -BeTrue
             (Get-Content $ArgvLog) | Should -Contain '--offline self setup --no-modify-path'
         }
         finally {
