@@ -30,7 +30,11 @@ server_start() {
     local _combined
     _combined="$(_server_helper_dir)/localhost-combined.pem"
     (
-        cd "$_root" || exit 1
+        cd "$_root" || { echo "server_start: cd '$_root' failed"; exit 1; }
+        # Pre-exec marker: proves the logfile redirect works and records the
+        # interpreter + cert state, so an empty log vs. a python traceback is
+        # distinguishable when this leg fails (notably on macOS).
+        echo "server_start: python3=$(command -v python3) ver=$(python3 -V 2>&1) cert=${_combined} exists=$([ -f "$_combined" ] && echo yes || echo no)"
         OCX_FIXTURE_CERT="$_combined"
         export OCX_FIXTURE_CERT
         exec python3 -u -c '
