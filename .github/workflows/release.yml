@@ -87,7 +87,7 @@ jobs:
           # (public keys are not secret) so it can be matched against the deploy
           # user's authorized_keys on the server.
           if ! ssh-keygen -y -f ~/.ssh/id_ed25519 > ~/.ssh/id_ed25519.pub; then
-            echo "DEPLOY_SSH_KEY is not a valid OpenSSH private key (check for escaped \\n vs real newlines)" >&2
+            echo "DEPLOY_SSH_KEY is not a valid OpenSSH private key (the secret must hold real newlines, not one collapsed line)" >&2
             exit 1
           fi
           echo "Deploy public key (add to the deploy user's ~/.ssh/authorized_keys):" >&2
