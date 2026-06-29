@@ -47,12 +47,22 @@ httpd.serve_forever()
     ) >"$_logfile" 2>&1 <&- 3>&- &
     local _pid=$!
     local _port=""
-    for _ in $(seq 1 50); do
+    for _ in $(seq 1 100); do
         _port=$(grep -oE 'port [0-9]+' "$_logfile" 2>/dev/null | head -1 | awk '{print $2}')
         [ -n "$_port" ] && break
         sleep 0.1
     done
     [ -z "$_port" ] && {
+        # Surface WHY the server never reported a port (python missing, ssl/cert
+        # load failure, …) instead of a bare exit 1 from setup_file. Goes to fd 2
+        # so bats captures it in the failing test's diagnostic block.
+        {
+            echo "server_start: HTTPS fixture server did not report a port within 10s"
+            echo "server_start: python3=$(command -v python3 || echo MISSING)"
+            echo "server_start: --- server log ($_logfile) ---"
+            cat "$_logfile" 2>/dev/null || echo "(no log)"
+            echo "server_start: --- end server log ---"
+        } >&2
         kill "$_pid" 2>/dev/null
         return 1
     }
