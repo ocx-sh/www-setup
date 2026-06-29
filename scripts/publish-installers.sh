@@ -89,16 +89,11 @@ else
     POINTER_DIR="latest"
 fi
 
-# Create the remote dirs up front so rsync's per-file transfers land cleanly.
-# Done with `ssh mkdir -p` rather than rsync --mkpath to avoid depending on a
-# recent rsync on the receiving host. Skipped under DRY_RUN.
-REMOTE_MKDIR="mkdir -p archive/${VERSION} ${POINTER_DIR}"
-if [ "$DRY_RUN" = "1" ]; then
-    echo "publish-installers: [dry-run] would ssh ${SETUP_OCX_HOST} '${REMOTE_MKDIR}'"
-else
-    # shellcheck disable=SC2086
-    $SSH_CMD "$SETUP_OCX_HOST" "$REMOTE_MKDIR"
-fi
+# The remote dirs (archive/<VERSION>/ and the channel pointer) are created by
+# rsync itself via --mkpath. We deliberately do NOT `ssh mkdir` first: the
+# deploy key is locked to a forced rsync command (rrsync ...,restrict), so an
+# arbitrary remote shell command is rejected. --mkpath needs rsync >= 3.2.3 on
+# both ends (GitHub runners and the host both ship 3.2.7).
 
 # Upload each installer: pinned immutable copy under archive/<VERSION>/ + the
 # channel pointer. The path-echo before each transfer makes `task publish:dry-run`
@@ -109,12 +104,12 @@ for f in $INSTALLER_FILES; do
 
     # Pinned (immutable, append-only) — always, regardless of channel.
     echo "publish-installers: -> archive/${VERSION}/${f} (pinned)"
-    run_rsync --ignore-existing -e "$SSH_CMD" \
+    run_rsync --mkpath --ignore-existing -e "$SSH_CMD" \
         "$src" "${SETUP_OCX_HOST}:archive/${VERSION}/${f}"
 
     # Channel pointer (mutable, no --delete).
     echo "publish-installers: -> ${POINTER_DIR}/${f} (pointer)"
-    run_rsync -e "$SSH_CMD" \
+    run_rsync --mkpath -e "$SSH_CMD" \
         "$src" "${SETUP_OCX_HOST}:${POINTER_DIR}/${f}"
 done
 

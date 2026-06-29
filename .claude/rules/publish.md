@@ -72,7 +72,7 @@ Never publish a file under a path that nginx will reroute — it just confuses c
 - **Always** publish the pinned immutable copies: `archive/<VERSION>/install.<ext>` (all five).
 - **stable** → also overwrite the `latest/install.<ext>` pointers.
 - **next** → overwrite the `next/install.<ext>` pointers; do **not** touch `latest/`.
-- The remote dirs (`archive/<VERSION>` + the pointer dir) are created up front via `ssh mkdir -p` — no rsync `--mkpath` host-version dependency.
+- The remote dirs (`archive/<VERSION>` + the pointer dir) are created by rsync's `--mkpath` (rsync ≥ 3.2.3 on both ends). We do **not** `ssh mkdir` first: the deploy key is locked to a forced rsync command (`rrsync …,restrict`), which rejects arbitrary remote shell commands.
 - Every installer release also refreshes `dist.json` via `scripts/publish-dist.sh` (which calls `scripts/gen-dist.sh` against the `ocx-sh/ocx` Releases API). The manifest is otherwise kept current by `.github/workflows/update-dist.yml` (dispatch + hourly cron + manual), independently of installer releases.
 
 ## rsync flags (see `scripts/publish-installers.sh`)
