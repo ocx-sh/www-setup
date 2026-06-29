@@ -34,6 +34,10 @@ repo = "setup.ocx.sh"
 
 [git]
 conventional_commits = true
+# Prerelease tags (vX.Y.Z-rc.N, …) are a publish-channel routing artifact, not a
+# changelog boundary. Ignore them so their commits roll into the next stable
+# release section instead of fragmenting the changelog / emptying stable notes.
+ignore_tags = ".*-.*"
 filter_unconventional = true
 split_commits = false
 protect_breaking_commits = false
