@@ -19,6 +19,14 @@ permissions:
   contents: read
 
 jobs:
+  # Classify the change so per-commit jobs skip when their installer surface is
+  # untouched (e.g. install.ps1-only -> Pester only; docs/ci -> nothing heavy).
+  # Single source of truth: _changes.yml. On dispatch/schedule the filter reports
+  # no change, so these per-commit jobs skip and the nightly real-release +
+  # activation jobs (gated on the event, below) carry the run.
+  changes:
+    uses: ./.github/workflows/_changes.yml
+
   # Linux: the nu/fish/elvish interpreters are bootstrapped from ocx.toml by the
   # setup-ocx action (installs ocx + `ocx pull`); the suite runs under `ocx run
   # nushell fish elvish` so the per-shell suites EXECUTE rather than self-skip on
@@ -26,6 +34,8 @@ jobs:
   bats-linux:
     name: Bats (ubuntu-latest)
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.bats == 'true'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -44,6 +54,8 @@ jobs:
   bats-macos:
     name: Bats (macos-latest)
     runs-on: macos-latest
+    needs: changes
+    if: needs.changes.outputs.bats == 'true'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -68,6 +80,8 @@ jobs:
   smoke-windows-nu-elvish:
     name: ${{ matrix.label }} smoke (windows-latest)
     runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.nu == 'true' || needs.changes.outputs.elvish == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -116,6 +130,8 @@ jobs:
   pester:
     name: Pester (${{ matrix.os }} / pwsh)
     runs-on: ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.ps1 == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -145,6 +161,8 @@ jobs:
   smoke-windows-51:
     name: 5.1 smoke (windows-latest / powershell)
     runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.ps1 == 'true'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: 5.1 smoke install (powershell.exe)

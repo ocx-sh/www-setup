@@ -1,0 +1,89 @@
+name: changes
+
+# Reusable path classifier. Callers (verify.yml + test-installers.yml) skip a
+# shell's lint/tests on a push/PR when neither its installer NOR any SHARED file
+# changed. This is the SINGLE SOURCE OF TRUTH for the change->surface map — do not
+# duplicate the filter in the callers.
+#
+# SHARED paths (workflows, test helpers, the sh-contract *.bats suites, pipeline
+# scripts, the toolchain lock, vendored bats, taskfiles) appear in EVERY filter,
+# so any shared change lights up every output and the full matrix runs. The
+# five-way installer parity rule (.claude/rules/installers.md) means real
+# installer changes usually touch all five at once and run everything anyway; the
+# wins here are docs/ci/chore commits (skip all heavy jobs) and install.ps1-only
+# changes (pwsh-only).
+#
+# Note: on workflow_dispatch / schedule, dorny/paths-filter diffs against the
+# default-branch HEAD, so a manual/cron run reports "no change" and the per-commit
+# jobs skip — the nightly real-release/activation jobs run via their own event
+# gate, not these outputs.
+
+on:
+  workflow_call:
+    outputs:
+      sh:
+        description: 'src/install.sh or a shared path changed'
+        value: ${{ jobs.filter.outputs.sh }}
+      ps1:
+        description: 'src/install.ps1 (or its Pester suite) or a shared path changed'
+        value: ${{ jobs.filter.outputs.ps1 }}
+      nu:
+        description: 'src/install.nu (or its bats suite) or a shared path changed'
+        value: ${{ jobs.filter.outputs.nu }}
+      fish:
+        description: 'src/install.fish (or its bats suite) or a shared path changed'
+        value: ${{ jobs.filter.outputs.fish }}
+      elvish:
+        description: 'src/install.elv (or its bats suite) or a shared path changed'
+        value: ${{ jobs.filter.outputs.elvish }}
+      bats:
+        description: 'any bats-covered shell (sh/nu/fish/elvish) or a shared path changed'
+        value: ${{ jobs.filter.outputs.bats }}
+
+permissions:
+  contents: read
+
+jobs:
+  filter:
+    runs-on: ubuntu-latest
+    outputs:
+      sh: ${{ steps.f.outputs.sh }}
+      ps1: ${{ steps.f.outputs.ps1 }}
+      nu: ${{ steps.f.outputs.nu }}
+      fish: ${{ steps.f.outputs.fish }}
+      elvish: ${{ steps.f.outputs.elvish }}
+      bats: ${{ steps.f.outputs.sh == 'true' || steps.f.outputs.nu == 'true' || steps.f.outputs.fish == 'true' || steps.f.outputs.elvish == 'true' }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: f
+        with:
+          filters: |
+            shared: &shared
+              - '.github/workflows/**'
+              - 'tests/install/helpers/**'
+              - 'tests/install/*.bats'
+              - 'scripts/**'
+              - 'ocx.toml'
+              - 'ocx.lock'
+              - 'external/**'
+              - 'taskfiles/**'
+            sh:
+              - *shared
+              - 'src/install.sh'
+            ps1:
+              - *shared
+              - 'src/install.ps1'
+              - 'tests/install/ps1/**'
+            nu:
+              - *shared
+              - 'src/install.nu'
+              - 'tests/install/nu/**'
+            fish:
+              - *shared
+              - 'src/install.fish'
+              - 'tests/install/fish/**'
+            elvish:
+              - *shared
+              - 'src/install.elv'
+              - 'tests/install/elvish/**'

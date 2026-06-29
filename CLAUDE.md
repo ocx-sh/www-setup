@@ -36,7 +36,7 @@ Each installer is a **thin bootstrap**: detect platform → resolve the release 
 | `tests/install/{nu,fish,elvish}/*.bats` | Per-shell installer suites (gate on shell presence) |
 | `tests/install/ps1/*.Tests.ps1` | Pester equivalents (ps1) |
 | `tests/docker/` | Distro × arch × installer integration matrix harness |
-| `.github/workflows/` | verify, test-installers, test-docker-matrix, release, update-dist (`dist.json` rebuild on dispatch + hourly cron + manual) |
+| `.github/workflows/` | verify, test-installers, test-docker-matrix, verify-distros, release, update-dist (`dist.json` rebuild on dispatch + hourly cron + manual), `_changes.yml` (reusable path-filter: verify + test-installers skip a shell's lint/tests when neither its `src/install.*` nor a shared path changed) |
 
 ## Commands
 
