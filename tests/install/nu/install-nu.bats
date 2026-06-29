@@ -62,7 +62,7 @@ setup() {
     OCX_INSTALL_VERSION=0.0.0 OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 \
         run --separate-stderr nu "$INSTALL_NU"
     [ "$status" -eq 0 ]
-    [ "${lines[-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+    [ "${lines[${#lines[@]}-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
 }
 
 @test "nu: stdout silent on success without PRINT_PATH" {

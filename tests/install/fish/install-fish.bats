@@ -59,7 +59,7 @@ setup() {
 @test "fish: OCX_INSTALL_PRINT_PATH emits bin dir as final stdout line" {
     OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 run --separate-stderr fish "$INSTALL_FISH" --version 0.0.0
     [ "$status" -eq 0 ]
-    [ "${lines[-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+    [ "${lines[${#lines[@]}-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
 }
 
 @test "fish: stdout silent on success without PRINT_PATH" {

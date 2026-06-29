@@ -43,7 +43,7 @@ setup() {
     # the EXTRACTION path is the one that fails.
     printf 'not a real xz archive\n' >"$_t/releases/download/v0.0.0/${_file}"
     local _sum
-    _sum=$(sha256sum "$_t/releases/download/v0.0.0/${_file}" | awk '{print $1}')
+    _sum=$(server_sha256 "$_t/releases/download/v0.0.0/${_file}")
     server_write_dist "$_t" "$FIXTURE_TARGET" "$_sum" "$_file"
     local _info _pid _port
     _info=$(server_start "$_t" "${BATS_TEST_TMPDIR}/e.log")
@@ -65,7 +65,7 @@ setup() {
     local _file="ocx-${FIXTURE_TARGET}.tar.xz"
     (cd "$_empty" && tar cJf "$_t/releases/download/v0.0.0/${_file}" "ocx-${FIXTURE_TARGET}")
     local _sum
-    _sum=$(sha256sum "$_t/releases/download/v0.0.0/${_file}" | awk '{print $1}')
+    _sum=$(server_sha256 "$_t/releases/download/v0.0.0/${_file}")
     server_write_dist "$_t" "$FIXTURE_TARGET" "$_sum" "$_file"
     local _info _pid _port
     _info=$(server_start "$_t" "${BATS_TEST_TMPDIR}/m.log")
@@ -99,7 +99,7 @@ STUB
     local _file="ocx-${FIXTURE_TARGET}.tar.xz"
     (cd "${BATS_TEST_TMPDIR}/build-bsfail" && tar cJf "$_bs/releases/download/v0.0.0/${_file}" "ocx-${FIXTURE_TARGET}")
     local _sum
-    _sum=$(sha256sum "$_bs/releases/download/v0.0.0/${_file}" | awk '{print $1}')
+    _sum=$(server_sha256 "$_bs/releases/download/v0.0.0/${_file}")
     server_write_dist "$_bs" "$FIXTURE_TARGET" "$_sum" "$_file"
     local _info _pid _port
     _info=$(server_start "$_bs" "${BATS_TEST_TMPDIR}/bs.log")

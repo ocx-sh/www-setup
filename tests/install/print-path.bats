@@ -54,7 +54,7 @@ setup() {
 @test "OCX_INSTALL_PRINT_PATH=1 prints the bin dir as the final stdout line" {
     OCX_INSTALL_PRINT_PATH=1 run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
-    [ "${lines[-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+    [ "${lines[${#lines[@]}-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
 }
 
 @test "stderr carries the informational banner even with PRINT_PATH set" {
@@ -84,7 +84,7 @@ setup() {
     __OCX_TESTING_INSTALL_BINARY="$_localbin" OCX_INSTALL_PRINT_PATH=1 \
         run --separate-stderr sh "$INSTALL_SH"
     [ "$status" -eq 0 ]
-    [ "${lines[-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+    [ "${lines[${#lines[@]}-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
 }
 
 @test "__OCX_TESTING_INSTALL_BINARY mode keeps stdout silent without PRINT_PATH" {

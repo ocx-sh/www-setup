@@ -89,6 +89,16 @@ server_detect_target() {
     esac
 }
 
+# Portable sha256 of a file: coreutils sha256sum (Linux) or BSD/macOS shasum.
+# Echoes the bare hex digest.
+server_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
 # Emit the body of a fixture `ocx` stub binary that:
 #   * answers `version` with 0.0.0 and `about` with a plausible banner,
 #   * answers `self setup [...]` and `--offline self setup [...]` by recording
@@ -206,12 +216,7 @@ server_build_fixture() {
     fi
 
     local _sum
-    # Portable sha256: coreutils sha256sum (Linux) or BSD/macOS shasum.
-    if command -v sha256sum >/dev/null 2>&1; then
-        _sum=$(sha256sum "$_archive" | awk '{print $1}')
-    else
-        _sum=$(shasum -a 256 "$_archive" | awk '{print $1}')
-    fi
+    _sum=$(server_sha256 "$_archive")
 
     server_write_dist "$_srv" "$_target" "$_sum" "$_file"
 

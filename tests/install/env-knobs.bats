@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # Bats tests for src/install.sh env-var knobs and the thin `ocx self setup`
-# hand-off. Requires: bats-core >= 1.5, python3, tar, xz, sha256sum.
+# hand-off. Requires: bats-core >= 1.5, python3, tar, xz, sha256sum or shasum.
 
 bats_require_minimum_version 1.5.0
 
@@ -78,7 +78,7 @@ setup() {
 @test "OCX_INSTALL_PRINT_PATH=1 emits bin dir as final stdout line" {
     OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
-    [ "${lines[-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+    [ "${lines[${#lines[@]}-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
 }
 
 @test "OCX_INSTALL_QUIET=1 suppresses stderr informational logs" {
@@ -161,7 +161,7 @@ setup() {
     # Second run without FORCE is idempotent (exit 0, fast-path).
     OCX_INSTALL_NO_SETUP=1 OCX_INSTALL_PRINT_PATH=1 run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
-    [ "${lines[-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+    [ "${lines[${#lines[@]}-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
     # FORCE re-runs the full install (still exits 0).
     OCX_INSTALL_NO_SETUP=1 OCX_INSTALL_FORCE=1 run sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
@@ -217,7 +217,7 @@ setup() {
         OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 \
         run --separate-stderr sh "$INSTALL_SH"
     [ "$status" -eq 0 ]
-    [ "${lines[-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+    [ "${lines[${#lines[@]}-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
     [ ! -f "$OCX_STUB_ARGV" ] || ! grep -q -- "self setup" "$OCX_STUB_ARGV"
 }
 

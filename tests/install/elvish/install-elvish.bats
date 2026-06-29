@@ -60,7 +60,7 @@ setup() {
     OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 \
         run --separate-stderr elvish "$INSTALL_ELV" --version 0.0.0
     [ "$status" -eq 0 ]
-    [ "${lines[-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+    [ "${lines[${#lines[@]}-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
 }
 
 @test "elvish: stdout silent on success without PRINT_PATH" {
