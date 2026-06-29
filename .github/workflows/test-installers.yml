@@ -81,6 +81,13 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: ocx-sh/setup-ocx@8cd2f38eed07c9b79aaed22e61f9ba6b36e967a3 # v1.2.2
+        with:
+          # Skip the action's blanket `ocx pull` (project auto-load): on Windows it
+          # would try to materialize EVERY ocx.toml binding incl. fish, which has no
+          # windows leaf (unix-only tool) → `ocx pull` exits 78. `ocx run <binding>`
+          # below materializes only the interpreter it needs (nu/elvish — both have
+          # windows leaves) on demand.
+          project: ""
       - name: Smoke (${{ matrix.label }})
         shell: pwsh
         run: |
