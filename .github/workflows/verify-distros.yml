@@ -54,5 +54,5 @@ jobs:
             sh -euc '
               sh tests/ci/setup-distro.sh "${{ matrix.distro }}"
               sh tests/ci/install-ocx.sh >/dev/null
-              ocx run nushell fish elvish -- external/bats-core/bin/bats -r tests/install/
+              ocx run -g all nushell fish elvish -- external/bats-core/bin/bats -r tests/install/
             '

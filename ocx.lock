@@ -1,9 +1,9 @@
 [metadata]
 lock_version = 2
 declaration_hash_version = 1
-declaration_hash = "sha256:9c192eae50edc6b5af65ffc8583c4a9450260b53ee64552e3f3f5039d1cff275"
+declaration_hash = "sha256:547771a5695bd31c1f16558c13f8e2f208ac02f1e9b8ca11f7edc14f23766cf1"
 generated_by = "ocx 0.3.9"
-generated_at = "2026-06-29T21:29:45Z"
+generated_at = "2026-06-29T21:46:41Z"
 
 [[tool]]
 name = "elvish"
@@ -16,17 +16,6 @@ repository = "ocx.sh/elvish"
 "linux/amd64" = "sha256:101b8250d8b06fb5fa7e7181bef6a88a5e2383b930bbdb1db56742181ae11876"
 "linux/arm64" = "sha256:10e9eb5716ed893a68fa49b18d77311d2966b83fdf452780498932e54974ec44"
 "windows/amd64" = "sha256:6b330423bfa3815c2e9f8f4fda18ffcb4bbffabd4ea0f14a872bced9fd3380ee"
-
-[[tool]]
-name = "fish"
-group = "default"
-repository = "ocx.sh/fish"
-
-[tool.platforms]
-"darwin/amd64" = "sha256:2a155ec3e714fca9a08aaba165e9ec94b97398d89956ce54491ce6b4ca8fcce1"
-"darwin/arm64" = "sha256:2a155ec3e714fca9a08aaba165e9ec94b97398d89956ce54491ce6b4ca8fcce1"
-"linux/amd64" = "sha256:5be89f6b0223f99963e8c65a01fbb2a684fb11892574b8d2580ce9c47951853d"
-"linux/arm64" = "sha256:de03c5088649adafb77c68c977304d7ade043f4af19840b0526dd34d2926d970"
 
 [[tool]]
 name = "git-cliff"
@@ -114,3 +103,14 @@ repository = "ocx.sh/go-task"
 "linux/arm64" = "sha256:78d6b8687428f5f5e2782c11295db4c813d5aab9f0cae0abc86710a2851e51f5"
 "windows/amd64" = "sha256:b3c73b637e0d1e8aaacbefb7696cd65e36016edb571b4f0e3eb919b783079ae1"
 "windows/arm64" = "sha256:d00de6d5a1ae0c8c2f3e639ef72cc5e7ee78c15dc34ee91cf77d8d84f409a365"
+
+[[tool]]
+name = "fish"
+group = "unix"
+repository = "ocx.sh/fish"
+
+[tool.platforms]
+"darwin/amd64" = "sha256:2a155ec3e714fca9a08aaba165e9ec94b97398d89956ce54491ce6b4ca8fcce1"
+"darwin/arm64" = "sha256:2a155ec3e714fca9a08aaba165e9ec94b97398d89956ce54491ce6b4ca8fcce1"
+"linux/amd64" = "sha256:5be89f6b0223f99963e8c65a01fbb2a684fb11892574b8d2580ce9c47951853d"
+"linux/arm64" = "sha256:de03c5088649adafb77c68c977304d7ade043f4af19840b0526dd34d2926d970"

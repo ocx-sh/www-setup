@@ -30,7 +30,7 @@ tasks:
     # so the per-shell suites (tests/install/{nu,fish,elvish}/) actually execute
     # instead of self-skipping on `command -v`. The POSIX (sh) suites use the
     # system shell and are unaffected by the composed env.
-    cmd: ocx run nushell fish elvish -- external/bats-core/bin/bats -r tests/install/
+    cmd: ocx run -g all nushell fish elvish -- external/bats-core/bin/bats -r tests/install/
 
   pester:
     desc: Run Pester equivalents on pwsh (bootstrapped from ocx.toml)

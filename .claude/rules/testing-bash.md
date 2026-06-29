@@ -179,8 +179,10 @@ hatch.
   context, so count-1 works; a literal `-1` does not). No `declare -A`, `mapfile`,
   or `${var,,}`/`${var^^}`. For checksums use `server_sha256`, never bare
   `sha256sum` (macOS ships `shasum`, not `sha256sum`). The macOS leg runs the
-  install suites (sh + nu + fish + elvish, via `ocx run nushell fish elvish`);
-  `dist.bats` is excluded (CI-side Linux generator).
+  install suites (sh + nu + fish + elvish, via `ocx run -g all nushell fish
+  elvish`); `dist.bats` is excluded (CI-side Linux generator). `-g all` is
+  required because fish lives in ocx.toml `[group.unix]` (no windows leaf), not
+  the default `[tools]` scope.
 
 ## When to update tests
 

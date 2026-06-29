@@ -12,7 +12,7 @@ tasks:
   verify:
     desc: Fish quality gate (fish -n via ocx.toml; fish_indent --check if present)
     cmds:
-      - ocx run fish -- fish -n src/install.fish
+      - ocx run -g all fish -- fish -n src/install.fish
       - |
         if command -v fish_indent >/dev/null 2>&1; then
           fish_indent --check src/install.fish
