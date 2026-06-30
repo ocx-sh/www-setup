@@ -208,11 +208,24 @@ jobs:
           ocx version
 
   install-ps1-windows:
-    name: install.ps1 (Windows, real release)
+    name: install.ps1 (Windows / ${{ matrix.shell }}, real release)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # powershell = Windows PowerShell 5.1 (Desktop); pwsh = PowerShell 7.
+        # 5.1's Invoke-WebRequest signals a -MaximumRedirection 0 redirect with a
+        # different (Location-less, .Response-free) exception than 7, so the real
+        # GitHub 302 -> objects.githubusercontent.com asset hop MUST run on BOTH to
+        # catch edition-specific download/redirect regressions. (A pwsh-only leg
+        # let a 5.1 strict-mode crash in the redirect path ship undetected.)
+        shell: [powershell, pwsh]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # Host shell is pwsh; the matrix selects the interpreter that actually RUNS
+      # install.ps1 (5.1 powershell.exe is on PATH on windows runners). The edition
+      # under test is the nested process, not the harness shell.
       - name: Run install.ps1
         shell: pwsh
         run: |
@@ -222,7 +235,7 @@ jobs:
             $a += "${{ inputs.release_tag }}".TrimStart('v')
           }
           $env:OCX_NO_MODIFY_PATH = "1"
-          pwsh -NoProfile -File src/install.ps1 @a
+          ${{ matrix.shell }} -NoProfile -File src/install.ps1 @a
       - name: Verify
         shell: pwsh
         run: |

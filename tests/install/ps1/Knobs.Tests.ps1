@@ -83,6 +83,20 @@ Describe 'install.ps1 env knobs' {
         ($out | Select-Object -Last 1) | Should -Be (Get-ExpectedBinDir -OcxHome $OcxHome)
     }
 
+    It 'follows a 302 redirect to the artifact (cross-edition redirect resolver)' {
+        # Drive the download through the fixture's /redirect 302 hop so
+        # Resolve-DownloadUrl is exercised - the redirect path that crashed
+        # Windows PowerShell 5.1 under Set-StrictMode (a bare .Response read on a
+        # Location-less Invoke-WebRequest exception). NO_SETUP means no stub
+        # execution is needed, so this runs on every host (incl. Windows pwsh 7).
+        $env:OCX_INSTALL_NO_SETUP = '1'
+        $env:OCX_INSTALL_MIRROR_URL = $Server.RedirectMirrorUrl
+        & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+        $LASTEXITCODE | Should -Be 0
+        $bin = Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) (Get-FixtureBinName)
+        Test-Path $bin | Should -BeTrue
+    }
+
     It 'checksum mismatch exits 4' {
         $tamperRoot = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-kn-ck-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
         $fx = New-OcxFixture -Root $tamperRoot -TamperChecksum

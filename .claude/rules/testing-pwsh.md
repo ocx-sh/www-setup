@@ -44,6 +44,23 @@ Things the harness gets right that a naive `python -m http.server` does not:
    dummy). There is **no** separate `sha256.sum` — the checksum is inline.
 3. **Separate stdout/stderr log files.** `Start-Process` on Linux pwsh refuses
    to redirect both streams to the same file; the harness always passes two.
+4. **A `/redirect/<path>` 302 route.** The server answers `/redirect/...` with a
+   302 to the same artifact under `/releases/download/...`, mirroring GitHub's
+   release-asset redirect to `objects.githubusercontent.com`. Pointing
+   `OCX_INSTALL_MIRROR_URL` at `$Server.RedirectMirrorUrl` (instead of
+   `$Server.MirrorUrl`) drives the download through a real hop so the installer's
+   `Resolve-DownloadUrl` redirect resolver is exercised (`Knobs.Tests.ps1` →
+   "follows a 302 redirect"). `Resolve-DownloadUrl` uses `[HttpWebRequest]`
+   (AllowAutoRedirect off, https re-checked per hop) precisely because
+   `Invoke-WebRequest -MaximumRedirection 0` signals a redirect with a different,
+   `.Response`-less exception on Windows PowerShell 5.1 than on 7 — under
+   `Set-StrictMode` that bare property read was itself a terminating error, so a
+   5.1 `curl|pwsh` install crashed in the redirect path. The redirect resolver
+   path is covered per-commit on pwsh 7 (the fixture test, all hosts) and on real
+   GitHub under **both** `powershell` (5.1) and `pwsh` (7) by the nightly
+   `install-ps1-windows` matrix in `test-installers.yml`. The hermetic fixture
+   test has no Bats mirror — `install.sh` delegates redirect-following to `curl`,
+   which has no equivalent strict-mode failure mode.
 
 The canonical bin dir asserted everywhere is
 `symlinks/ocx.sh/ocx/cli/current/content/bin` via `Get-ExpectedBinDir`. The

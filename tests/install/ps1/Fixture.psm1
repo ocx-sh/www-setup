@@ -250,6 +250,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return 'application/json'
         return super().guess_type(path)
 
+    # /redirect/<path> answers 302 -> http://127.0.0.1:<port>/<path>, mirroring
+    # GitHub's release-asset redirect so the installer's redirect resolver is
+    # exercised. The Location is an absolute (cross-"host") https-on-localhost URL.
+    def do_GET(self):
+        if self.path.startswith('/redirect/'):
+            target = self.path[len('/redirect'):]
+            port = self.server.server_address[1]
+            self.send_response(302)
+            self.send_header('Location', 'http://127.0.0.1:%d%s' % (port, target))
+            self.end_headers()
+            return
+        return super().do_GET()
+
 with socketserver.TCPServer(('127.0.0.1', 0), Handler) as httpd:
     print('Serving HTTP on 127.0.0.1 port %d' % httpd.server_address[1], flush=True)
     httpd.serve_forever()
@@ -274,6 +287,8 @@ with socketserver.TCPServer(('127.0.0.1', 0), Handler) as httpd:
         Port      = $port
         DistUrl   = "http://127.0.0.1:$port/dist.json"
         MirrorUrl = "http://127.0.0.1:$port/releases/download"
+        # Same artifact, reached through a 302 hop (see the /redirect route above).
+        RedirectMirrorUrl = "http://127.0.0.1:$port/redirect/releases/download"
     }
 }
 

@@ -229,47 +229,72 @@ function Assert-HttpsUrl {
     Err "refusing insecure (non-https) URL: $Url" 3
 }
 
-# Extract the redirect Location from a thrown Invoke-WebRequest error, across
-# PowerShell editions (PS 5.1 WebException vs PS 7 HttpResponseException).
-function Get-RedirectLocation {
-    param($ErrorRecord)
-    $resp = $ErrorRecord.Exception.Response
-    if ($null -eq $resp) { return $null }
-    try { $code = [int]$resp.StatusCode } catch { return $null }
-    if ($code -lt 300 -or $code -ge 400) { return $null }
-    if ($resp.PSObject.Properties.Match('Headers').Count -gt 0 -and
-        $resp.Headers.PSObject.Properties.Match('Location').Count -gt 0 -and
-        $resp.Headers.Location) {
-        return [string]$resp.Headers.Location
+# Resolve the final download URL by walking redirects with auto-redirect
+# DISABLED, re-validating https on EVERY hop, so a https->http redirect can
+# never silently downgrade the transport. We use [System.Net.HttpWebRequest]
+# rather than Invoke-WebRequest -MaximumRedirection 0 because IWR's redirect
+# signalling is not portable across PowerShell editions: PS 7 throws an
+# HttpResponseException carrying the 3xx .Response, but Windows PowerShell 5.1
+# throws a Location-less exception with no .Response member at all - under
+# Set-StrictMode that bare property read is itself a terminating error, so 5.1
+# installs crashed with "The property 'Response' cannot be found" before any
+# redirect could be followed. HttpWebRequest (AllowAutoRedirect=$false RETURNS
+# the 3xx instead of throwing) behaves identically on both editions. GitHub
+# release assets answer 302 to a signed objects.githubusercontent.com (https)
+# URL, so at least one hop is expected.
+function Resolve-DownloadUrl {
+    param([string]$Url)
+    $current = $Url
+    for ($hop = 0; $hop -lt 5; $hop++) {
+        Assert-HttpsUrl $current
+        $req = [System.Net.HttpWebRequest][System.Net.WebRequest]::Create($current)
+        $req.AllowAutoRedirect = $false
+        $req.Method = 'GET'
+        $req.UserAgent = 'ocx-install'
+        $resp = $null
+        try {
+            $resp = $req.GetResponse()
+        }
+        catch [System.Net.WebException] {
+            # 4xx/5xx surface as WebException; reuse the response to read status.
+            # A transport error (DNS/TLS) has no .Response - rethrow to the caller.
+            $resp = $_.Exception.Response
+            if ($null -eq $resp) { throw }
+        }
+        try {
+            $code = [int]$resp.StatusCode
+            if ($code -ge 300 -and $code -lt 400) {
+                $loc = $resp.Headers['Location']
+                if (-not $loc) { Err "redirect from $current carried no Location header" 3 }
+                # Resolve a possibly-relative Location against the current URL.
+                $current = [System.Uri]::new([System.Uri]$current, [string]$loc).AbsoluteUri
+                continue
+            }
+            return $current
+        }
+        finally {
+            $resp.Close()
+        }
     }
-    try { return [string]$resp.Headers['Location'] } catch { return $null }
+    Err "too many redirects resolving $Url" 3
 }
 
 function Download-File {
     param([string]$Url, [string]$Destination)
 
-    Assert-HttpsUrl $Url
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
-
-    # Follow at most ONE redirect hop manually, re-validating the scheme on the
-    # hop target. -MaximumRedirection 0 means a https->http redirect can NOT
-    # silently downgrade the transport. GitHub release assets answer 302 to a
-    # signed S3 URL, so one explicit, scheme-checked hop is required.
-    $current = $Url
-    for ($hop = 0; $hop -lt 2; $hop++) {
-        try {
-            $ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest -Uri $current -OutFile $Destination -MaximumRedirection 0 -UseBasicParsing -ErrorAction Stop
-            return $true
-        }
-        catch {
-            $next = Get-RedirectLocation $_
-            if (-not $next) { return $false }
-            Assert-HttpsUrl $next
-            $current = $next
-        }
+    try {
+        # Resolve-DownloadUrl scheme-checks every hop; a downgrade hard-exits via
+        # Err. The returned URL is the final https artifact - hand it to IWR with
+        # redirects disabled (the chain is already resolved).
+        $final = Resolve-DownloadUrl $Url
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $final -OutFile $Destination -MaximumRedirection 0 -UseBasicParsing -ErrorAction Stop
+        return $true
     }
-    return $false
+    catch {
+        return $false
+    }
 }
 
 function Download-String {
