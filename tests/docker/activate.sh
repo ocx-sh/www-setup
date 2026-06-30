@@ -158,15 +158,19 @@ case "$SHELL_UNDER_TEST" in
         ;;
     zsh)
         # Completion introspection: zsh registers completers in the $_comps
-        # associative array. Initialize the completion system (compinit -u skips
-        # the insecure-dir check, which trips in containers with world-writable
-        # dirs), then print the key for ocx if present. A non-empty key means a
-        # completer is registered for ocx.
+        # associative array. The ocx activation block (sourced from the profile by
+        # `zsh -lic`) ALREADY initializes the completion system — it runs
+        # `compinit -C` itself when `compdef` is not yet defined — and registers
+        # the ocx completer at runtime via `compdef`. We therefore do NOT run
+        # `compinit` again here: a second `compinit` rebuilds $_comps from fpath
+        # completion FILES and so WIPES the runtime `compdef` registration (the ocx
+        # completer is registered at runtime, not shipped as an fpath file),
+        # yielding a false "no completion" negative (exit 10). Just read the key
+        # after the profile has sourced.
         run_probe zsh -lic '
             p="$(command -v ocx || true)"
             echo "OCX_RESOLVED=${p}"
             if [ -n "$p" ]; then ocx about >/dev/null 2>&1 || ocx version >/dev/null 2>&1; fi
-            autoload -Uz compinit && compinit -u >/dev/null 2>&1
             c="$(print -l ${(k)_comps[ocx]} 2>/dev/null || true)"
             echo "OCX_COMPLETION=${c}"
         '
