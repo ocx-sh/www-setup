@@ -38,9 +38,17 @@ server_start() {
         OCX_FIXTURE_CERT="$_combined"
         export OCX_FIXTURE_CERT
         exec python3 -u -c '
-import http.server, ssl, os, sys
+import http.server, ssl, os, sys, socketserver
 cert = os.environ["OCX_FIXTURE_CERT"]
-httpd = http.server.HTTPServer(("127.0.0.1", 0), http.server.SimpleHTTPRequestHandler)
+class _Srv(http.server.HTTPServer):
+    # Skip HTTPServer.server_bind getfqdn() reverse-DNS lookup: it blocks past
+    # the 10s startup timeout on macOS runners (no /etc/hosts fast-path), so the
+    # server never reached the port print. Bind only; no name resolution.
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = self.server_address[0]
+        self.server_port = self.server_address[1]
+httpd = _Srv(("127.0.0.1", 0), http.server.SimpleHTTPRequestHandler)
 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 ctx.load_cert_chain(cert)
 httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
