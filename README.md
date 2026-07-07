@@ -52,7 +52,7 @@ curl -fsSL https://setup.ocx.sh/elvish | elvish
 irm https://setup.ocx.sh/pwsh | iex
 ```
 
-On Linux/macOS the PowerShell installer needs `tar` + `xz-utils` on `PATH` for archive extraction (already present on most systems); for a shell-native install there, the POSIX `https://setup.ocx.sh/sh` one-liner is also available.
+On Linux/macOS the PowerShell installer needs `tar` on `PATH` for archive extraction (xz-utils only for releases older than the .tar.gz switch; both already present on most systems); for a shell-native install there, the POSIX `https://setup.ocx.sh/sh` one-liner is also available.
 
 ### Pinning a version
 

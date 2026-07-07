@@ -35,13 +35,13 @@ setup() {
     unset __OCX_TESTING_INSTALL_BINARY
 }
 
-@test "exit 5: corrupt archive (bad xz) fails to extract" {
+@test "exit 5: corrupt archive (bad gzip) fails to extract" {
     local _t="${BATS_TEST_TMPDIR}/extract"
     server_build_fixture "$_t" >/dev/null
-    local _file="ocx-${FIXTURE_TARGET}.tar.xz"
+    local _file="ocx-${FIXTURE_TARGET}.tar.gz"
     # Replace the archive with garbage; recompute the sha so checksum PASSES and
     # the EXTRACTION path is the one that fails.
-    printf 'not a real xz archive\n' >"$_t/releases/download/v0.0.0/${_file}"
+    printf 'not a real gzip archive\n' >"$_t/releases/download/v0.0.0/${_file}"
     local _sum
     _sum=$(server_sha256 "$_t/releases/download/v0.0.0/${_file}")
     server_write_dist "$_t" "$FIXTURE_TARGET" "$_sum" "$_file"
@@ -62,8 +62,8 @@ setup() {
     local _empty="${BATS_TEST_TMPDIR}/empty-bundle"
     mkdir -p "$_empty/ocx-${FIXTURE_TARGET}"
     printf 'README\n' >"$_empty/ocx-${FIXTURE_TARGET}/README.txt"
-    local _file="ocx-${FIXTURE_TARGET}.tar.xz"
-    (cd "$_empty" && tar cJf "$_t/releases/download/v0.0.0/${_file}" "ocx-${FIXTURE_TARGET}")
+    local _file="ocx-${FIXTURE_TARGET}.tar.gz"
+    (cd "$_empty" && tar czf "$_t/releases/download/v0.0.0/${_file}" "ocx-${FIXTURE_TARGET}")
     local _sum
     _sum=$(server_sha256 "$_t/releases/download/v0.0.0/${_file}")
     server_write_dist "$_t" "$FIXTURE_TARGET" "$_sum" "$_file"
@@ -96,8 +96,8 @@ case "$1" in
 esac
 STUB
     chmod +x "$_build/ocx"
-    local _file="ocx-${FIXTURE_TARGET}.tar.xz"
-    (cd "${BATS_TEST_TMPDIR}/build-bsfail" && tar cJf "$_bs/releases/download/v0.0.0/${_file}" "ocx-${FIXTURE_TARGET}")
+    local _file="ocx-${FIXTURE_TARGET}.tar.gz"
+    (cd "${BATS_TEST_TMPDIR}/build-bsfail" && tar czf "$_bs/releases/download/v0.0.0/${_file}" "ocx-${FIXTURE_TARGET}")
     local _sum
     _sum=$(server_sha256 "$_bs/releases/download/v0.0.0/${_file}")
     server_write_dist "$_bs" "$FIXTURE_TARGET" "$_sum" "$_file"

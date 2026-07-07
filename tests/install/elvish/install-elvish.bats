@@ -79,7 +79,7 @@ setup() {
     server_build_fixture "$_t" >/dev/null
     server_write_dist "$_t" "$FIXTURE_TARGET" \
         "0000000000000000000000000000000000000000000000000000000000000000" \
-        "ocx-${FIXTURE_TARGET}.tar.xz"
+        "ocx-${FIXTURE_TARGET}.tar.gz"
     local _info _pid _port
     _info=$(server_start "$_t" "${BATS_TEST_TMPDIR}/ck.log")
     _pid="${_info% *}"

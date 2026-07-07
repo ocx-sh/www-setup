@@ -229,12 +229,12 @@ server_build_fixture() {
     server_stub_body >"$_binsrc"
     chmod +x "$_binsrc"
 
-    local _file="ocx-${_target}.tar.xz"
+    local _file="ocx-${_target}.tar.gz"
     local _archive="$_srv/releases/download/v0.0.0/${_file}"
     if [ "$_layout" = "flat" ]; then
-        (cd "$_build" && tar cJf "$_archive" "ocx")
+        (cd "$_build" && tar czf "$_archive" "ocx")
     else
-        (cd "$_build" && tar cJf "$_archive" "ocx-${_target}")
+        (cd "$_build" && tar czf "$_archive" "ocx-${_target}")
     fi
 
     local _sum

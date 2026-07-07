@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # Bats tests for src/install.sh env-var knobs and the thin `ocx self setup`
-# hand-off. Requires: bats-core >= 1.5, python3, tar, xz, sha256sum or shasum.
+# hand-off. Requires: bats-core >= 1.5, python3, tar, sha256sum or shasum.
 
 bats_require_minimum_version 1.5.0
 
@@ -125,7 +125,7 @@ setup() {
     # verification rather than extraction.
     server_write_dist "$_t" "$FIXTURE_TARGET" \
         "0000000000000000000000000000000000000000000000000000000000000000" \
-        "ocx-${FIXTURE_TARGET}.tar.xz"
+        "ocx-${FIXTURE_TARGET}.tar.gz"
     local _info _pid _port
     _info=$(server_start "$_t" "${BATS_TEST_TMPDIR}/ck.log")
     _pid="${_info% *}"

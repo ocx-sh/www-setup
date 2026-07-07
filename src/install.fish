@@ -201,7 +201,7 @@ function __ocx_safe_extract --argument-names archive dest
     end
     # Only flags accepted by BOTH GNU tar and macOS bsdtar (--no-overwrite-dir is GNU-only).
     if not tar xf $archive -C $dest --no-same-owner --no-same-permissions 2>/dev/null
-        __ocx_err "failed to extract $archive — ensure tar and xz-utils are installed" 5
+        __ocx_err "failed to extract $archive — ensure tar is installed" 5
     end
 end
 

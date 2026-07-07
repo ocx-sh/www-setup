@@ -48,8 +48,11 @@ JSON
 
     # 8-target full release for 0.10.0; a single target for the others.
     mkdir -p "$CKS/v0.10.0" "$CKS/v0.9.0" "$CKS/v0.6.0-rc.1"
+    # Mixed extensions on one release: the .tar.gz rows exercise the current
+    # release format, the .tar.xz rows prove gen-dist still parses pre-switch
+    # (<= 0.4.x) assets. gen-dist's ASSET_RE accepts tar.gz|tar.xz|zip.
     cat >"$CKS/v0.10.0/sha256.sum" <<'SUM'
-1111111111111111111111111111111111111111111111111111111111111111  ocx-x86_64-unknown-linux-gnu.tar.xz
+1111111111111111111111111111111111111111111111111111111111111111  ocx-x86_64-unknown-linux-gnu.tar.gz
 2222222222222222222222222222222222222222222222222222222222222222  ocx-aarch64-unknown-linux-gnu.tar.xz
 3333333333333333333333333333333333333333333333333333333333333333  ocx-x86_64-unknown-linux-musl.tar.xz
 4444444444444444444444444444444444444444444444444444444444444444  ocx-aarch64-unknown-linux-musl.tar.xz
@@ -114,10 +117,10 @@ d = json.loads(sys.argv[1])
 row = next(r for r in d["releases"]
            if r["version"] == "0.10.0" and r["target"] == "x86_64-unknown-linux-gnu")
 assert row["sha256"] == "1" * 64, row["sha256"]
-assert row["filename"] == "ocx-x86_64-unknown-linux-gnu.tar.xz", row
+assert row["filename"] == "ocx-x86_64-unknown-linux-gnu.tar.gz", row
 assert row["tag"] == "v0.10.0", row
 assert row["url"] == ("https://github.com/ocx-sh/ocx/releases/download/"
-                      "v0.10.0/ocx-x86_64-unknown-linux-gnu.tar.xz"), row["url"]
+                      "v0.10.0/ocx-x86_64-unknown-linux-gnu.tar.gz"), row["url"]
 PY
     [ "$status" -eq 0 ]
 }

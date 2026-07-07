@@ -121,7 +121,7 @@ jobs:
 
   # PowerShell 7 (pwsh) on Windows + Linux + macOS. install.ps1 is cross-platform
   # (it resolves *-unknown-linux-{gnu,musl} / *-apple-darwin targets and the `ocx`
-  # binary on Unix), so the full download -> .tar.xz extract -> `self setup` path
+  # binary on Unix), so the full download -> .tar.gz extract -> `self setup` path
   # EXECUTES on the POSIX hosts (ubuntu + macos) against the fixture stub. The few
   # scenarios that run the stub self-skip on Windows (the shell-script stub is not
   # a PE; Windows execution is covered by the 5.1 smoke + the real-release dispatch

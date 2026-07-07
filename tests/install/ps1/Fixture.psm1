@@ -15,7 +15,7 @@
 # returns the real host target (*-pc-windows-msvc on Windows, *-unknown-linux-{gnu,musl}
 # on Linux, *-apple-darwin on macOS) and the binary is ocx.exe on Windows / ocx on
 # Unix. The fixture mirrors that: on Windows it builds a FLAT .zip with ocx.exe at
-# the root; on Unix it builds a FLAT .tar.xz with an executable `ocx` at the root
+# the root; on Unix it builds a FLAT .tar.gz with an executable `ocx` at the root
 # (so the full download -> extract -> `self setup` hand-off path EXECUTES on the
 # POSIX hosts — ubuntu + macos). The stub is a `#!/bin/sh` script; on Windows it is
 # not a PE, so suites that execute it self-skip there (see -Skip:($env:OS -eq
@@ -74,10 +74,10 @@ function Get-FixtureBinName {
     return 'ocx'
 }
 
-# Archive extension for the host platform (.zip on Windows, .tar.xz on Unix).
+# Archive extension for the host platform (.zip on Windows, .tar.gz on Unix).
 function Get-FixtureArchiveExt {
     if (Test-FixtureIsWindows) { return 'zip' }
-    return 'tar.xz'
+    return 'tar.gz'
 }
 
 function Wait-FixturePort {
@@ -142,8 +142,8 @@ function New-OcxStub {
 }
 
 # Build a FLAT release archive from the contents of $BuildDir (binary at the root)
-# into $OutFile. .zip via Compress-Archive on Windows; .tar.xz via `tar -cJf` on
-# Unix (libarchive xz). Mirrors the real cargo-dist layout per platform.
+# into $OutFile. .zip via Compress-Archive on Windows; .tar.gz via `tar -czf` on
+# Unix (gzip in-box on modern tar). Mirrors the real cargo-dist layout per platform.
 function New-OcxArchive {
     param(
         [Parameter(Mandatory)][string]$BuildDir,
@@ -154,8 +154,8 @@ function New-OcxArchive {
         return
     }
     # `-C $BuildDir .` => flat members (./ocx) extracting to the archive root.
-    & tar -cJf $OutFile -C $BuildDir .
-    if ($LASTEXITCODE -ne 0) { throw "tar -cJf failed building $OutFile (ensure tar + xz are installed)" }
+    & tar -czf $OutFile -C $BuildDir .
+    if ($LASTEXITCODE -ne 0) { throw "tar -czf failed building $OutFile (ensure tar is installed)" }
 }
 
 # Build a standalone local test binary for the __OCX_TESTING_INSTALL_BINARY hatch

@@ -371,7 +371,7 @@ safe_extract() {
 
     tar xf "$_archive" -C "$_dest" \
         --no-same-owner --no-same-permissions 2>/dev/null ||
-        err "failed to extract ${_archive} — ensure tar and xz-utils are installed" 5
+        err "failed to extract ${_archive} — ensure tar is installed" 5
 }
 
 # --- Distribution manifest (dist.json) --------------------------------------
@@ -382,7 +382,7 @@ safe_extract() {
 #    "latest_next":{"version":"0.6.0-rc.1","channel":"next"},
 #    "releases":[
 #      {"version":"0.5.0","channel":"stable","tag":"v0.5.0","target":"…",
-#       "filename":"ocx-….tar.xz","sha256":"…","url":"https://…"}, …]}
+#       "filename":"ocx-….tar.gz","sha256":"…","url":"https://…"}, …]}
 # We own the format, so a jq-free POSIX parse is safe: `grep -o '{[^{}]*}'`
 # extracts each flat leaf object (it skips the outer container brace because
 # `[^{}]` excludes both braces). No GitHub API, no token.

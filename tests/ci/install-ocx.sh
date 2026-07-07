@@ -47,6 +47,7 @@ if [ "$LIBC" = "gnu" ] && [ -n "$(find /lib -maxdepth 1 -name 'ld-musl-*.so.1' 2
 fi
 
 TARGET="${ARCH}-unknown-linux-${LIBC}"
+# .tar.xz: releases <= 0.4.x; switch to .tar.gz when OCX_VERSION is bumped past the gz switch.
 NAME="ocx-${TARGET}.tar.xz"
 BASE="https://github.com/${REPO}/releases/download/v${OCX_VERSION}"
 

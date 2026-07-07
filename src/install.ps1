@@ -8,7 +8,7 @@
 # 5.1+ and PowerShell 7+ (release target *-pc-windows-msvc, binary ocx.exe). On
 # Linux/macOS it requires PowerShell 7+ (5.1 is Windows-only) and mirrors the
 # POSIX installer's targets (*-unknown-linux-{gnu,musl}, *-apple-darwin; binary
-# ocx). The Unix download path needs `tar` + `xz-utils` for archive extraction.
+# ocx). The Unix download path needs `tar` for archive extraction.
 # For a shell-native install on Unix, src/install.sh remains available.
 #
 # This is a THIN BOOTSTRAP. It detects the architecture, resolves the release
@@ -372,9 +372,9 @@ function Expand-ZipSafely {
 }
 
 # Extract a .tar.* archive on a non-Windows host by shelling out to `tar`.
-# Managed tar is .NET 7+ only and there is no in-box xz support at any version,
-# so `tar` (which delegates to xz-utils) is the only portable path - and it is
-# already a hard dependency of install.sh. Ports install.sh's two-pass safety
+# Managed tar is .NET 7+ only, so `tar` remains the portable path for .tar.*
+# archives (gzip is in-box on modern tar; xz is only needed for pre-0.5 releases)
+# - and it is already a hard dependency of install.sh. Ports install.sh's two-pass safety
 # guards (reject absolute / '..' members; reject link targets that escape).
 function Expand-TarSafely {
     param(
@@ -388,7 +388,7 @@ function Expand-TarSafely {
     $entries = @()
     try { $entries = & tar -tf $Path 2>$null } catch { $entries = @() }
     if ($LASTEXITCODE -ne 0) {
-        throw 'failed to list archive - ensure tar and xz-utils are installed'
+        throw 'failed to list archive - ensure tar is installed'
     }
     foreach ($e in $entries) {
         if ($e -match '^/' -or $e -match '(^|/)\.\.(/|$)') {
@@ -420,7 +420,7 @@ function Expand-TarSafely {
     # no pre-existing dirs for it to protect anyway.
     & tar xf $Path -C $Destination --no-same-owner --no-same-permissions 2>$null
     if ($LASTEXITCODE -ne 0) {
-        throw "failed to extract $Path - ensure tar and xz-utils are installed"
+        throw "failed to extract $Path - ensure tar is installed"
     }
 }
 
