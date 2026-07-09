@@ -32,6 +32,9 @@ jobs:
     name: ${{ matrix.installer }} / ${{ matrix.distro }} / ${{ matrix.platform }}
     if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
+    # arm64 runs emulated under QEMU (slowest leg, ~15m real installs); 30m bounds
+    # a hung/lost runner instead of letting it ride the 6h default. See run 29003089692.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -80,6 +83,9 @@ jobs:
     name: ${{ matrix.shell }} / ${{ matrix.distro }} / ${{ matrix.platform }}
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # arm64 runs emulated under QEMU (slowest leg, ~15m real installs); 30m bounds
+    # a hung/lost runner instead of letting it ride the 6h default. See run 29003089692.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
