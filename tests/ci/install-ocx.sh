@@ -47,8 +47,6 @@ if [ "$LIBC" = "gnu" ] && [ -n "$(find /lib -maxdepth 1 -name 'ld-musl-*.so.1' 2
 fi
 
 TARGET="${ARCH}-unknown-linux-${LIBC}"
-# .tar.xz: releases <= 0.4.x; switch to .tar.gz when OCX_VERSION is bumped past the gz switch.
-NAME="ocx-${TARGET}.tar.xz"
 BASE="https://github.com/${REPO}/releases/download/v${OCX_VERSION}"
 
 # --- Fetch helper (curl or wget; HTTPS-only) ---
@@ -68,7 +66,17 @@ TMP=$(mktemp -d)
 trap "rm -rf '$TMP'" EXIT INT TERM
 
 log "fetching ocx ${OCX_VERSION} (${TARGET})"
-fetch "${BASE}/${NAME}" "${TMP}/${NAME}" || die "download failed: ${BASE}/${NAME}" 3
+# Archive format: 0.4.3+ ship .tar.gz; <= 0.4.2 shipped .tar.xz. Try gz, fall back to xz.
+EXT=""
+for _ext in tar.gz tar.xz; do
+    _name="ocx-${TARGET}.${_ext}"
+    if fetch "${BASE}/${_name}" "${TMP}/${_name}"; then
+        NAME="$_name"
+        EXT="$_ext"
+        break
+    fi
+done
+[ -n "$EXT" ] || die "download failed: ${BASE}/ocx-${TARGET}.tar.{gz,xz}" 3
 fetch "${BASE}/${NAME}.sha256" "${TMP}/${NAME}.sha256" || die "checksum download failed" 3
 
 # --- Verify against the published per-file sha256 ---
@@ -84,7 +92,10 @@ fi
 [ "$ACTUAL" = "$EXPECTED" ] || die "checksum mismatch: expected $EXPECTED got $ACTUAL" 4
 
 # --- Extract + install ---
-tar -xJf "${TMP}/${NAME}" -C "${TMP}" || die "extraction failed" 5
+case "$EXT" in
+    tar.gz) tar -xzf "${TMP}/${NAME}" -C "${TMP}" || die "extraction failed" 5 ;;
+    tar.xz) tar -xJf "${TMP}/${NAME}" -C "${TMP}" || die "extraction failed" 5 ;;
+esac
 BIN=$(find "${TMP}" -type f -name ocx | head -n1)
 [ -n "$BIN" ] || die "ocx binary not found in archive" 5
 

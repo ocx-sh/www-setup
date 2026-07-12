@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: recursive
-      - uses: ocx-sh/setup-ocx@8cd2f38eed07c9b79aaed22e61f9ba6b36e967a3 # v1.2.2
+      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
       - name: Run bats (vendored, shells via ocx.toml)
         run: ocx run -g all nushell fish elvish -- external/bats-core/bin/bats -r tests/install/
 
@@ -60,7 +60,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: recursive
-      - uses: ocx-sh/setup-ocx@8cd2f38eed07c9b79aaed22e61f9ba6b36e967a3 # v1.2.2
+      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
       - name: Run bats (vendored; nu/fish/elvish via ocx.toml)
         run: |
           ocx run -g all nushell fish elvish -- external/bats-core/bin/bats \
@@ -94,7 +94,7 @@ jobs:
             entry: elvish src/install.elv
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: ocx-sh/setup-ocx@8cd2f38eed07c9b79aaed22e61f9ba6b36e967a3 # v1.2.2
+      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
         with:
           # Pre-warm only the default [tools] group. fish lives in [group.unix]
           # (no windows leaf); pulling/resolving it on Windows exits 78. The
