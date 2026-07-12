@@ -37,7 +37,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.bats == 'true'
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: recursive
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
@@ -52,12 +52,12 @@ jobs:
   # bats-linux/verify-distros, not part of the macOS installer contract, so the
   # install suites are listed explicitly rather than `-r`.
   bats-macos:
-    name: Bats (macos-latest)
-    runs-on: macos-latest
+    name: Bats (macos-26)
+    runs-on: macos-26
     needs: changes
     if: needs.changes.outputs.bats == 'true'
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: recursive
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
@@ -93,7 +93,7 @@ jobs:
             binding: elvish
             entry: elvish src/install.elv
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
         with:
           # Pre-warm only the default [tools] group. fish lives in [group.unix]
@@ -135,9 +135,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        os: [windows-latest, ubuntu-latest, macos-26]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Install Pester (v5)
         shell: pwsh
         run: |
@@ -164,7 +164,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.ps1 == 'true'
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: 5.1 smoke install (powershell.exe)
         shell: powershell
         run: |
@@ -190,10 +190,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-26]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Run install.sh against the real release
         run: |
           args=""
@@ -222,7 +222,7 @@ jobs:
         # let a 5.1 strict-mode crash in the redirect path ship undetected.)
         shell: [powershell, pwsh]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       # Host shell is pwsh; the matrix selects the interpreter that actually RUNS
       # install.ps1 (5.1 powershell.exe is on PATH on windows runners). The edition
       # under test is the nested process, not the harness shell.
@@ -252,10 +252,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-26]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Run install.ps1
         shell: pwsh
         run: |
