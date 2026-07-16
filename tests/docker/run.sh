@@ -52,12 +52,26 @@ ARCH_SLUG=${PLATFORM##*/}
 TAG="setup-ocx-sh-test/${DISTRO}-${ARCH_SLUG}:latest"
 
 echo "==> Building $TAG ($PLATFORM, $DOCKERFILE)"
-docker buildx build \
-    --platform "$PLATFORM" \
-    --file "$DOCKERFILE" \
-    --tag "$TAG" \
-    --load \
-    "$REPO_ROOT"
+# ponytail: retry the build to ride out transient Docker Hub registry flakes
+# (e.g. 502 from auth.docker.io/token on the base-image pull). 3 tries, linear
+# backoff. Bump attempts if the registry gets flakier.
+build_attempts=3
+for attempt in $(seq 1 "$build_attempts"); do
+    if docker buildx build \
+        --platform "$PLATFORM" \
+        --file "$DOCKERFILE" \
+        --tag "$TAG" \
+        --load \
+        "$REPO_ROOT"; then
+        break
+    fi
+    if [ "$attempt" -eq "$build_attempts" ]; then
+        echo "run.sh: build failed after $build_attempts attempts" >&2
+        exit 1
+    fi
+    echo "==> Build attempt $attempt failed; retrying in $((attempt * 5))s" >&2
+    sleep "$((attempt * 5))"
+done
 
 # --- Optional binary injection (network-free deterministic path) ---
 # When OCX_TEST_BINARY points at a host file, bind-mount it read-only into the
