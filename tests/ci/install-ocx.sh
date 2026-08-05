@@ -17,7 +17,7 @@
 
 set -eu
 
-OCX_VERSION="${OCX_VERSION:-0.3.8}"
+OCX_VERSION="${OCX_VERSION:-0.5.0}"
 DEST="${1:-/usr/local/bin}"
 REPO="ocx-sh/ocx"
 

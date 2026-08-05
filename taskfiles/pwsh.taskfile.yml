@@ -1,16 +1,23 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 #
-# PowerShell quality gate. The `pwsh` interpreter is bootstrapped from ocx.toml
-# (binding `pwsh`) via `ocx run` — no system PowerShell required. PSScriptAnalyzer
-# is installed into the CurrentUser scope on demand.
+# PowerShell quality gate. On Linux the `pwsh` interpreter is bootstrapped from
+# ocx.toml (binding `pwsh` in [group.linux], hence `-g all`) via `ocx run` — no
+# system PowerShell required. The ocx.sh/powershell/powershell package ships
+# linux-glibc leaves only, so on macOS/Windows the gate falls back to a system
+# pwsh on PATH. PSScriptAnalyzer is installed into the CurrentUser scope on
+# demand.
 
 version: '3'
 
+vars:
+  # ocx-provisioned on Linux; system pwsh elsewhere (no darwin/windows leaf).
+  PWSH: '{{if eq OS "linux"}}ocx run -g all pwsh -- pwsh{{else}}pwsh{{end}}'
+
 tasks:
   verify:
-    desc: PowerShell quality gate (PSScriptAnalyzer, pwsh via ocx.toml)
+    desc: PowerShell quality gate (PSScriptAnalyzer; pwsh via ocx.toml on Linux)
     cmd: |
-      ocx run pwsh -- pwsh -NoProfile -Command '
+      {{.PWSH}} -NoProfile -Command '
         if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
           Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force -Repository PSGallery
         }
@@ -18,8 +25,8 @@ tasks:
       '
 
   format:check:
-    desc: PSScriptAnalyzer format-rule subset (pwsh via ocx.toml)
+    desc: PSScriptAnalyzer format-rule subset (pwsh via ocx.toml on Linux)
     cmd: |
-      ocx run pwsh -- pwsh -NoProfile -Command '
+      {{.PWSH}} -NoProfile -Command '
         Invoke-ScriptAnalyzer -Path src/install.ps1 -Settings PSGallery -EnableExit
       '

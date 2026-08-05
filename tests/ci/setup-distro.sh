@@ -7,7 +7,9 @@
 # ls-files`), the download/extract chain (curl, ca-certificates, tar, xz), and
 # the Bats fixture harness deps (python3 for the HTTPS server, coreutils for
 # sha256sum, findutils, grep, bash). The target SHELLS themselves (nu/fish/
-# elvish/pwsh) are NOT installed here — they come from ocx.toml via `ocx run`.
+# elvish) are NOT installed here — they come from ocx.toml via `ocx run`.
+# (pwsh is not among them: ocx.sh/powershell/powershell ships glibc-only
+# leaves, so it cannot come from ocx on Alpine/musl.)
 #
 # Usage: setup-distro.sh [alpine|fedora|ubuntu|debian]
 # Distro auto-detected from /etc/os-release when omitted.

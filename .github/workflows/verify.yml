@@ -26,6 +26,8 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+        with:
+          groups: default
       - run: ocx lock --check
 
   # ---------------------------------------------------------------------------
@@ -33,7 +35,9 @@ jobs:
   # is bootstrapped from ocx.toml by the setup-ocx action, which installs ocx and
   # runs `ocx pull` to materialize the pinned toolchain — then `task <shell>:verify`
   # invokes the gate exactly as it runs locally (`ocx run <binding> -- <tool>`).
-  # No ad-hoc apt/tarball shell installs.
+  # No ad-hoc apt/tarball shell installs. Each job scopes its pull (`groups:`)
+  # to the group(s) its gate actually names, so it does not download the whole
+  # toolchain (pwsh alone is ~140 MB, in [group.linux]).
   # ---------------------------------------------------------------------------
   shell:
     name: shellcheck + shfmt
@@ -43,6 +47,8 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+        with:
+          groups: default
       - run: task shell:verify
 
   pwsh:
@@ -53,6 +59,8 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+        with:
+          groups: default,linux
       - run: task pwsh:verify
 
   nu:
@@ -63,6 +71,8 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+        with:
+          groups: default
       - run: task nu:verify
 
   fish:
@@ -73,6 +83,8 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+        with:
+          groups: default,unix
       - run: task fish:verify
 
   elvish:
@@ -83,6 +95,8 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+        with:
+          groups: default
       - run: task elvish:verify
 
   actionlint:

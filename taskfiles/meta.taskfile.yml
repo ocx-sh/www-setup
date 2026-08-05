@@ -14,34 +14,25 @@ tasks:
       - task: lychee
 
   actionlint:
-    desc: Lint GitHub Actions workflows
-    # actionlint is not an OCX-provisionable package; CI uses the action,
-    # locally it must be on PATH.
-    preconditions:
-      - sh: command -v actionlint
-        msg: 'actionlint not on PATH; CI is authoritative'
-    cmd: actionlint -color
+    desc: Lint GitHub Actions workflows (actionlint via ocx.toml)
+    cmd: ocx run actionlint -- actionlint -color
 
   hawkeye:
-    desc: Verify license headers
-    # hawkeye is not an OCX-provisionable package; CI uses the action,
-    # locally it must be on PATH.
-    preconditions:
-      - sh: command -v hawkeye
-        msg: 'hawkeye not on PATH; CI is authoritative'
-    cmd: hawkeye check
+    desc: Verify license headers (hawkeye via ocx.toml)
+    cmd: ocx run hawkeye -- hawkeye check
 
   markdownlint:
     desc: Lint Markdown files
-    # markdownlint-cli2 is npm-only; CI uses the action. Locally fall back gracefully.
-    preconditions:
-      - sh: command -v markdownlint-cli2 || command -v markdownlint
-        msg: 'markdownlint-cli2 not installed; CI is authoritative'
+    # markdownlint-cli2 is npm-only (no OCX package); CI uses the action. A
+    # local install is optional — skip with a warning instead of failing the
+    # whole verify gate when it is absent.
     cmd: |
       if command -v markdownlint-cli2 >/dev/null 2>&1; then
         markdownlint-cli2 '**/*.md' '!CHANGELOG.md' '!node_modules' '!.git'
-      else
+      elif command -v markdownlint >/dev/null 2>&1; then
         markdownlint --ignore CHANGELOG.md --ignore node_modules '**/*.md'
+      else
+        echo "meta.taskfile: markdownlint-cli2 not on PATH — skipping (CI is authoritative)" >&2
       fi
 
   lychee:

@@ -182,7 +182,9 @@ hatch.
   install suites (sh + nu + fish + elvish, via `ocx run -g all nushell fish
   elvish`); `dist.bats` is excluded (CI-side Linux generator). `-g all` is
   required because fish lives in ocx.toml `[group.unix]` (no windows leaf), not
-  the default `[tools]` scope.
+  the default `[tools]` scope; pwsh lives in `[group.linux]` (linux-glibc
+  leaves only) — `ocx run` resolves only named tools, so neither blocks a
+  macOS run, but the setup-ocx pull is scoped `default,unix` on macOS.
 
 ## When to update tests
 

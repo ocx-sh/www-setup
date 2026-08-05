@@ -5,14 +5,14 @@ Thanks for helping land changes to the canonical OCX installer scripts.
 ## Prerequisites
 
 - [Task](https://taskfile.dev) — task runner.
-- [OCX](https://ocx.sh) — provisions the linters and test tools used here via its toolchain. Local dev wires it through [direnv](https://direnv.net): `.envrc` runs `eval "$(ocx direnv export)"` so the tools land on PATH on `cd`. After installing OCX, run `task ocx:index-update` once to populate `.ocx/index/`. (CI does not yet use this path — see the note below.)
+- [OCX](https://ocx.sh) — provisions the linters and test tools used here via its toolchain. Local dev wires it through [direnv](https://direnv.net): `.envrc` runs `eval "$(ocx direnv export)"` so the tools land on PATH on `cd`. Package resolution populates the local index on demand; no manual index step is needed.
 - **Vendored Bats** — the Bats framework lives as git submodules under `external/`. After cloning, run:
   ```sh
   git submodule update --init --recursive    # or: task test:bootstrap
   ```
   The test tasks depend on this; a fresh clone resolves Bats without a manual step.
 - `pwsh` — PowerShell 7+. Needed for Pester tests and PSScriptAnalyzer. `src/install.ps1` is **cross-platform** (Windows + Linux + macOS) but still targets a **Windows PowerShell 5.1 Desktop floor** on Windows (no ternary, `??`, `&&`/`||` chains, `$IsWindows` auto-var, `-SkipCertificateCheck`, `-SslProtocol`); on Unix it needs `tar` for extraction (xz-utils only for releases older than the .tar.gz switch). CI runs Pester on windows-latest + ubuntu-latest + macos-latest and smoke-installs under both `powershell.exe` (5.1) and `pwsh` (7) on Windows.
-- **Exotic shells** — `nu` (Nushell), `fish`, `elvish` are provisioned via the OCX toolchain (`ocx.toml`: `ocx.sh/nushell`, `ocx.sh/fish`, `ocx.sh/elvish`). Their lint gates are `nu --ide-check`, `fish -n` + `fish_indent --check`, and `elvish -compileonly`. The fish suite runs locally; nu/elvish are exercised in the docker matrix.
+- **Exotic shells** — `nu` (Nushell), `fish`, `elvish` are provisioned via the OCX toolchain (`ocx.toml`: `ocx.sh/nushell/nushell`, `ocx.sh/fish-shell/fish`, `ocx.sh/elvish/elvish`). Their lint gates are `nu --ide-check`, `fish -n` + `fish_indent --check`, and `elvish -compileonly`. The fish suite runs locally; nu/elvish are exercised in the docker matrix. On Linux, `pwsh` itself is also OCX-provisioned (`ocx.sh/powershell/powershell` in `[group.linux]` — the package ships linux-glibc leaves only, so macOS/Windows use a system pwsh).
 - `python3` — used by the Bats fixture HTTPS server.
 - `docker` with `buildx` and (for non-native arches) QEMU binfmt handlers — required for `tests/docker/`. Run `task docker:qemu:register` to install handlers on Linux hosts.
 
@@ -60,7 +60,7 @@ The docker matrix runs each installer (`sh`/`nu`/`fish`/`elvish`) via its own in
 tests/docker/run.sh fedora linux/arm64 latest "" nu
 ```
 
-> **CI toolchain note:** locally, `task` and the linters/test tools come from the OCX toolchain (via direnv). The GitHub Actions workflows do **not** yet dogfood `ocx-sh/setup-ocx` — they currently install each tool ad-hoc. Migrating CI onto `setup-ocx` + `task` is planned, not done; until then keep the pinned versions in the workflows roughly in sync with `ocx.toml` to avoid local/CI drift.
+> **CI toolchain note:** CI dogfoods the same OCX toolchain as local dev: the lint/bats workflows bootstrap it via `ocx-sh/setup-ocx` (or `tests/ci/install-ocx.sh` inside distro containers). Only the Pester jobs (runner pwsh + PSGallery) and the marketplace lint actions (actionlint/markdownlint/lychee/hawkeye) remain ad-hoc — keep those pinned versions roughly in sync with `ocx.toml` to avoid local/CI drift.
 
 ## Commit conventions
 

@@ -40,18 +40,18 @@ Each installer is a **thin bootstrap**: detect platform → resolve the release 
 
 ## Commands
 
-All tasks run through [Task](https://taskfile.dev). Locally, the dev toolchain (linters, test tools) is provisioned by the OCX toolchain via [direnv](https://direnv.net) (`.envrc` runs `eval "$(ocx direnv export)"`) plus Task. CI dogfooding through `ocx-sh/setup-ocx` is being rolled out — today the workflows still install their tools ad-hoc, so the local OCX toolchain and CI can drift.
+All tasks run through [Task](https://taskfile.dev). Locally, the dev toolchain (linters, test tools) is provisioned by the OCX toolchain via [direnv](https://direnv.net) (`.envrc` runs `eval "$(ocx direnv export)"`) plus Task. CI dogfoods the same toolchain: the lint/bats workflows bootstrap it via `ocx-sh/setup-ocx` (or `tests/ci/install-ocx.sh` inside distro containers); only the Pester jobs (runner pwsh + PSGallery) and the marketplace lint actions (actionlint/markdownlint/lychee/hawkeye) remain ad-hoc.
 
 ```bash
 task verify                                # lint (5 shells) + bats + pester
 task shell:verify                          # shellcheck + shfmt
-task pwsh:verify                           # PSScriptAnalyzer (needs pwsh on PATH)
+task pwsh:verify                           # PSScriptAnalyzer (pwsh via ocx [group.linux]; system pwsh on macOS/Windows)
 task nu:verify                             # nu --ide-check
 task fish:verify                           # fish -n + fish_indent --check
 task elvish:verify                         # elvish -compileonly
 task test:bootstrap                        # git submodule init (vendored bats)
 task test:bats                             # vendored bats: env-knob, exit-code, print-path, dist, per-shell
-task test:pester                           # Pester (needs pwsh + Pester module)
+task test:pester                           # Pester (pwsh via ocx [group.linux]; installs Pester module on demand)
 task docker:integration DISTRO=alpine PLATFORM=linux/amd64
 task docker:integration:all                # full 3×2 matrix
 task publish:dry-run                       # validates rsync paths
@@ -85,7 +85,7 @@ Pick the most specific code when calling `err()`. Reusing codes across unrelated
 
 ## Testing tiers
 
-1. **Bats** (`tests/install/*.bats` + `tests/install/{nu,fish,elvish}/`) — VENDORED bats (`external/bats-core/bin/bats`; run `git submodule update --init --recursive` first). A fixture HTTPS server (python3 + ssl) serves `dist.json` + the archive; exercises env knobs, exit-code paths, stdout/stderr discipline, the `ocx self setup` hand-off argv, and `gen-dist.sh` (`dist.bats`). Per-shell suites skip where the shell is absent. CI runs Bats on **ubuntu** (all suites incl `dist.bats`) **and macos-latest** (`bats-macos`: sh + nu + fish + elvish install suites; `dist.bats` excluded as a CI-side Linux tool). The nu/fish/elvish interpreters come from ocx.toml via `ocx run -g all …` — `-g all` because **fish lives in `[group.unix]`, not `[tools]`** (the `ocx.sh/fish` package has no windows leaf, and `ocx run`/`ocx pull` resolve the whole selected scope, so a fish in the default scope would break every Windows project op). Unix selects `-g all` (default + unix); the Windows nu/elvish smoke uses the default scope only (no fish). Suites are **bash-3.2-safe** (macOS stock `/bin/bash`): no negative array subscripts, and the fixture helper's `server_sha256` falls back to `shasum`. **Windows** nu/elvish use a fixture-free smoke (`smoke-windows-nu-elvish` in `test-installers.yml`) — full Bats needs bash, so it drives each installer through the `__OCX_TESTING_INSTALL_BINARY` hatch under an ocx-provisioned interpreter and asserts the PrintPath contract.
+1. **Bats** (`tests/install/*.bats` + `tests/install/{nu,fish,elvish}/`) — VENDORED bats (`external/bats-core/bin/bats`; run `git submodule update --init --recursive` first). A fixture HTTPS server (python3 + ssl) serves `dist.json` + the archive; exercises env knobs, exit-code paths, stdout/stderr discipline, the `ocx self setup` hand-off argv, and `gen-dist.sh` (`dist.bats`). Per-shell suites skip where the shell is absent. CI runs Bats on **ubuntu** (all suites incl `dist.bats`) **and macos-latest** (`bats-macos`: sh + nu + fish + elvish install suites; `dist.bats` excluded as a CI-side Linux tool). The nu/fish/elvish interpreters come from ocx.toml via `ocx run -g all …` — `-g all` because **fish lives in `[group.unix]`, not `[tools]`** (the `ocx.sh/fish-shell/fish` package has no windows leaf) and **pwsh lives in `[group.linux]`** (`ocx.sh/powershell/powershell` ships linux-glibc leaves only). `ocx run` resolves only the tools it names, but a whole-scope `ocx pull` resolves everything in scope — so the pull scopes are per-OS: Windows pulls `default` only, macOS pulls `default,unix`, Linux pulls everything. Suites are **bash-3.2-safe** (macOS stock `/bin/bash`): no negative array subscripts, and the fixture helper's `server_sha256` falls back to `shasum`. **Windows** nu/elvish use a fixture-free smoke (`smoke-windows-nu-elvish` in `test-installers.yml`) — full Bats needs bash, so it drives each installer through the `__OCX_TESTING_INSTALL_BINARY` hatch under an ocx-provisioned interpreter and asserts the PrintPath contract.
 2. **Pester** (`tests/install/ps1/*.Tests.ps1`) — symmetric coverage for the PowerShell installer. Runs on windows-latest **+ ubuntu-latest + macos-latest** (install.ps1 is cross-platform; the download→extract→`self setup` path executes on the POSIX hosts, self-skips on Windows where the shell-script stub is not a PE).
 3. **Docker matrix** (`tests/docker/run.sh`) — real distros × arch × **installer** (INSTALLER axis: sh/nu/fish/elvish/**pwsh**), network-free via an injected stub (the per-commit + nightly smoke); a SHELL-axis **activation matrix** (bash/dash/zsh/ksh/fish/nu/elvish) runs **nightly + dispatch** against a real network install (writes the profile/shim blocks a stub can't):
    - **Alpine** (musl) — `linux/amd64`, `linux/arm64`

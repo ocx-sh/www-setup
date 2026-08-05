@@ -6,7 +6,8 @@
 #
 # `ocx run NAME -- BINARY ...` composes the project toolchain env. NAME is the
 # binding declared in ocx.toml [tools] (ocx run takes binding NAMES, not
-# package refs). The package ref (e.g. ocx.sh/shfmt:3) lives ONLY in ocx.toml.
+# package refs). The package ref (e.g. ocx.sh/shfmt/shfmt:3) lives ONLY in
+# ocx.toml.
 #
 # Root taskfile registers tools:
 #

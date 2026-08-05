@@ -61,6 +61,11 @@ jobs:
         with:
           submodules: recursive
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+        with:
+          # Pre-warm default + unix only. pwsh lives in [group.linux]
+          # (ocx.sh/powershell/powershell ships linux-glibc leaves only); a
+          # whole-scope pull on darwin would fail on its missing leaf.
+          groups: default,unix
       - name: Run bats (vendored; nu/fish/elvish via ocx.toml)
         run: |
           ocx run -g all nushell fish elvish -- external/bats-core/bin/bats \
@@ -96,10 +101,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
         with:
-          # Pre-warm only the default [tools] group. fish lives in [group.unix]
-          # (no windows leaf); pulling/resolving it on Windows exits 78. The
-          # default scope is all windows-capable, and `ocx run nushell|elvish`
-          # below resolves that same default scope — so fish is never referenced.
+          # Pre-warm only the default [tools] group. fish ([group.unix]) and
+          # pwsh ([group.linux]) ship no windows leaf; pulling/resolving either
+          # on Windows exits 78. The default scope is all windows-capable, and
+          # `ocx run nushell|elvish` below resolves that same default scope —
+          # so neither is ever referenced.
           groups: default
       - name: Smoke (${{ matrix.label }})
         shell: pwsh

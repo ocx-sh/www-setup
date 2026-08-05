@@ -13,3 +13,4 @@ node_modules/
 target/
 .serena/
 .claude/artifacts/
+.claude/state/subagents.jsonl

@@ -17,9 +17,9 @@ includes:
   meta: ./taskfiles/meta.taskfile.yml
   # Tool registrations (backed by ocx.taskfile.yml).
   # NAME is the binding declared in ocx.toml [tools]; `ocx run NAME -- BINARY`
-  # composes the toolchain env. Hallucinated OCX packages (bats, hawkeye,
-  # actionlint) are NOT registered here — they stay system tools behind a
-  # `command -v` precondition (see meta/test taskfiles).
+  # composes the toolchain env. bats is NOT registered here — it is a vendored
+  # git submodule (external/bats-core), not an OCX package. markdownlint-cli2
+  # is npm-only (no OCX package); meta:verify skips it locally.
   shellcheck:
     taskfile: ./taskfiles/ocx.taskfile.yml
     internal: true
