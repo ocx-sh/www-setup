@@ -299,6 +299,23 @@ function Stop-FixtureServer {
     }
 }
 
+# Publish the fixture's dist.json as a content-addressed snapshot at
+# dist/<sha256>.json - the layout scripts/publish-dist.sh and `ocx-mirror dist
+# sync` both emit - and return the digest.
+#
+# Pointing OCX_INSTALL_DIST_URL at the snapshot PINS the manifest: install.ps1
+# recognises the 64-hex basename and verifies the served body against it, so a
+# mirror that altered the manifest is caught (exit 4) instead of trusted.
+function Publish-DistSnapshot {
+    param([Parameter(Mandatory)][string]$SrvRoot)
+    $dist = Join-Path $SrvRoot 'dist.json'
+    $sha = (Get-FileHash -Path $dist -Algorithm SHA256).Hash.ToLower()
+    $dir = Join-Path $SrvRoot 'dist'
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    Copy-Item -Path $dist -Destination (Join-Path $dir "$sha.json") -Force
+    return $sha
+}
+
 # Canonical OCX bin dir under $OcxHome (the real on-disk store layout).
 function Get-ExpectedBinDir {
     param([Parameter(Mandatory)][string]$OcxHome)
@@ -308,5 +325,6 @@ function Get-ExpectedBinDir {
 Export-ModuleMember -Function `
     Get-FixtureTarget, Get-FixtureBinName, Get-FixtureArchiveExt, `
     New-OcxFixture, New-OcxStub, New-OcxArchive, New-OcxTestBinary, Write-OcxDist, `
+    Publish-DistSnapshot, `
     Start-FixtureServer, Stop-FixtureServer, Get-ExpectedBinDir, `
     Wait-FixturePort, Get-PythonExe, Test-FixtureIsWindows

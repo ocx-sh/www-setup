@@ -21,6 +21,12 @@
 #     manifest the installers read via OCX_INSTALL_DIST_URL to resolve "latest"
 #     and the per-target sha256 + download URL). /releases is a legacy alias
 #     pointing at the same manifest.
+#   - /dist/<sha256>.json is an IMMUTABLE content-addressed snapshot of a past
+#     manifest (append-only); pointing OCX_INSTALL_DIST_URL at one pins the whole
+#     closure, and the installers verify the body against that digest. It needs no
+#     location of its own: `location = /dist` is an EXACT match, so /dist/<...>
+#     falls through to the static `location /` below. /dist.json.sha256 is the
+#     sidecar naming the rolling manifest's current digest.
 #   - /docs/ and /actions/ are PROXIED upstream (pre-existing forwards owned by
 #     the host config, reproduced here for completeness). Never publish repo
 #     artifacts under those prefixes — nginx reroutes them.
@@ -31,6 +37,8 @@
 #   $root/latest/install.*                  stable channel pointer (overwritten)
 #   $root/next/install.*                    prerelease channel pointer (overwritten)
 #   $root/dist.json                         distribution manifest (regenerated every release)
+#   $root/dist.json.sha256                  sha256sum-format sidecar for dist.json
+#   $root/dist/<sha256>.json                immutable manifest snapshot (append-only)
 
 # --- Shell-segment map (http context; place alongside the server block) --------
 # Translate the captured /<shell> segment to the installer filename. Evaluated

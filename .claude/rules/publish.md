@@ -13,6 +13,8 @@ setup.ocx.sh/archive/<VERSION>/install.<ext>  # pinned (immutable, append-only);
 setup.ocx.sh/latest/install.<ext>             # STABLE channel pointer (mutable, overwritten)
 setup.ocx.sh/next/install.<ext>               # "next" channel pointer: newest of prerelease + stable (mutable, overwritten)
 setup.ocx.sh/dist.json                        # distribution manifest (overwritten every release)
+setup.ocx.sh/dist.json.sha256                 # sha256sum-format sidecar for the rolling manifest
+setup.ocx.sh/dist/<sha256>.json               # immutable manifest snapshot (append-only)
 ```
 
 **Friendly per-shell URLs** (nginx rewrites onto the dirs above; no files of their own):
@@ -24,6 +26,8 @@ setup.ocx.sh/<shell>/<VERSION>  # → archive/<VERSION>/install.<ext>   (optiona
 setup.ocx.sh/dist               # → dist.json
 setup.ocx.sh/releases           # legacy alias → dist.json
 ```
+
+`/dist` is an EXACT-match `location`, so `/dist/<sha256>.json` is not shadowed by it — the snapshot is served straight from the static root.
 
 `<VERSION>` is the semver string without a leading `v` (e.g. `2.0.1`, not `v2.0.1`).
 
@@ -45,6 +49,12 @@ The per-shell `/<shell>` URLs carry no files of their own — regex `location`s 
 ```
 
 `releases[]` is newest-first; a full release carries 8 targets (linux gnu+musl, darwin, windows × x86_64/aarch64) derived from `sha256.sum` (never hardcoded). The installers resolve the latest stable via the first `"channel":"stable"` leaf, then resolve the `(version,target)` row → inline `sha256` + `url`. There is **no separate `sha256.sum` fetch** in the install path; the checksum is inline.
+
+#### Content-addressed snapshots
+
+`scripts/publish-dist.sh` publishes three documents per run: the immutable snapshot `dist/<sha256>.json`, the sidecar `dist.json.sha256` (sha256sum format, naming `dist.json`), and the rolling `dist.json` **last**. That order is load-bearing and matches `ocx-mirror dist sync`: a consumer reading mid-run resolves either the old manifest or the new one, and never learns a digest whose snapshot is not already fetchable. The snapshot upload uses `--ignore-existing` (content-addressed ⇒ append-only; an unchanged manifest is a no-op) and `--mkpath` to create the remote `dist/` dir, since the `rrsync`-restricted deploy key rejects an `ssh mkdir`.
+
+`OCX_INSTALL_DIST_URL=https://setup.ocx.sh/dist/<sha256>.json` pins the **whole closure** — every release row already carries an inline `sha256`, so one hash fixes every version, URL and checksum the installer will use. The installers detect the 64-hex basename and **verify the served body against it** (mismatch → exit **4**, missing sha256 tool → exit **2**, never a silent skip). That makes the serving host pure transport, which is what lets a mirror stay untrusted — see [`mirror-auth.md`](mirror-auth.md).
 
 The manifest is rebuilt and uploaded (overwrite) by `.github/workflows/update-dist.yml`, which runs on three triggers: a `repository_dispatch` of type `ocx-released` fired by `ocx-sh/ocx` when a new OCX release ships (the fast path), an **hourly cron** (the fallback if a dispatch is absent or fails), and `workflow_dispatch` (manual). It is **also** refreshed opportunistically on this repo's own installer releases — `scripts/publish-dist.sh` regenerates and uploads it as part of the `publish-installers` job.
 

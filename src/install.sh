@@ -55,6 +55,8 @@ OCX_INSTALL_REPO="${OCX_INSTALL_REPO:-ocx-sh/ocx}"
 # Self-hosted distribution manifest (Node-dist-style; newest-first releases with
 # inline per-target sha256 + download URL). Resolved over the HTTPS-enforced
 # downloader — no GitHub API, no token. See get_latest_version / dist_row.
+# A content-addressed snapshot URL (.../dist/<sha256>.json) pins the manifest and
+# is verified against the digest in its own name — see fetch_dist.
 OCX_INSTALL_DIST_URL="${OCX_INSTALL_DIST_URL:-https://setup.ocx.sh/dist.json}"
 # Artifact host override: when set, the per-target download URL from dist.json is
 # rewritten to ${OCX_INSTALL_MIRROR_URL%/}/<tag>/<filename>. Empty = use the
@@ -169,7 +171,9 @@ ENVIRONMENT (user-facing):
 ENVIRONMENT (installer knobs):
     OCX_INSTALL_VERSION       Pin a version (empty = latest stable)
     OCX_INSTALL_REPO          GitHub owner/repo (default: ocx-sh/ocx)
-    OCX_INSTALL_DIST_URL      Distribution manifest URL (latest + checksums)
+    OCX_INSTALL_DIST_URL      Distribution manifest URL (latest + checksums).
+                              A .../dist/<sha256>.json snapshot pins the whole
+                              closure and is verified against that digest.
     OCX_INSTALL_MIRROR_URL    Artifact host override (rewrites the download URL)
     OCX_INSTALL_NO_SETUP      Truthy = place binary on PATH only; skip
                               `ocx self setup` (env shims + profile blocks)
@@ -297,15 +301,23 @@ download() {
 
 # --- Checksum verification --------------------------------------------------
 
-# verify_checksum <file_path> <expected_sha256>
+# verify_checksum <file_path> <expected_sha256> [required]
 # The expected hash comes inline from dist.json — no separate sha256.sum fetch.
+#
+# A non-empty third arg makes a missing sha256 tool FATAL instead of a warning.
+# On the content-addressed manifest path the digest is the only thing
+# authenticating the pin, so degrading to "unverified" there would hand back
+# whatever the mirror served while the URL still claimed to be a pin.
 verify_checksum() {
-    local _file="$1" _expected="$2" _sha_cmd _actual
+    local _file="$1" _expected="$2" _required="${3:-}" _sha_cmd _actual
 
     if check_cmd sha256sum; then
         _sha_cmd="sha256sum"
     elif check_cmd shasum; then
         _sha_cmd="shasum -a 256"
+    elif [ -n "$_required" ]; then
+        err "neither sha256sum nor shasum found — cannot verify the pinned manifest at ${OCX_INSTALL_DIST_URL}
+  Install coreutils, or point OCX_INSTALL_DIST_URL at the rolling manifest." 2
     else
         warn "neither sha256sum nor shasum found — SKIPPING CHECKSUM VERIFICATION"
         warn "install coreutils or set PATH to include sha256sum for verified downloads"
@@ -389,6 +401,40 @@ safe_extract() {
 
 # Resolve the latest STABLE version: the first leaf object whose channel is
 # stable (the `latest` pointer, emitted first; newest-first regardless).
+# --- Distribution manifest fetch --------------------------------------------
+
+# Echo the sha256 a manifest URL pins itself to, or empty for a rolling URL.
+#
+# `ocx-mirror dist sync` keeps every manifest it has ever published at
+# dist/<sha256>.json beside the rolling dist.json, and so does setup.ocx.sh.
+# Pointing OCX_INSTALL_DIST_URL at one of those pins the WHOLE closure — every
+# release row carries an inline sha256 — so checking the body against the digest
+# in its own name makes the pin self-authenticating and leaves the mirror as
+# pure transport. Unverified, a content-addressed URL is just a URL.
+dist_pin_digest() {
+    local _base="${1%%\?*}"
+    _base="${_base%%#*}"
+    printf '%s' "${_base##*/}" | sed -n 's/^\([0-9a-f]\{64\}\)\.json$/\1/p'
+}
+
+# fetch_dist <url> <dest_file> — download the manifest, verifying it when the URL
+# pins its own digest. Returns non-zero on a download failure; a digest mismatch
+# is fatal (exit 4) via verify_checksum.
+#
+# Staged to a file rather than echoed: the digest covers the bytes as served, and
+# a command substitution would strip the manifest's trailing newline. It also
+# keeps verify_checksum out of a subshell, where its `err` would exit only that
+# subshell and the caller would report the wrong code.
+fetch_dist() {
+    local _url="$1" _dest="$2" _pin
+
+    _pin=$(dist_pin_digest "$_url")
+    download_to_file "$_url" "$_dest" || return 1
+    if [ -n "$_pin" ]; then
+        verify_checksum "$_dest" "$_pin" required
+    fi
+}
+
 get_latest_version() {
     local _dist="$1" _version
 
@@ -609,10 +655,16 @@ main() {
     _target=$(detect_target)
     say "Detected platform: $_target"
 
+    _tmpdir=$(mktemp -d)
+    trap cleanup EXIT INT TERM HUP
+
     # Fetch the manifest once; reuse for latest-resolution AND row-resolution.
-    _dist=$(download "$OCX_INSTALL_DIST_URL") ||
+    # A content-addressed URL (dist/<sha256>.json) is verified against the
+    # digest in its own name before anything is parsed out of it.
+    fetch_dist "$OCX_INSTALL_DIST_URL" "$_tmpdir/dist.json" ||
         err "failed to fetch the latest version from ${OCX_INSTALL_DIST_URL}
   Check your internet connection, or pin a version with OCX_INSTALL_VERSION." 3
+    _dist=$(cat "$_tmpdir/dist.json")
     [ -n "$_dist" ] ||
         err "failed to determine the latest version: empty manifest at ${OCX_INSTALL_DIST_URL}" 3
 
@@ -661,9 +713,6 @@ main() {
     fi
 
     say "Installing ocx v${_version}..."
-    _tmpdir=$(mktemp -d)
-    trap cleanup EXIT INT TERM HUP
-
     _archive="$_tmpdir/$_filename"
     say "Downloading ${_filename}..."
     download_to_file "$_url" "$_archive" ||

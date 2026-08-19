@@ -144,14 +144,14 @@ function __ocx_assert_https --argument-names url
     __ocx_err "refusing insecure (non-https) URL: $url" 3
 end
 
-# __ocx_download <url> -> stdout
-function __ocx_download --argument-names url
-    if command -q curl
-        curl --proto '=https' --tlsv1.2 -fsSL $url
-    else if command -q wget
-        __ocx_assert_https $url
-        wget --secure-protocol=TLSv1_2 --https-only -qO- $url
-    else
+# A downloader is a PRECONDITION, asserted once in statement position.
+#
+# __ocx_download_file is called from `if not …` / `; or …` conjunctions, and fish
+# demotes an `exit` inside a conditional's command to a plain stop with status
+# ZERO — so raising this from in there ended the run reporting success while
+# installing nothing. Check it up front instead, where `exit` means exit.
+function __ocx_require_downloader
+    if not command -q curl; and not command -q wget
         __ocx_err "either curl or wget is required to download OCX" 2
     end
 end
@@ -170,13 +170,21 @@ end
 
 # --- Checksum verification --------------------------------------------------
 
-# __ocx_verify_checksum <file> <expected_sha256>
-function __ocx_verify_checksum --argument-names file expected
+# __ocx_verify_checksum <file> <expected_sha256> [required]
+#
+# A non-empty `required` makes a missing sha256 tool FATAL instead of a warning.
+# On the content-addressed manifest path the digest is the only thing
+# authenticating the pin, so degrading to "unverified" there would hand back
+# whatever the mirror served while the URL still claimed to be a pin.
+function __ocx_verify_checksum --argument-names file expected required
     set -l actual ''
     if command -q sha256sum
         set actual (sha256sum $file | string split ' ')[1]
     else if command -q shasum
         set actual (shasum -a 256 $file | string split ' ')[1]
+    else if test -n "$required"
+        __ocx_err "neither sha256sum nor shasum found — cannot verify the pinned manifest at $OCX_INSTALL_DIST_URL
+  Install coreutils, or point OCX_INSTALL_DIST_URL at the rolling manifest." 2
     else
         __ocx_warn "neither sha256sum nor shasum found — SKIPPING CHECKSUM VERIFICATION"
         return 0
@@ -187,6 +195,38 @@ function __ocx_verify_checksum --argument-names file expected
         __ocx_err "checksum mismatch for "(basename $file)\n"  expected: $exp"\n"  got:      $actual" 4
     end
     __ocx_say "Checksum verified."
+end
+
+# --- Distribution manifest fetch --------------------------------------------
+
+# Echo the sha256 a manifest URL pins itself to, or nothing for a rolling URL.
+#
+# `ocx-mirror dist sync` keeps every manifest it has ever published at
+# dist/<sha256>.json beside the rolling dist.json, and so does setup.ocx.sh.
+# Pointing OCX_INSTALL_DIST_URL at one of those pins the WHOLE closure — every
+# release row carries an inline sha256 — so checking the body against the digest
+# in its own name makes the pin self-authenticating and leaves the mirror as
+# pure transport. Unverified, a content-addressed URL is just a URL.
+function __ocx_dist_pin_digest --argument-names url
+    set -l base (string replace -r '[?#].*$' '' -- $url)
+    set -l m (string match -r '^([0-9a-f]{64})\.json$' -- (basename $base))
+    test (count $m) -ge 2; and echo $m[2]
+end
+
+# __ocx_fetch_dist <url> <dest> — download the manifest, verifying it when the
+# URL pins its own digest. Non-zero on a download failure; a digest mismatch is
+# fatal (exit 4) via __ocx_verify_checksum.
+#
+# Staged to a file rather than echoed: the digest covers the bytes as served, and
+# a command substitution would strip the manifest's trailing newline. It also
+# keeps __ocx_verify_checksum out of a command substitution, where its `exit`
+# would end only the capture and the caller would report the wrong code.
+function __ocx_fetch_dist --argument-names url dest
+    set -l pin (__ocx_dist_pin_digest $url)
+    __ocx_download_file $url $dest; or return 1
+    if test -n "$pin"
+        __ocx_verify_checksum $dest $pin required
+    end
 end
 
 # --- Safe archive extraction ------------------------------------------------
@@ -353,11 +393,26 @@ function __ocx_main
     set -l target (__ocx_detect_target)
     __ocx_say "Detected platform: $target"
 
+    # A content-addressed URL (dist/<sha256>.json) is verified against the
+    # digest in its own name before anything is parsed out of it.
+    __ocx_require_downloader
+
+    # Called in STATEMENT position, not as an `if` condition: fish turns an
+    # `exit` inside a conditional's command into a plain stop with status 0, so a
+    # digest mismatch would be reported and then exit SUCCESSFULLY.
+    set -l dist_tmp (mktemp)
+    __ocx_fetch_dist $OCX_INSTALL_DIST_URL $dist_tmp
+    set -l fetch_status $status
+    if test $fetch_status -ne 0
+        rm -f $dist_tmp
+        __ocx_err "failed to determine the latest version from $OCX_INSTALL_DIST_URL
+  (fetch failed or empty manifest). Check your connection, or pin OCX_INSTALL_VERSION." 3
+    end
     # `string collect` keeps the multi-line manifest as ONE list element;
     # otherwise fish splits it on newlines and passing $dist to a function would
-    # expand into many positional args and misalign --argument-names. A fetch
-    # failure yields an empty capture, caught below.
-    set -l dist (__ocx_download $OCX_INSTALL_DIST_URL | string collect)
+    # expand into many positional args and misalign --argument-names.
+    set -l dist (cat $dist_tmp | string collect)
+    rm -f $dist_tmp
     if test -z "$dist"
         __ocx_err "failed to determine the latest version from $OCX_INSTALL_DIST_URL
   (fetch failed or empty manifest). Check your connection, or pin OCX_INSTALL_VERSION." 3

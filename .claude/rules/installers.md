@@ -32,7 +32,7 @@ A non-zero `self setup` exit → `err`/`Err` exit **6**. The recorded argv is as
 **Tier 2 — installer-only knobs**, all `OCX_INSTALL_*` with a strict grammar:
 
 - **values (bare nouns):** `OCX_INSTALL_VERSION` (empty = latest stable; the portable pinning channel for every shell), `OCX_INSTALL_REPO` (`ocx-sh/ocx`).
-- **endpoints (`_URL` suffix):** `OCX_INSTALL_DIST_URL` (manifest, default `https://setup.ocx.sh/dist.json`), `OCX_INSTALL_MIRROR_URL` (artifact host override — rewrites the per-target URL to `<MIRROR_URL>/<tag>/<filename>`).
+- **endpoints (`_URL` suffix):** `OCX_INSTALL_DIST_URL` (manifest, default `https://setup.ocx.sh/dist.json`; a `dist/<sha256>.json` snapshot URL pins the manifest — see below), `OCX_INSTALL_MIRROR_URL` (artifact host override — rewrites the per-target URL to `<MIRROR_URL>/<tag>/<filename>`).
 - **opt-outs (`NO_` prefix):** `OCX_INSTALL_NO_SETUP` (skip `ocx self setup`), `OCX_INSTALL_NO_SMOKETEST`.
 - **opt-ins (bare verb/adj):** `OCX_INSTALL_FORCE`, `OCX_INSTALL_QUIET`, `OCX_INSTALL_PRINT_PATH`.
 - **sh-only:** `OCX_INSTALL_DOWNLOADER` (`curl`|`wget`).
@@ -42,6 +42,18 @@ A non-zero `self setup` exit → `err`/`Err` exit **6**. The recorded argv is as
 **Rename map (history)** — old → new: `OCX_INSTALL_INDEX_URL`→`OCX_INSTALL_DIST_URL`; `OCX_INSTALL_BASE_URL`→`OCX_INSTALL_MIRROR_URL`; `OCX_INSTALL_SKIP_SELF_INIT`→`OCX_INSTALL_NO_SETUP`; `OCX_INSTALL_NO_BIN_SMOKETEST`→`OCX_INSTALL_NO_SMOKETEST`. **Dropped:** `OCX_INSTALL_FORMAT_URL`, `OCX_INSTALL_CHECKSUM_FORMAT_URL` (URLs now come inline from `dist.json`). **Added:** `OCX_INSTALL_VERSION`.
 
 When introducing a new knob: pick the most boring possible name fitting the grammar above; default to empty/`0`; document it in `README.md` (env matrix) and the test suites; mirror it in **all five** installers (env name identical; pwsh adds a `[switch]`/`[string]` param that the env overrides).
+
+### Content-addressed manifest pins
+
+`OCX_INSTALL_DIST_URL` may name a **content-addressed snapshot** — `.../dist/<sha256>.json`, published by `scripts/publish-dist.sh` and by `ocx-mirror dist sync`. Every release row already carries an inline `sha256`, so pinning the manifest pins the whole closure.
+
+All five installers detect the pin the same way and MUST keep doing so: strip any `?query`/`#fragment`, take the basename, and match `^[0-9a-f]{64}\.json$`. On a match the manifest is downloaded **to a file** and hashed there — never captured into a shell variable, because every dialect's command substitution strips the trailing newline the digest covers — then compared:
+
+- mismatch → exit **4** (the ordinary checksum code);
+- no `sha256sum`/`shasum` available → exit **2**. A pin MUST NOT degrade to the unverified warn-and-continue path that a rolling manifest allows: the digest is the only thing authenticating it.
+- Non-pinned (rolling) URLs are unchanged — nothing to verify against.
+
+The verification call must sit in **statement position**, not inside a command substitution or an `if` condition: POSIX `$(…)` runs in a subshell, and fish demotes `exit` inside a conditional's command to a plain return — either way the process would continue past a failed check and report the wrong code. `sh` and `fish` therefore pass a destination path into `fetch_dist` / `__ocx_fetch_dist` instead of echoing the body.
 
 `OCX_INSTALL_DIST_URL` is fetched over the HTTPS-enforced downloader (no token). `get_latest_version` (sh) / `Get-LatestVersion` (ps1) / the nu/fish/elvish equivalents pick the first `"channel":"stable"` leaf object (the manifest is newest-first), strip a leading `v`, and validate semver. Any fetch failure, empty body, or no-stable-entry → exit **3** with a message containing the substring `latest version`.
 

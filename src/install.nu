@@ -113,8 +113,11 @@ def __ocx-fetch-text [url: string]: nothing -> string {
 # Download a URL to a file (the archive). Prefer `http get | save`, fall back to
 # `^curl`. Returns true on success.
 def __ocx-download-file [url: string, dest: string]: nothing -> bool {
+    # `--raw` on the GET too: without it `http get` parses an application/json
+    # body into a record and `save --raw` then writes nushell's repr of it, not
+    # the served bytes — which the manifest-pin digest is taken over.
     let ok = try {
-        http get $url | save --raw --force $dest
+        http get --raw $url | save --raw --force $dest
         true
     } catch {
         false
@@ -136,6 +139,34 @@ def __ocx-verify-checksum [file: string, expected: string] {
         __ocx-err $"checksum mismatch for ($file)\n  expected: ($expected)\n  got:      ($actual)" 4
     }
     __ocx-say 'Checksum verified.'
+}
+
+# Echo the sha256 a manifest URL pins itself to, or '' for a rolling URL.
+#
+# `ocx-mirror dist sync` keeps every manifest it has ever published at
+# dist/<sha256>.json beside the rolling dist.json, and so does setup.ocx.sh.
+# Pointing OCX_INSTALL_DIST_URL at one of those pins the WHOLE closure — every
+# release row carries an inline sha256 — so checking the body against the digest
+# in its own name makes the pin self-authenticating and leaves the mirror as
+# pure transport. Unverified, a content-addressed URL is just a URL.
+def __ocx-dist-pin-digest [url: string]: nothing -> string {
+    let name = ($url | split row '?' | first | split row '#' | first | split row '/' | last)
+    if ($name =~ '^[0-9a-f]{64}\.json$') { $name | str replace '.json' '' } else { '' }
+}
+
+# Fetch the manifest text, verifying it when the URL pins its own digest.
+def __ocx-fetch-dist [url: string]: nothing -> string {
+    let pin = (__ocx-dist-pin-digest $url)
+    if $pin == '' { return (__ocx-fetch-text $url) }
+
+    # Staged to a file: the digest covers the bytes as served, and `^curl`
+    # output captured as a value would lose the manifest's trailing newline.
+    let tmp = $"(mktemp -d)/dist.json"
+    if not (__ocx-download-file $url $tmp) {
+        __ocx-err $"failed to fetch ($url)" 3
+    }
+    __ocx-verify-checksum $tmp $pin
+    open --raw $tmp
 }
 
 # --- Safe archive extraction ------------------------------------------------
@@ -258,7 +289,9 @@ def __ocx-main [] {
     __ocx-say $"Detected platform: ($target)"
     let exe = if ($target =~ 'windows') { 'ocx.exe' } else { 'ocx' }
 
-    let dist_text = (__ocx-fetch-text $dist_url)
+    # A content-addressed URL (dist/<sha256>.json) is verified against the
+    # digest in its own name before anything is parsed out of it.
+    let dist_text = (__ocx-fetch-dist $dist_url)
     if ($dist_text | str trim | is-empty) {
         __ocx-err $"failed to determine the latest version: empty manifest at ($dist_url)" 3
     }

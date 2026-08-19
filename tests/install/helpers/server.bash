@@ -192,6 +192,21 @@ server_write_dist() {
 EOF
 }
 
+# Publish the fixture's dist.json as a content-addressed snapshot at
+# dist/<sha256>.json — the layout scripts/publish-dist.sh and `ocx-mirror dist
+# sync` both emit — and echo the digest.
+#
+# Pointing OCX_INSTALL_DIST_URL at the snapshot PINS the manifest: the installer
+# recognises the 64-hex basename and verifies the served body against it, so a
+# mirror that altered the manifest is caught (exit 4) instead of trusted.
+server_publish_dist_snapshot() {
+    local _root="$1" _sha
+    _sha=$(server_sha256 "$_root/dist.json")
+    mkdir -p "$_root/dist"
+    cp "$_root/dist.json" "$_root/dist/${_sha}.json"
+    echo "$_sha"
+}
+
 # Rewrite the dummy dist.json url to point at the real fixture server (for the
 # one test that exercises URL passthrough without OCX_INSTALL_MIRROR_URL).
 server_finalize_dist_url() {

@@ -62,6 +62,12 @@ Things the harness gets right that a naive `python -m http.server` does not:
    test has no Bats mirror — `install.sh` delegates redirect-following to `curl`,
    which has no equivalent strict-mode failure mode.
 
+4. **Content-addressed manifest snapshots.** `Publish-DistSnapshot -SrvRoot`
+   copies `dist.json` to `dist/<sha256>.json` and returns the digest, so
+   `Knobs.Tests.ps1` can point `OCX_INSTALL_DIST_URL` at a pin. A second
+   snapshot is written under a name (`'a' * 64`) whose digest the body does not
+   match — the altered-manifest case, which must exit **4**.
+
 The canonical bin dir asserted everywhere is
 `symlinks/ocx.sh/ocx/cli/current/content/bin` via `Get-ExpectedBinDir`. The
 no-setup knob is **`OCX_INSTALL_NO_SETUP`** / `-NoSetup`; the smoketest knob is
@@ -142,7 +148,8 @@ the latest-via-`dist.json` happy path, the dead-manifest → exit 3 (message
 contains `latest version`) scenario, the checksum-mismatch → exit 4 path, the
 `self setup`-failure → exit 6 path with the recorded argv, and the
 `__OCX_TESTING_INSTALL_BINARY` happy (`--offline self setup` argv) + bad (exit 2)
-paths. The accepted pwsh divergence — an unknown flag (`-BogusFlag`) is rejected
+paths, and the pinned-manifest pair (`dist/<sha256>.json` installs; an altered
+body exits 4). The accepted pwsh divergence — an unknown flag (`-BogusFlag`) is rejected
 by the `[CmdletBinding()]` binder at exit 1 (indeterminate through `irm | iex`),
 not the in-script exit 2 — is preserved. Exit code 7 (unsupported platform)
 cannot be triggered on an X64 host in either suite — it is exercised by

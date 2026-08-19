@@ -40,6 +40,7 @@ exposes:
 | `server_detect_target` | Echo the current `<arch>-<os>-<libc>` triple so the fixture archive name matches what the installer's `detect_target` will request. |
 | `server_build_fixture ROOT [LAYOUT]` | Build a v0.0.0 release tree under `ROOT`: `releases/download/v0.0.0/ocx-<target>.tar.xz`, then a `dist.json` manifest with the archive's inline `sha256`. Echoes the target triple. |
 | `server_write_dist ROOT TARGET SHA FILE` | (Re)write a single-release `dist.json` — used by tamper tests (e.g. a wrong `sha256` for the exit-4 path). |
+| `server_publish_dist_snapshot ROOT` | Copy `dist.json` to the content-addressed `dist/<sha256>.json` and echo the digest — the pinned-manifest path. Appending a byte to the snapshot afterwards produces the altered-body (exit 4) case. |
 | `server_finalize_dist_url ROOT BASE` | Rewrite the dummy manifest `url` to the real fixture server (for the one URL-passthrough test that drops `OCX_INSTALL_MIRROR_URL`). |
 | `server_stub_body` | Emit the body of the fixture `ocx` stub binary packed into the archive. |
 | `server_sha256 FILE` | Portable sha256 of `FILE` — coreutils `sha256sum` (Linux) or BSD/macOS `shasum -a 256`. Use this in suites instead of bare `sha256sum` so the tamper tests run on the macOS Bats leg. |
@@ -197,5 +198,6 @@ hatch.
 | Bin-path / `self setup` argv change | flip the path string in all suites, update the `server_stub_body` + the argv assertions, update this file |
 | New archive layout | add a `server_build_fixture ... <layout>` variant + a test |
 | Latest-resolution / manifest format change | `env-knobs.bats` (latest via `dist.json`) + `exit-codes.bats` (dead manifest → exit 3, message contains `latest version`) + `dist.bats` (generator shape) |
+| Manifest-pin (`dist/<sha256>.json`) behavior change | `env-knobs.bats` + every `tests/install/{nu,fish,elvish}/` suite — the happy path (installs) and the altered-body path (exit 4), both via `server_publish_dist_snapshot` |
 | `__OCX_TESTING_INSTALL_BINARY` behavior change | `env-knobs.bats` (happy: no download, binary placed, `--offline self setup` argv) + `exit-codes.bats` (bad → exit 2) + `print-path.bats` (PRINT_PATH honored) |
 | New exotic installer behavior | the matching `tests/install/{nu,fish,elvish}/` suite |

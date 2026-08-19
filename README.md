@@ -76,6 +76,16 @@ curl -fsSL https://setup.ocx.sh/sh/0.5.0 | sh
 
 The installers resolve "latest" by reading the self-hosted distribution manifest at `https://setup.ocx.sh/dist.json` — there is **no GitHub API dependency** in the install path. The manifest lists the published OCX product versions (from `ocx-sh/ocx`) with an inline checksum and download URL per platform; override it with `OCX_INSTALL_DIST_URL`.
 
+### Pinned manifest (reproducible install)
+
+Every manifest ever published is kept, unchanged, at a content-addressed URL:
+
+```sh
+OCX_INSTALL_DIST_URL=https://setup.ocx.sh/dist/<sha256>.json curl -fsSL https://setup.ocx.sh/sh | sh
+```
+
+Because every release row carries an inline `sha256`, pinning the manifest pins the **whole closure** — one hash, fully reproducible. The installers recognise a `dist/<sha256>.json` URL and **verify the served body against the digest in its own name** (mismatch → exit 4), so the host serving it is pure transport and needs no trust. The current digest is published at `https://setup.ocx.sh/dist.json.sha256`, and `ocx-mirror dist sync` emits the same layout for a corporate mirror.
+
 ## Configuration
 
 The `OCX_INSTALL_*` prefix scopes a knob to install-time; the shared runtime envs (`OCX_HOME`, `OCX_NO_MODIFY_PATH`, `NO_COLOR`, `TMPDIR`) keep their existing names.
@@ -84,7 +94,7 @@ The `OCX_INSTALL_*` prefix scopes a knob to install-time; the shared runtime env
 |---|---|---|
 | `OCX_INSTALL_VERSION` | Pin a version (empty = latest stable). The portable pinning channel for every shell. | _(latest)_ |
 | `OCX_INSTALL_REPO` | GitHub owner/repo | `ocx-sh/ocx` |
-| `OCX_INSTALL_DIST_URL` | Distribution manifest (`dist.json`) used to resolve the latest version + per-target checksum/URL | `https://setup.ocx.sh/dist.json` |
+| `OCX_INSTALL_DIST_URL` | Distribution manifest (`dist.json`) used to resolve the latest version + per-target checksum/URL. A `dist/<sha256>.json` snapshot pins the whole closure and is verified against that digest. | `https://setup.ocx.sh/dist.json` |
 | `OCX_INSTALL_MIRROR_URL` | Artifact host override — rewrites the per-target download URL to `<MIRROR_URL>/<tag>/<filename>` | _(use manifest URL)_ |
 | `OCX_INSTALL_NO_SETUP` | Place the binary on PATH only; skip `ocx self setup` (env shims + profile blocks). The CI / air-gapped path. `OCX_NO_MODIFY_PATH` is a no-op in this mode. | `0` |
 | `OCX_INSTALL_NO_SMOKETEST` | Skip the post-extract `ocx version` smoke test | `0` |

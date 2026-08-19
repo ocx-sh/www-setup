@@ -112,6 +112,43 @@ setup() {
     [ -x "${OCX_HOME}/${BIN_SUBPATH}/ocx" ]
 }
 
+@test "pinned manifest: dist/<sha256>.json installs and is digest-verified" {
+    local _t="${BATS_TEST_TMPDIR}/pin-ok"
+    server_build_fixture "$_t" >/dev/null
+    local _sha
+    _sha=$(server_publish_dist_snapshot "$_t")
+    local _info _pid _port
+    _info=$(server_start "$_t" "${BATS_TEST_TMPDIR}/pin-ok.log")
+    _pid="${_info% *}"
+    _port="${_info#* }"
+    OCX_INSTALL_DIST_URL="https://127.0.0.1:${_port}/dist/${_sha}.json" \
+        OCX_INSTALL_MIRROR_URL="https://127.0.0.1:${_port}/releases/download" \
+        OCX_INSTALL_NO_SETUP=1 \
+        run sh "$INSTALL_SH"
+    server_stop "$_pid"
+    [ "$status" -eq 0 ]
+    [ -x "${OCX_HOME}/${BIN_SUBPATH}/ocx" ]
+}
+
+@test "pinned manifest: altered body → exit 4" {
+    # The mirror serves a manifest that does not hash to the digest in its own
+    # URL. Unverified this would install whatever that manifest named.
+    local _t="${BATS_TEST_TMPDIR}/pin-bad"
+    server_build_fixture "$_t" >/dev/null
+    local _sha
+    _sha=$(server_publish_dist_snapshot "$_t")
+    printf '\n' >>"$_t/dist/${_sha}.json"
+    local _info _pid _port
+    _info=$(server_start "$_t" "${BATS_TEST_TMPDIR}/pin-bad.log")
+    _pid="${_info% *}"
+    _port="${_info#* }"
+    OCX_INSTALL_DIST_URL="https://127.0.0.1:${_port}/dist/${_sha}.json" \
+        OCX_INSTALL_MIRROR_URL="https://127.0.0.1:${_port}/releases/download" \
+        run sh "$INSTALL_SH"
+    server_stop "$_pid"
+    [ "$status" -eq 4 ]
+}
+
 @test "no row for the (version,target) → exit 3" {
     # dist.json has only 0.0.0; request a version with no manifest row.
     run sh "$INSTALL_SH" --version 9.9.9

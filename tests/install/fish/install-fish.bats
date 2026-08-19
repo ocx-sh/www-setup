@@ -109,3 +109,38 @@ setup() {
     __OCX_TESTING_INSTALL_BINARY="${BATS_TEST_TMPDIR}/nope" run fish "$INSTALL_FISH"
     [ "$status" -eq 2 ]
 }
+
+@test "fish: pinned manifest dist/<sha256>.json installs and is digest-verified" {
+    local _t="${BATS_TEST_TMPDIR}/pin-ok"
+    server_build_fixture "$_t" >/dev/null
+    local _sha
+    _sha=$(server_publish_dist_snapshot "$_t")
+    local _info _pid _port
+    _info=$(server_start "$_t" "${BATS_TEST_TMPDIR}/pin-ok.log")
+    _pid="${_info% *}"
+    _port="${_info#* }"
+    OCX_INSTALL_DIST_URL="https://127.0.0.1:${_port}/dist/${_sha}.json" \
+        OCX_INSTALL_MIRROR_URL="https://127.0.0.1:${_port}/releases/download" \
+        OCX_INSTALL_NO_SETUP=1 \
+        run fish "$INSTALL_FISH"
+    server_stop "$_pid"
+    [ "$status" -eq 0 ]
+    [ -x "${OCX_HOME}/${BIN_SUBPATH}/ocx" ]
+}
+
+@test "fish: pinned manifest with an altered body → exit 4" {
+    local _t="${BATS_TEST_TMPDIR}/pin-bad"
+    server_build_fixture "$_t" >/dev/null
+    local _sha
+    _sha=$(server_publish_dist_snapshot "$_t")
+    printf '\n' >>"$_t/dist/${_sha}.json"
+    local _info _pid _port
+    _info=$(server_start "$_t" "${BATS_TEST_TMPDIR}/pin-bad.log")
+    _pid="${_info% *}"
+    _port="${_info#* }"
+    OCX_INSTALL_DIST_URL="https://127.0.0.1:${_port}/dist/${_sha}.json" \
+        OCX_INSTALL_MIRROR_URL="https://127.0.0.1:${_port}/releases/download" \
+        run fish "$INSTALL_FISH"
+    server_stop "$_pid"
+    [ "$status" -eq 4 ]
+}

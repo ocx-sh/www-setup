@@ -27,7 +27,9 @@
 # Latest-version resolution + the per-target checksum/URL come from the
 # self-hosted distribution manifest (OCX_INSTALL_DIST_URL, default
 # https://setup.ocx.sh/dist.json) - NOT the GitHub API. No GITHUB_TOKEN is
-# consulted; the manifest and release assets are public.
+# consulted; the manifest and release assets are public. A content-addressed
+# snapshot URL (.../dist/<sha256>.json) pins the manifest and is verified
+# against the digest in its own name - see Get-DistPinDigest.
 #
 # Stdout/stderr contract (load-bearing):
 #   - All informational/warning/error messages go to STDERR.
@@ -449,10 +451,42 @@ function Assert-SafeOcxHome {
 # --- Distribution manifest (dist.json) ---
 
 # Parse dist.json via native ConvertFrom-Json. Returns the parsed object.
+# Return the sha256 a manifest URL pins itself to, or '' for a rolling URL.
+#
+# `ocx-mirror dist sync` keeps every manifest it has ever published at
+# dist/<sha256>.json beside the rolling dist.json, and so does setup.ocx.sh.
+# Pointing OCX_INSTALL_DIST_URL at one of those pins the WHOLE closure - every
+# release row carries an inline sha256 - so checking the body against the digest
+# in its own name makes the pin self-authenticating and leaves the mirror as
+# pure transport. Unverified, a content-addressed URL is just a URL.
+function Get-DistPinDigest {
+    param([string]$Url)
+    $base = ($Url -split '[?#]')[0]
+    $name = $base.Substring($base.LastIndexOf('/') + 1)
+    if ($name -match '^([0-9a-f]{64})\.json$') { return $Matches[1] }
+    return ''
+}
+
 function Get-DistManifest {
     $body = $null
-    try { $body = Download-String $OcxInstallDistUrl }
-    catch { Err "Failed to fetch the latest version from the manifest ($OcxInstallDistUrl): $($_.Exception.Message)" 3 }
+    $pin = Get-DistPinDigest $OcxInstallDistUrl
+    if ($pin) {
+        # Staged to a file: the digest covers the bytes as served, and
+        # Get-FileHash is the only sha256 that sees them unaltered.
+        $pinTmp = [System.IO.Path]::GetTempFileName()
+        try {
+            if (-not (Download-File -Url $OcxInstallDistUrl -Destination $pinTmp)) {
+                Err "Failed to fetch the pinned manifest ($OcxInstallDistUrl)." 3
+            }
+            Verify-Checksum -FilePath $pinTmp -Expected $pin
+            $body = Get-Content -Path $pinTmp -Raw
+        }
+        finally { Remove-Item -Path $pinTmp -Force -ErrorAction SilentlyContinue }
+    }
+    else {
+        try { $body = Download-String $OcxInstallDistUrl }
+        catch { Err "Failed to fetch the latest version from the manifest ($OcxInstallDistUrl): $($_.Exception.Message)" 3 }
+    }
 
     if ([string]::IsNullOrWhiteSpace([string]$body)) {
         Err "Failed to determine the latest version: the manifest ($OcxInstallDistUrl) was empty." 3

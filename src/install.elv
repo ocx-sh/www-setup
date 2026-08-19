@@ -116,7 +116,11 @@ fn ocx-download-file {|url dest|
 
 # --- Checksum verification --------------------------------------------------
 
-fn ocx-verify-checksum {|file expected|
+# `&required` makes a missing sha256 tool FATAL instead of a warning. On the
+# content-addressed manifest path the digest is the only thing authenticating
+# the pin, so degrading to "unverified" there would hand back whatever the
+# mirror served while the URL still claimed to be a pin.
+fn ocx-verify-checksum {|file expected &required=$false|
     var actual = ''
     if (eq $platform:os windows) {
         # certutil prints a hash line between two status lines.
@@ -126,6 +130,8 @@ fn ocx-verify-checksum {|file expected|
             set actual = (str:split ' ' (e:sha256sum $file) | take 1)
         } elif (has-external shasum) {
             set actual = (str:split ' ' (e:shasum -a 256 $file) | take 1)
+        } elif $required {
+            ocx-err "neither sha256sum nor shasum found — cannot verify the pinned manifest; install coreutils, or point OCX_INSTALL_DIST_URL at the rolling manifest" 2
         } else {
             ocx-warn "neither sha256sum nor shasum found — SKIPPING CHECKSUM VERIFICATION"
             return
@@ -135,6 +141,45 @@ fn ocx-verify-checksum {|file expected|
         ocx-err "checksum mismatch for "$file": expected "$expected" got "$actual 4
     }
     ocx-say "Checksum verified."
+}
+
+# --- Distribution manifest fetch --------------------------------------------
+
+# Put the sha256 a manifest URL pins itself to, or '' for a rolling URL.
+#
+# `ocx-mirror dist sync` keeps every manifest it has ever published at
+# dist/<sha256>.json beside the rolling dist.json, and so does setup.ocx.sh.
+# Pointing OCX_INSTALL_DIST_URL at one of those pins the WHOLE closure — every
+# release row carries an inline sha256 — so checking the body against the digest
+# in its own name makes the pin self-authenticating and leaves the mirror as
+# pure transport. Unverified, a content-addressed URL is just a URL.
+fn ocx-dist-pin-digest {|url|
+    var name = (re:replace '^.*/' '' (re:replace '[?#].*$' '' $url))
+    if (re:match '^[0-9a-f]{64}\.json$' $name) {
+        put (re:replace '\.json$' '' $name)
+    } else {
+        put ''
+    }
+}
+
+# Fetch the manifest as text, verifying it when the URL pins its own digest.
+fn ocx-fetch-dist {|url|
+    var pin = (ocx-dist-pin-digest $url)
+    if (eq $pin '') {
+        ocx-fetch-text $url
+        return
+    }
+
+    # Staged to a file: the digest covers the bytes as served, and `slurp` of a
+    # curl pipeline would not survive the trailing newline intact everywhere.
+    var tmp = (str:trim-space (e:mktemp))
+    if (not (ocx-download-file $url $tmp)) {
+        ocx-err "failed to fetch "$url 3
+    }
+    ocx-verify-checksum $tmp $pin &required=$true
+    var body = (slurp < $tmp)
+    e:rm -f $tmp
+    put $body
 }
 
 # --- Safe archive extraction ------------------------------------------------
@@ -283,7 +328,9 @@ fn ocx-main {|@args|
     ocx-say "Detected platform: "$target
     var exe = (if (re:match windows $target) { put ocx.exe } else { put ocx })
 
-    var dist_text = (ocx-fetch-text $dist_url)
+    # A content-addressed URL (dist/<sha256>.json) is verified against the
+    # digest in its own name before anything is parsed out of it.
+    var dist_text = (ocx-fetch-dist $dist_url)
     if (eq (str:trim-space $dist_text) '') {
         ocx-err "failed to determine the latest version: empty manifest at "$dist_url 3
     }

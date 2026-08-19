@@ -25,6 +25,15 @@ BeforeAll {
     $script:FixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-kn-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
     $fixture = New-OcxFixture -Root $FixtureRoot -ArgvLog 'on'
     $script:Server = Start-FixtureServer -SrvRoot $fixture.SrvRoot
+
+    # Content-addressed manifest snapshots (what scripts/publish-dist.sh and
+    # `ocx-mirror dist sync` publish beside the rolling dist.json). The "bad" one
+    # carries a name whose digest the body does not match - the case a mirror
+    # serving an altered manifest produces.
+    $script:DistPinSha = Publish-DistSnapshot -SrvRoot $fixture.SrvRoot
+    $script:DistPinBadSha = 'a' * 64
+    Copy-Item -Path (Join-Path $fixture.SrvRoot 'dist.json') `
+        -Destination (Join-Path $fixture.SrvRoot "dist/$DistPinBadSha.json") -Force
 }
 
 AfterAll {
@@ -165,5 +174,19 @@ Describe 'install.ps1 env knobs' {
         $env:__OCX_TESTING_INSTALL_BINARY = Join-Path ([System.IO.Path]::GetTempPath()) 'no-such-ocx-binary.exe'
         & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 2
+    }
+
+    It 'pinned manifest dist/<sha256>.json installs and is digest-verified' {
+        $env:OCX_INSTALL_NO_SETUP = '1'
+        $env:OCX_INSTALL_DIST_URL = "http://127.0.0.1:$($Server.Port)/dist/$DistPinSha.json"
+        & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
+        $LASTEXITCODE | Should -Be 0
+        Test-Path (Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) (Get-FixtureBinName)) | Should -BeTrue
+    }
+
+    It 'pinned manifest with an altered body exits 4' {
+        $env:OCX_INSTALL_DIST_URL = "http://127.0.0.1:$($Server.Port)/dist/$DistPinBadSha.json"
+        & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
+        $LASTEXITCODE | Should -Be 4
     }
 }
