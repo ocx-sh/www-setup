@@ -63,6 +63,36 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# --- Embedded configuration (sed-able) ---
+#
+# Corporate mirrors host ONE patched copy of this installer, carrying the site
+# defaults with it. Replace the placeholder values below with sed:
+#
+#   sed -i "s|<TOKEN>|https://artifactory.corp/ocx/dist.json|" install.*
+#
+# Each <TOKEN> is named for the environment variable it backs and is spelled
+# identically in all five installers (install.sh ps1 nu fish elv), so ONE
+# command patches every dialect. Values are single-quoted, which in every
+# dialect means no interpolation and newlines allowed - an entire PEM block can
+# be substituted for the CA bundle. Values must not contain a single quote.
+#
+# Precedence: environment > embedded > built-in default. A placeholder left
+# unreplaced still matches @OCX_*@ and is ignored, so a pristine installer
+# behaves exactly as it always has.
+
+$OcxCfgDistUrl       = '@OCX_INSTALL_DIST_URL@'
+$OcxCfgMirrorUrl     = '@OCX_INSTALL_MIRROR_URL@'
+$OcxCfgCaBundle      = '@OCX_INSTALL_CA_BUNDLE@'
+$OcxCfgManagedConfig = '@OCX_MANAGED_CONFIG@'
+
+# The embedded value unless it is still an unreplaced placeholder. The guard
+# carries no complete token, so no sed of a token above can ever rewrite it.
+function Resolve-EmbeddedConfig {
+    param([string]$Embedded, [string]$Fallback = '')
+    if ($Embedded -clike '@OCX_*@') { return $Fallback }
+    return $Embedded
+}
+
 # --- Host OS predicate (5.1-safe) ---
 
 # True on a Windows host. Windows PowerShell 5.1 is the Desktop edition and is
@@ -93,17 +123,33 @@ function Test-Truthy {
 
 # --- Configuration (env-driven) ---
 #
-# Tier 1 - shared OCX env: OCX_HOME, OCX_NO_MODIFY_PATH. Plus NO_COLOR, TMPDIR.
+# Tier 1 - shared OCX env: OCX_HOME, OCX_NO_MODIFY_PATH, OCX_MANAGED_CONFIG.
+#          Plus NO_COLOR, TMPDIR.
 # Tier 2 - installer-only knobs, all OCX_INSTALL_*:
-#   values:    OCX_INSTALL_VERSION (empty = latest), OCX_INSTALL_REPO
+#   values:    OCX_INSTALL_VERSION (empty = latest), OCX_INSTALL_REPO,
+#              OCX_INSTALL_CA_BUNDLE
 #   endpoints: OCX_INSTALL_DIST_URL, OCX_INSTALL_MIRROR_URL
 #   opt-outs:  OCX_INSTALL_NO_SETUP, OCX_INSTALL_NO_SMOKETEST
 #   opt-ins:   OCX_INSTALL_FORCE, OCX_INSTALL_QUIET, OCX_INSTALL_PRINT_PATH
 # (OCX_INSTALL_DOWNLOADER is sh-only; install.ps1 always uses Invoke-WebRequest.)
 
 $OcxInstallRepo      = if ($env:OCX_INSTALL_REPO)        { $env:OCX_INSTALL_REPO }        else { 'ocx-sh/ocx' }
-$OcxInstallDistUrl   = if ($env:OCX_INSTALL_DIST_URL)    { $env:OCX_INSTALL_DIST_URL }    else { 'https://setup.ocx.sh/dist.json' }
-$OcxInstallMirrorUrl = if ($env:OCX_INSTALL_MIRROR_URL)  { $env:OCX_INSTALL_MIRROR_URL }  else { '' }
+$OcxInstallDistUrl   = if ($env:OCX_INSTALL_DIST_URL)    { $env:OCX_INSTALL_DIST_URL }    else { Resolve-EmbeddedConfig $OcxCfgDistUrl 'https://setup.ocx.sh/dist.json' }
+$OcxInstallMirrorUrl = if ($env:OCX_INSTALL_MIRROR_URL)  { $env:OCX_INSTALL_MIRROR_URL }  else { Resolve-EmbeddedConfig $OcxCfgMirrorUrl '' }
+
+# CA bundle (PEM file). ACCEPTED DIVERGENCE: Invoke-WebRequest has no 5.1-safe
+# CA-bundle parameter, so install.ps1 cannot honor it - the knob is parsed so a
+# uniformly sed-ed installer set does not fail here, and Main warns once. On
+# Windows, install the CA into the machine certificate store instead.
+$OcxInstallCaBundle  = if ($env:OCX_INSTALL_CA_BUNDLE)   { $env:OCX_INSTALL_CA_BUNDLE }   else { Resolve-EmbeddedConfig $OcxCfgCaBundle '' }
+
+# Corporate managed-config OCI ref, forwarded to `ocx self setup
+# --managed-config`. ONLY from the embedded block: when OCX_MANAGED_CONFIG is
+# set, the flag is omitted so `ocx self setup` reads the env itself (its own
+# documented order is flag > OCX_MANAGED_CONFIG > existing seed), which keeps
+# env ahead of embedded.
+$OcxManagedConfig = ''
+if (-not $env:OCX_MANAGED_CONFIG) { $OcxManagedConfig = Resolve-EmbeddedConfig $OcxCfgManagedConfig '' }
 
 # Behavioral knobs. Environment wins over switches.
 $OcxInstallNoSetup    = if (Test-Truthy $env:OCX_INSTALL_NO_SETUP)    { $true } else { [bool]$NoSetup }
@@ -650,6 +696,41 @@ function Main {
         if ($callerVersion -and $callerVersion.Value) { $requestedVersion = $callerVersion.Value }
     }
 
+    # `ocx self setup` does its own HTTPS work (it pulls the package store from
+    # the registry). It merges the host trust store into its compiled-in Mozilla
+    # roots and discovers that store via SSL_CERT_FILE / SSL_CERT_DIR (PEM only)
+    # - so the bundle is handed down even though install.ps1 cannot use it for
+    # its OWN downloads. An SSL_CERT_FILE already in the environment wins.
+    #
+    # The value is either a path or the PEM text itself (the embedded placeholder
+    # is single-quoted, and single quotes span newlines in every dialect). Inline
+    # PEM is materialized to a temp file, because SSL_CERT_FILE is a PATH; it is a
+    # public certificate, so it is left for TEMP to reap.
+    if ($OcxInstallCaBundle) {
+        Warn ("OCX_INSTALL_CA_BUNDLE is not honored by install.ps1's own downloads " +
+            '(Invoke-WebRequest has no CA-bundle option) - install the CA into the machine ' +
+            'certificate store instead. It is still passed to `ocx self setup` via SSL_CERT_FILE.')
+        $caPath = $OcxInstallCaBundle
+        # A real bundle may open with comment lines or a certificate label
+        # (Fedora/RHEL ship exactly that), so detect PEM by CONTENT, not by a
+        # leading marker: a filesystem path can never contain "-----BEGIN".
+        if ($OcxInstallCaBundle.Contains('-----BEGIN')) {
+            $caPath = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName() + '.pem')
+            [System.IO.File]::WriteAllText($caPath, $OcxInstallCaBundle + "`n")
+        }
+        else {
+            # Test-Path can THROW on a string with characters that are illegal in
+            # a Windows path, and $ErrorActionPreference is Stop - which would
+            # surface as an unhandled error instead of the contract's exit 2.
+            $caExists = $false
+            try { $caExists = Test-Path -LiteralPath $caPath -PathType Leaf } catch { $caExists = $false }
+            if (-not $caExists) {
+                Err "OCX_INSTALL_CA_BUNDLE is neither a readable file nor an inline PEM block: $caPath" 2
+            }
+        }
+        if (-not $env:SSL_CERT_FILE) { $env:SSL_CERT_FILE = $caPath }
+    }
+
     $ocxHome = Get-DefaultOcxHome
     Assert-SafeOcxHome -Path $ocxHome
     $installBinDir = Join-Path $ocxHome $OcxBinSubPath
@@ -658,6 +739,10 @@ function Main {
     # OCX_NO_MODIFY_PATH or -NoModifyPath). No-op in NO_SETUP mode.
     $postFlags = @()
     if ($OcxNoModifyPath) { $postFlags += '--no-modify-path' }
+    # Adopt the corporate managed-config tier. Not forwarded on the --offline
+    # test hatch below, where the OCI fetch could not succeed anyway.
+    $managedPostFlags = $postFlags
+    if ($OcxManagedConfig) { $managedPostFlags = @($postFlags) + @('--managed-config', $OcxManagedConfig) }
 
     # --- Internal test-mode hatch (UNDOCUMENTED) ---
     if ($env:__OCX_TESTING_INSTALL_BINARY) {
@@ -797,7 +882,7 @@ function Main {
             # Hand off: `ocx self setup <version>` installs that version from the
             # registry into the package store and writes the env shim + profile
             # block. The version is a positional to `self setup`.
-            Invoke-SelfSetup -Bin $bin -PostArgs (@($requestedVersion) + $postFlags)
+            Invoke-SelfSetup -Bin $bin -PostArgs (@($requestedVersion) + $managedPostFlags)
             Print-Success -InstalledVersion $requestedVersion
         }
 

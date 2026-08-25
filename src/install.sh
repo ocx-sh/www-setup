@@ -39,13 +39,48 @@ set -eu
 has_local() { local _ 2>/dev/null; }
 has_local || alias local=typeset
 
+# --- Embedded configuration (sed-able) --------------------------------------
+#
+# Corporate mirrors host ONE patched copy of this installer, carrying the site
+# defaults with it. Replace the placeholder values below with sed:
+#
+#   sed -i "s|<TOKEN>|https://artifactory.corp/ocx/dist.json|" install.*
+#
+# Each <TOKEN> is named for the environment variable it backs and is spelled
+# identically in all five installers (install.sh ps1 nu fish elv), so ONE
+# command patches every dialect. Values are single-quoted, which in every
+# dialect means no interpolation and newlines allowed — an entire PEM block can
+# be substituted for the CA bundle. Values must not contain a single quote.
+#
+# Precedence: environment > embedded > built-in default. A placeholder left
+# unreplaced still matches @OCX_*@ and is ignored, so a pristine installer
+# behaves exactly as it always has.
+
+__ocx_cfg_dist_url='@OCX_INSTALL_DIST_URL@'
+__ocx_cfg_mirror_url='@OCX_INSTALL_MIRROR_URL@'
+__ocx_cfg_ca_bundle='@OCX_INSTALL_CA_BUNDLE@'
+__ocx_cfg_managed_config='@OCX_MANAGED_CONFIG@'
+
+# ocx_cfg <embedded> <fallback> — echo the embedded value unless it is still an
+# unreplaced placeholder. The guard carries no complete token, so no sed of a
+# token above can ever rewrite it.
+# printf, not echo: dash's echo eats backslash escapes, which would mangle a
+# value like C:\certs\corp.pem.
+ocx_cfg() {
+    case "$1" in
+        @OCX_*@) printf '%s\n' "$2" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
 # --- Configuration (env-driven) ---------------------------------------------
 #
-# Tier 1 — shared OCX env (read by the binary too): OCX_HOME, OCX_NO_MODIFY_PATH.
-# Plus standard externals NO_COLOR, TMPDIR.
+# Tier 1 — shared OCX env (read by the binary too): OCX_HOME, OCX_NO_MODIFY_PATH,
+# OCX_MANAGED_CONFIG. Plus standard externals NO_COLOR, TMPDIR.
 #
 # Tier 2 — installer-only knobs, all OCX_INSTALL_* with a strict grammar:
-#   values (bare nouns):  OCX_INSTALL_VERSION (empty = latest), OCX_INSTALL_REPO
+#   values (bare nouns):  OCX_INSTALL_VERSION (empty = latest), OCX_INSTALL_REPO,
+#                         OCX_INSTALL_CA_BUNDLE
 #   endpoints (_URL):     OCX_INSTALL_DIST_URL, OCX_INSTALL_MIRROR_URL
 #   opt-outs (NO_):       OCX_INSTALL_NO_SETUP, OCX_INSTALL_NO_SMOKETEST
 #   opt-ins (bare verb):  OCX_INSTALL_FORCE, OCX_INSTALL_QUIET, OCX_INSTALL_PRINT_PATH
@@ -57,11 +92,11 @@ OCX_INSTALL_REPO="${OCX_INSTALL_REPO:-ocx-sh/ocx}"
 # downloader — no GitHub API, no token. See get_latest_version / dist_row.
 # A content-addressed snapshot URL (.../dist/<sha256>.json) pins the manifest and
 # is verified against the digest in its own name — see fetch_dist.
-OCX_INSTALL_DIST_URL="${OCX_INSTALL_DIST_URL:-https://setup.ocx.sh/dist.json}"
+OCX_INSTALL_DIST_URL="${OCX_INSTALL_DIST_URL:-$(ocx_cfg "$__ocx_cfg_dist_url" "https://setup.ocx.sh/dist.json")}"
 # Artifact host override: when set, the per-target download URL from dist.json is
 # rewritten to ${OCX_INSTALL_MIRROR_URL%/}/<tag>/<filename>. Empty = use the
 # manifest's URL verbatim (GitHub Releases).
-OCX_INSTALL_MIRROR_URL="${OCX_INSTALL_MIRROR_URL:-}"
+OCX_INSTALL_MIRROR_URL="${OCX_INSTALL_MIRROR_URL:-$(ocx_cfg "$__ocx_cfg_mirror_url" "")}"
 # Pin a specific version (empty = resolve latest stable from the manifest). This
 # is the portable pinning channel across every shell's `curl | <shell>` arg
 # quirks; --version is sugar where the dialect parses it cleanly.
@@ -74,6 +109,19 @@ OCX_INSTALL_PRINT_PATH="${OCX_INSTALL_PRINT_PATH:-0}"
 OCX_INSTALL_FORCE="${OCX_INSTALL_FORCE:-0}"
 OCX_INSTALL_QUIET="${OCX_INSTALL_QUIET:-0}"
 OCX_INSTALL_DOWNLOADER="${OCX_INSTALL_DOWNLOADER:-}"
+
+# CA bundle (PEM file) for every download — TLS-intercepting corporate proxies.
+# Trust only; the inline sha256 from dist.json stays the integrity boundary.
+OCX_INSTALL_CA_BUNDLE="${OCX_INSTALL_CA_BUNDLE:-$(ocx_cfg "$__ocx_cfg_ca_bundle" "")}"
+
+# Corporate managed-config OCI ref, forwarded to `ocx self setup --managed-config`.
+# ONLY from the embedded block: when OCX_MANAGED_CONFIG is exported, the flag is
+# omitted so `ocx self setup` reads the env itself (its own documented order is
+# flag > OCX_MANAGED_CONFIG > existing seed), which keeps env ahead of embedded.
+_managed_config=""
+if [ -z "${OCX_MANAGED_CONFIG:-}" ]; then
+    _managed_config=$(ocx_cfg "$__ocx_cfg_managed_config" "")
+fi
 
 # --- Truthy helper ----------------------------------------------------------
 
@@ -166,6 +214,8 @@ OPTIONS:
 ENVIRONMENT (user-facing):
     OCX_HOME                  Installation directory (default: ~/.ocx)
     OCX_NO_MODIFY_PATH        Truthy to skip shell profile modification
+    OCX_MANAGED_CONFIG        Corporate managed-config OCI ref (read by
+                              `ocx self setup`; overrides the embedded default)
     NO_COLOR                  Disable colored output (https://no-color.org/)
 
 ENVIRONMENT (installer knobs):
@@ -182,6 +232,7 @@ ENVIRONMENT (installer knobs):
     OCX_INSTALL_QUIET         Truthy = suppress informational logs
     OCX_INSTALL_PRINT_PATH    Truthy = emit absolute bin dir on final stdout line
     OCX_INSTALL_DOWNLOADER    Force 'curl' or 'wget' (default: auto-detect)
+    OCX_INSTALL_CA_BUNDLE     CA bundle (PEM file) trusted for every download
 EOF
 }
 
@@ -277,25 +328,43 @@ detect_downloader() {
     fi
 }
 
+# The CA bundle is passed as its own argv element rather than spliced into an
+# unquoted flag string, so a path containing spaces still works.
 download_to_file() {
     local _url="$1" _dest="$2"
 
     if [ "$_downloader" = "curl" ]; then
-        curl --proto '=https' --tlsv1.2 -fsSL -o "$_dest" "$_url"
+        if [ -n "$OCX_INSTALL_CA_BUNDLE" ]; then
+            curl --proto '=https' --tlsv1.2 --cacert "$OCX_INSTALL_CA_BUNDLE" -fsSL -o "$_dest" "$_url"
+        else
+            curl --proto '=https' --tlsv1.2 -fsSL -o "$_dest" "$_url"
+        fi
     else
         assert_https_url "$_url"
         # --https-only refuses a redirect to http:// (assert_https_url only vets
         # the INITIAL URL; wget follows up to 20 redirects). TLSv1_2 floor.
-        wget --secure-protocol=TLSv1_2 --https-only -q -O "$_dest" "$_url"
+        if [ -n "$OCX_INSTALL_CA_BUNDLE" ]; then
+            wget --secure-protocol=TLSv1_2 --https-only --ca-certificate="$OCX_INSTALL_CA_BUNDLE" -q -O "$_dest" "$_url"
+        else
+            wget --secure-protocol=TLSv1_2 --https-only -q -O "$_dest" "$_url"
+        fi
     fi
 }
 
 download() {
     if [ "$_downloader" = "curl" ]; then
-        curl --proto '=https' --tlsv1.2 -fsSL "$1"
+        if [ -n "$OCX_INSTALL_CA_BUNDLE" ]; then
+            curl --proto '=https' --tlsv1.2 --cacert "$OCX_INSTALL_CA_BUNDLE" -fsSL "$1"
+        else
+            curl --proto '=https' --tlsv1.2 -fsSL "$1"
+        fi
     else
         assert_https_url "$1"
-        wget --secure-protocol=TLSv1_2 --https-only -qO- "$1"
+        if [ -n "$OCX_INSTALL_CA_BUNDLE" ]; then
+            wget --secure-protocol=TLSv1_2 --https-only --ca-certificate="$OCX_INSTALL_CA_BUNDLE" -qO- "$1"
+        else
+            wget --secure-protocol=TLSv1_2 --https-only -qO- "$1"
+        fi
     fi
 }
 
@@ -556,6 +625,9 @@ cleanup() {
     if [ -n "${_tmpdir:-}" ]; then
         ignore rm -rf "$_tmpdir"
     fi
+    if [ -n "${_ca_tmp:-}" ]; then
+        ignore rm -f "$_ca_tmp"
+    fi
 }
 
 # --- Success banner ---------------------------------------------------------
@@ -615,6 +687,39 @@ main() {
         _no_modify_path=0
     fi
 
+    # The CA bundle is either a path or the PEM text itself. The embedded
+    # placeholder is single-quoted in every dialect and single quotes span
+    # newlines, so a whole PEM block can be substituted straight into the
+    # script — no second file to ship alongside the mirrored installer. Inline
+    # PEM is materialized to a temp file, which is what curl/wget need.
+    # A real bundle may open with comment lines or a certificate label
+    # (Fedora/RHEL ship exactly that), so detect PEM by CONTENT, not by a
+    # leading marker: a filesystem path can never contain "-----BEGIN".
+    case "$OCX_INSTALL_CA_BUNDLE" in
+        "") ;;
+        *"-----BEGIN"*)
+            need_cmd mktemp
+            _ca_tmp=$(mktemp) # mktemp already creates it 0600
+            trap cleanup EXIT INT TERM HUP
+            printf '%s\n' "$OCX_INSTALL_CA_BUNDLE" >"$_ca_tmp"
+            OCX_INSTALL_CA_BUNDLE="$_ca_tmp"
+            ;;
+        *)
+            if [ ! -r "$OCX_INSTALL_CA_BUNDLE" ]; then
+                err "OCX_INSTALL_CA_BUNDLE is neither a readable file nor an inline PEM block: $OCX_INSTALL_CA_BUNDLE" 2
+            fi
+            ;;
+    esac
+    # `ocx self setup` does its own HTTPS work (it pulls the package store from
+    # the registry). It merges the host trust store into its compiled-in Mozilla
+    # roots and discovers that store via SSL_CERT_FILE / SSL_CERT_DIR (PEM only)
+    # — so handing the same bundle down is what makes ONE corporate CA cover
+    # BOTH hops. An SSL_CERT_FILE already in the environment wins, as everywhere.
+    if [ -n "$OCX_INSTALL_CA_BUNDLE" ] && [ -z "${SSL_CERT_FILE:-}" ]; then
+        SSL_CERT_FILE="$OCX_INSTALL_CA_BUNDLE"
+        export SSL_CERT_FILE
+    fi
+
     _ocx_home="${OCX_HOME:-$HOME/.ocx}"
     assert_safe_ocx_home "$_ocx_home"
     _bin_dir="${_ocx_home}/${OCX_BIN_SUBPATH}"
@@ -625,6 +730,12 @@ main() {
     _post=""
     if [ "$_no_modify_path" = "1" ]; then
         _post="--no-modify-path"
+    fi
+    # Adopt the corporate managed-config tier. Not forwarded on the --offline
+    # test hatch below, where the OCI fetch could not succeed anyway.
+    _managed_post="$_post"
+    if [ -n "$_managed_config" ]; then
+        _managed_post="$_post --managed-config $_managed_config"
     fi
 
     # --- Internal test-mode hatch (UNDOCUMENTED) ---------------------------
@@ -765,7 +876,7 @@ main() {
         # Hand off: `ocx self setup <version>` installs that version from the
         # registry into the package store and writes the env shims + profile
         # blocks. The version is a positional to `self setup`.
-        run_self_setup "$_bin" "" "$_version $_post"
+        run_self_setup "$_bin" "" "$_version $_managed_post"
         print_success "$_version"
     fi
 
