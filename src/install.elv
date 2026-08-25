@@ -32,10 +32,50 @@ use platform
 use os
 use re
 
+# --- Embedded configuration (sed-able) --------------------------------------
+#
+# Corporate mirrors host ONE patched copy of this installer, carrying the site
+# defaults with it. Replace the placeholder values below with sed:
+#
+#   sed -i "s|<TOKEN>|https://artifactory.corp/ocx/dist.json|" install.*
+#
+# Each <TOKEN> is named for the environment variable it backs and is spelled
+# identically in all five installers (install.sh ps1 nu fish elv), so ONE
+# command patches every dialect. Values are single-quoted, which in every
+# dialect means no interpolation and newlines allowed — an entire PEM block can
+# be substituted for the CA bundle. Values must not contain a single quote.
+#
+# Precedence: environment > embedded > built-in default. A placeholder left
+# unreplaced still matches @OCX_*@ and is ignored, so a pristine installer
+# behaves exactly as it always has.
+
+var cfg-dist-url = '@OCX_INSTALL_DIST_URL@'
+var cfg-mirror-url = '@OCX_INSTALL_MIRROR_URL@'
+var cfg-ca-bundle = '@OCX_INSTALL_CA_BUNDLE@'
+var cfg-managed-config = '@OCX_MANAGED_CONFIG@'
+
 # --- Helpers ----------------------------------------------------------------
 
+# ocx-cfg <embedded> <fallback> — the embedded value unless it is still an
+# unreplaced placeholder. The guard carries no complete token, so no sed of a
+# token above can ever rewrite it.
+fn ocx-cfg {|embedded fallback|
+    if (and (str:has-prefix $embedded '@OCX_') (str:has-suffix $embedded '@')) {
+        put $fallback
+    } else {
+        put $embedded
+    }
+}
+
+# Precedence: environment > embedded > built-in default.
 fn ocx-env {|name fallback|
     if (has-env $name) { put (get-env $name) } else { put $fallback }
+}
+
+# CA bundle (PEM file) for every download — TLS-intercepting corporate proxies.
+# Trust only; the inline sha256 from dist.json stays the integrity boundary.
+fn ocx-ca-bundle {
+    ocx-env OCX_INSTALL_CA_BUNDLE (ocx-cfg $cfg-ca-bundle '')
 }
 
 fn ocx-truthy {|v|
@@ -99,10 +139,18 @@ fn ocx-assert-https {|url|
     }
 }
 
+# The CA bundle is passed as its own argv element, so a path containing spaces
+# still works.
+fn ocx-ca-args {
+    var ca = (ocx-ca-bundle)
+    if (eq $ca '') { put [] } else { put [--cacert $ca] }
+}
+
 # Fetch a URL as text (the manifest) -> stdout. Uses external curl.
 fn ocx-fetch-text {|url|
+    var ca = (ocx-ca-args)
     var out = ''
-    if ?(set out = (e:curl --proto '=https' --tlsv1.2 -fsSL $url 2>/dev/null | slurp)) {
+    if ?(set out = (e:curl --proto '=https' --tlsv1.2 $@ca -fsSL $url 2>/dev/null | slurp)) {
         put $out
     } else {
         ocx-err "failed to fetch "$url 3
@@ -111,7 +159,8 @@ fn ocx-fetch-text {|url|
 
 # Download a URL to a file (the archive). Returns via exit status of curl.
 fn ocx-download-file {|url dest|
-    put ?(e:curl --proto '=https' --tlsv1.2 -fsSL -o $dest $url 2>/dev/null)
+    var ca = (ocx-ca-args)
+    put ?(e:curl --proto '=https' --tlsv1.2 $@ca -fsSL -o $dest $url 2>/dev/null)
 }
 
 # --- Checksum verification --------------------------------------------------
@@ -269,8 +318,8 @@ fn ocx-assert-safe-home {|home|
 # --- Main -------------------------------------------------------------------
 
 fn ocx-main {|@args|
-    var dist_url = (ocx-env OCX_INSTALL_DIST_URL https://setup.ocx.sh/dist.json)
-    var mirror_url = (ocx-env OCX_INSTALL_MIRROR_URL '')
+    var dist_url = (ocx-env OCX_INSTALL_DIST_URL (ocx-cfg $cfg-dist-url https://setup.ocx.sh/dist.json))
+    var mirror_url = (ocx-env OCX_INSTALL_MIRROR_URL (ocx-cfg $cfg-mirror-url ''))
     var repo = (ocx-env OCX_INSTALL_REPO ocx-sh/ocx)
     var no_setup = (ocx-truthy (ocx-env OCX_INSTALL_NO_SETUP 0))
     var no_smoketest = (ocx-truthy (ocx-env OCX_INSTALL_NO_SMOKETEST 0))
@@ -295,6 +344,43 @@ fn ocx-main {|@args|
         set i = (+ $i 1)
     }
 
+    # The CA bundle is either a path or the PEM text itself. The embedded
+    # placeholder is single-quoted in every dialect and single quotes span
+    # newlines, so a whole PEM block can be substituted straight into the
+    # script — no second file to ship alongside the mirrored installer. Inline
+    # PEM is materialized to a temp file, which is what curl needs; it is a
+    # public certificate, so it is left for TMPDIR to reap rather than threaded
+    # through every error path.
+    var ca_bundle = (ocx-ca-bundle)
+    # A real bundle may open with comment lines or a certificate label
+    # (Fedora/RHEL ship exactly that), so detect PEM by CONTENT, not by a
+    # leading marker: a filesystem path can never contain "-----BEGIN".
+    if (str:contains $ca_bundle '-----BEGIN') {
+        var ca_tmp = (str:trim-space (e:mktemp | slurp))
+        print $ca_bundle"\n" > $ca_tmp
+        set-env OCX_INSTALL_CA_BUNDLE $ca_tmp
+    } elif (and (not-eq $ca_bundle '') (not (os:exists $ca_bundle))) {
+        ocx-err "OCX_INSTALL_CA_BUNDLE is neither a readable file nor an inline PEM block: "$ca_bundle 2
+    }
+    # `ocx self setup` does its own HTTPS work (it pulls the package store from
+    # the registry). It merges the host trust store into its compiled-in Mozilla
+    # roots and discovers that store via SSL_CERT_FILE / SSL_CERT_DIR (PEM only)
+    # — so handing the same bundle down is what makes ONE corporate CA cover
+    # BOTH hops. An SSL_CERT_FILE already in the environment wins, as everywhere.
+    if (and (not-eq (ocx-ca-bundle) '') (eq (ocx-env SSL_CERT_FILE '') '')) {
+        set-env SSL_CERT_FILE (ocx-ca-bundle)
+    }
+
+    # Corporate managed-config OCI ref, forwarded to `ocx self setup
+    # --managed-config`. ONLY from the embedded block: when OCX_MANAGED_CONFIG is
+    # exported, the flag is omitted so `ocx self setup` reads the env itself (its
+    # own documented order is flag > OCX_MANAGED_CONFIG > existing seed), which
+    # keeps env ahead of embedded.
+    var managed_config = ''
+    if (eq (ocx-env OCX_MANAGED_CONFIG '') '') {
+        set managed_config = (ocx-cfg $cfg-managed-config '')
+    }
+
     var home_base = (ocx-env HOME (ocx-env USERPROFILE ''))
     var ocx_home = (ocx-env OCX_HOME $home_base"/.ocx")
     ocx-assert-safe-home $ocx_home
@@ -302,6 +388,12 @@ fn ocx-main {|@args|
 
     var post = []
     if $no_modify_path { set post = [--no-modify-path] }
+    # Adopt the corporate managed-config tier. Not forwarded on the --offline
+    # test hatch below, where the OCI fetch could not succeed anyway.
+    var managed_post = $post
+    if (not-eq $managed_config '') {
+        set managed_post = [$@post --managed-config $managed_config]
+    }
 
     # --- Internal test-mode hatch (UNDOCUMENTED) ---
     var test_bin = (ocx-env __OCX_TESTING_INSTALL_BINARY '')
@@ -419,7 +511,7 @@ fn ocx-main {|@args|
         if (not-eq $platform:os windows) { e:chmod +x $bin_dir"/"$exe }
         ocx-say "Installed to "$bin_dir"/"$exe
     } else {
-        ocx-run-self-setup $bin [] [$version $@post]
+        ocx-run-self-setup $bin [] [$version $@managed_post]
     }
 
     e:rm -rf $tmpdir
