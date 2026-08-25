@@ -19,7 +19,8 @@ Describe 'install.ps1 exit codes' {
         $env:OCX_STUB_ARGV = $ArgvLog
         foreach ($v in 'GITHUB_PATH', '__OCX_TESTING_INSTALL_BINARY', 'OCX_INSTALL_PRINT_PATH',
             'OCX_INSTALL_QUIET', 'OCX_INSTALL_FORCE', 'OCX_INSTALL_NO_SETUP', 'OCX_INSTALL_VERSION',
-            'OCX_INSTALL_DIST_URL', 'OCX_INSTALL_MIRROR_URL') {
+            'OCX_INSTALL_DIST_URL', 'OCX_INSTALL_MIRROR_URL',
+            'OCX_INSTALL_CA_BUNDLE', 'OCX_MANAGED_CONFIG', 'SSL_CERT_FILE', 'SSL_CERT_DIR') {
             Remove-Item "Env:$v" -ErrorAction SilentlyContinue
         }
     }

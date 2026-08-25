@@ -139,6 +139,11 @@ server_stub_body() {
 if [ -n "${OCX_STUB_ARGV:-}" ]; then
     printf '%s\n' "$*" >>"$OCX_STUB_ARGV"
 fi
+# `ocx self setup` reads the host trust store through SSL_CERT_FILE; record what
+# the installer handed down so the CA tests can assert BOTH hops are covered.
+if [ -n "${OCX_STUB_ENV:-}" ]; then
+    printf 'SSL_CERT_FILE=%s\n' "${SSL_CERT_FILE:-}" >>"$OCX_STUB_ENV"
+fi
 case "$1" in
     version)
         echo "0.0.0"
@@ -258,4 +263,108 @@ server_build_fixture() {
     server_write_dist "$_srv" "$_target" "$_sum" "$_file"
 
     echo "$_target"
+}
+
+# server_embed_config <src-installer> <dest> [TOKEN=VALUE ...]
+#
+# Copy an installer and substitute its embedded-configuration placeholders,
+# exactly the way a corporate mirror patches its own copy. TOKEN is the bare
+# environment-variable name (e.g. OCX_INSTALL_DIST_URL); the @...@ wrapper is
+# added here. The substitution is a plain literal replace over the whole file —
+# the point of the token contract is that ONE such command works on every
+# dialect, so the suites must not special-case per shell.
+#
+# A VALUE may contain newlines (an inline PEM block) — every dialect's
+# single-quoted literal spans lines.
+server_embed_config() {
+    local _src="$1" _dest="$2"
+    shift 2
+    cp "$_src" "$_dest"
+    local _pair _token _value
+    for _pair in "$@"; do
+        _token="${_pair%%=*}"
+        _value="${_pair#*=}"
+        SRC="$_dest" TOKEN="@${_token}@" VALUE="$_value" python3 - <<'PY'
+import os
+p = os.environ['SRC']
+with open(p, encoding='utf-8') as f:
+    s = f.read()
+token = os.environ['TOKEN']
+assert token in s, 'placeholder %s not found in %s' % (token, p)
+with open(p, 'w', encoding='utf-8') as f:
+    f.write(s.replace(token, os.environ['VALUE']))
+PY
+    done
+}
+
+# True when a GNU wget is on PATH. The installers' wget branch uses GNU-only
+# flags (--secure-protocol, --https-only, --ca-certificate); Alpine ships
+# BusyBox wget, which has none of them, so wget-backend tests must gate on this
+# rather than on `command -v wget`.
+server_have_gnu_wget() {
+    command -v wget >/dev/null 2>&1 || return 1
+    wget --version 2>&1 | head -n 1 | grep -q 'GNU Wget'
+}
+
+# server_path_without_curl
+#
+# Echo a PATH whose entries mirror the current PATH except that `curl` is
+# absent. Forcing a dialect's wget fallback needs curl to be genuinely
+# unreachable — `command -v curl` skips non-executables and keeps searching, so
+# shadowing it does not work. A symlink farm does. Built once per .bats file.
+server_path_without_curl() {
+    local _farm="${BATS_FILE_TMPDIR}/nocurl-bin"
+    if [ ! -d "$_farm" ]; then
+        mkdir -p "$_farm"
+        local _dir _f _b
+        while IFS= read -r _dir; do
+            [ -n "$_dir" ] && [ -d "$_dir" ] || continue
+            for _f in "$_dir"/*; do
+                [ -x "$_f" ] || continue
+                _b="${_f##*/}"
+                # An `if`, not `[ ... ] && continue`: bats runs test code under
+                # `set -e`, where a bare `&&` list that evaluates false is itself
+                # a failing command.
+                if [ "$_b" != "curl" ] && [ ! -e "$_farm/$_b" ]; then
+                    ln -s "$_f" "$_farm/$_b" 2>/dev/null || true
+                fi
+            done
+        done <<<"${PATH//:/$'\n'}"
+    fi
+    printf '%s' "$_farm"
+}
+
+# server_pad_dist ROOT [BYTES]
+#
+# Write ROOT/dist-big.json: the fixture manifest plus a filler member large
+# enough to exceed a pipe buffer (default 200 KiB; the real setup.ocx.sh
+# manifest is ~73 KiB, the fixture one a few hundred bytes).
+#
+# Size is load-bearing, not cosmetic. A downloader that leaves the response on
+# an undrained stream deadlocks only once the body outgrows the 64 KiB pipe
+# buffer — small fixtures fit and hide the bug entirely. The filler carries no
+# braces, so the jq-free `{[^{}]*}` parses in sh/fish are unaffected.
+server_pad_dist() {
+    local _root="$1" _bytes="${2:-200000}" _pad=xxxxxxxxxxxxxxxx
+    # Doubled in the shell and emitted with the printf BUILTIN: a 200 KiB sed
+    # expression blows ARG_MAX (status 126, "Argument list too long"), and
+    # `tr '\0' 'x'` over /dev/zero is not portable to BSD tr on the macOS leg.
+    while [ ${#_pad} -lt "$_bytes" ]; do _pad="${_pad}${_pad}"; done
+    _pad="${_pad:0:$_bytes}"
+    {
+        printf '{\n  "_pad": "%s",\n' "$_pad"
+        # Everything after the opening brace of the real manifest.
+        sed '1d' "$_root/dist.json"
+    } >"$_root/dist-big.json"
+}
+
+# server_ca_bundle_inline
+#
+# Echo the fixture CA cert with the comment header a real distro bundle carries
+# (Fedora/RHEL's extracted tls-ca-bundle.pem opens with `# <name>` lines). Used
+# for the inline-PEM scenarios so they exercise detection by CONTENT rather than
+# by a leading `-----BEGIN` marker, which a real bundle does not have.
+server_ca_bundle_inline() {
+    printf '# Corp Root CA\n#\n# Issuer: Corp Internal Root\n'
+    cat "$(server_ca_bundle)"
 }
