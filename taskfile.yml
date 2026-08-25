@@ -91,21 +91,21 @@ tasks:
       - task: test:pester
 
   publish:dry-run:
-    desc: Validate publish-installers.sh STABLE archive/+latest/+next rsync targets, offline (no upload; run 'task dist' for the manifest).
+    desc: Validate publish-installers.sh STABLE archive/+latest/+next Bunny keys, offline (no upload, no credentials; run 'task dist' for the manifest).
     vars:
       # Strip any leading v AND any prerelease suffix so this always exercises
       # the stable channel (which writes both the latest/ and next/ pointers).
       VERSION:
         sh: 'ocx run git-cliff -- git-cliff --bumped-version 2>/dev/null | sed "s/^v//; s/-.*//" || echo "0.0.0"'
-    cmd: DRY_RUN=1 VERSION={{.VERSION}} SSH_KEY=/dev/null SETUP_OCX_HOST=setup.ocx.sh scripts/publish-installers.sh
+    cmd: DRY_RUN=1 VERSION={{.VERSION}} scripts/publish-installers.sh
 
   publish:dev-dry-run:
-    desc: Validate publish-installers.sh NEXT (prerelease) archive/+next rsync targets, offline (no upload; run 'task dist' for the manifest).
+    desc: Validate publish-installers.sh NEXT (prerelease) archive/+next Bunny keys, offline (no upload, no credentials; run 'task dist' for the manifest).
     vars:
       # Force a prerelease VERSION so the next/ channel pointers are exercised.
       # Override with VERSION=X.Y.Z-rc.N on the CLI.
       VERSION: '{{.VERSION | default "0.0.0-dev.0"}}'
-    cmd: DRY_RUN=1 VERSION={{.VERSION}} SSH_KEY=/dev/null SETUP_OCX_HOST=setup.ocx.sh scripts/publish-installers.sh
+    cmd: DRY_RUN=1 VERSION={{.VERSION}} scripts/publish-installers.sh
 
   dist:
     # Sourced from the ocx-sh/ocx GitHub Releases API (NOT this repo's tags), so
@@ -114,6 +114,21 @@ tasks:
     # fetches each release's sha256.sum asset to inline the per-target checksums.
     desc: Print the distribution manifest (dist.json) from the ocx-sh/ocx Releases API.
     cmd: scripts/gen-dist.sh
+
+  rules:plan:
+    desc: Print the setup.ocx.sh Bunny edge-rule set (offline, no credentials).
+    dir: deploy/bunny
+    cmd: python3 edge-rules.py plan
+
+  rules:apply:
+    desc: Apply the edge rules to the pull zone and purge (needs BUNNY_API_KEY).
+    dir: deploy/bunny
+    cmd: python3 edge-rules.py apply
+
+  rules:verify:
+    desc: Probe every routed URL against the live pull zone (needs no credentials).
+    dir: deploy/bunny
+    cmd: python3 edge-rules.py verify
 
   format:
     desc: Auto-format shell scripts

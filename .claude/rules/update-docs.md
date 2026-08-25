@@ -10,7 +10,7 @@ The README is the front door for `curl | <shell>` users. Update when:
 - **Env-var matrix** — an `OCX_INSTALL_*` knob added, removed, or renamed in any `src/install.*` (the matrix omits internal/test-only hatches like `__OCX_TESTING_INSTALL_BINARY`)
 - **Exit-code table** — code added, removed, or its meaning changes
 - **Distribution manifest / channels** — `OCX_INSTALL_DIST_URL`, the `/dist` manifest, or the stable/`next` channel layout changes
-- **URL layout** — the version-major on-disk dirs (`archive/<VERSION>/`, `latest/`, `next/`) or the nginx per-shell rewrite layer change (keep `deploy/nginx/setup.ocx.sh.conf.example` + `.claude/rules/publish.md` in sync)
+- **URL layout** — the version-major key prefixes (`archive/<VERSION>/`, `latest/`, `next/`) or the per-shell rewrite layer change (keep `deploy/bunny/edge-rules.py` and `.claude/rules/publish.md` in sync)
 - **Stdout/stderr contract** — discipline changes (which would be a major version bump)
 
 ## CONTRIBUTING.md
@@ -24,7 +24,7 @@ The CONTRIBUTING guide is for developers landing a PR. Update when:
 
 ## CLAUDE.md
 
-The CLAUDE.md surfaces table must reflect reality. Update when a top-level dir is added/removed (e.g. `src/`, `external/`, `deploy/nginx/`, `deploy/github/`) or a top-level pipeline script/workflow is added (e.g. `scripts/gen-dist.sh`, `scripts/publish-dist.sh`, `.github/workflows/update-dist.yml`). Also update the **Required release secrets** table when a secret is added (e.g. `SETUP_OCX_DISPATCH_TOKEN`, which lives in `ocx-sh/ocx`).
+The CLAUDE.md surfaces table must reflect reality. Update when a top-level dir is added/removed (e.g. `src/`, `external/`, `deploy/bunny/`, `deploy/github/`) or a top-level pipeline script/workflow is added (e.g. `scripts/gen-dist.sh`, `scripts/publish-dist.sh`, `scripts/lib/bunny.sh`, `.github/workflows/update-dist.yml`). Also update the **Required release secrets** table when a secret is added (e.g. `SETUP_OCX_DISPATCH_TOKEN`, which lives in `ocx-sh/ocx`).
 
 ## Cross-repo manifest
 
@@ -32,7 +32,7 @@ When the `dist.json` sourcing or refresh mechanism changes, keep these in sync (
 
 - `deploy/github/ocx-release-dispatch.yml.example` — the reference snippet `ocx-sh/ocx` adds to its release workflow (`repository_dispatch(ocx-released)`, `SETUP_OCX_DISPATCH_TOKEN`, the setup.ocx.sh repo slug in the API URL).
 - `scripts/gen-dist.sh` — sources `dist.json` from the `ocx-sh/ocx` GitHub Releases API (channel = API `prerelease` flag), inlining a per-target `sha256` + URL derived from each release's `sha256.sum`; uses `GITHUB_TOKEN` in CI.
-- `scripts/publish-dist.sh` — regenerate + rsync `dist.json` (also invoked on installer releases).
+- `scripts/publish-dist.sh` — regenerate + upload `dist.json` to Bunny Edge Storage (also invoked on installer releases).
 - `.github/workflows/update-dist.yml` — rebuilds the manifest on dispatch + hourly cron + manual.
 - `.claude/rules/publish.md` and `.claude/rules/workflow-release.md` — the contract + the cross-repo dispatch/cron-fallback flow.
 

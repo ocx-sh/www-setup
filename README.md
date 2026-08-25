@@ -20,7 +20,7 @@ https://setup.ocx.sh/dist           # dist.json — the distribution manifest th
 
 Each installer is a **thin bootstrap**: it detects the platform, resolves the release from the manifest, downloads + verifies the archive against the manifest's inline `sha256`, then hands off to the downloaded binary's `ocx self setup` — which owns the package-store install, the per-shell env shims, and the managed shell-profile activation blocks.
 
-The bare paths are nginx rewrites onto the latest-stable installer. The pre-release ("next") channel and pinned, immutable copies are reachable at the same friendly per-shell prefix:
+The bare paths are Bunny CDN edge-rule rewrites onto the latest-stable installer. The pre-release ("next") channel and pinned, immutable copies are reachable at the same friendly per-shell prefix:
 
 ```
 https://setup.ocx.sh/<shell>/next          # next (latest prerelease)  [alias: /<shell>/canary]
@@ -138,7 +138,7 @@ task verify                                    # lint (5 shells) + Bats + Pester
 task test:bats                                 # only Bats (vendored)
 task test:pester                               # only Pester (needs pwsh + Pester)
 task docker:integration DISTRO=alpine PLATFORM=linux/amd64
-task publish:dry-run                           # validate rsync paths
+task publish:dry-run                           # validate storage keys (offline)
 ```
 
 [`CONTRIBUTING.md`](CONTRIBUTING.md) covers prerequisites and the PR flow. [`CLAUDE.md`](CLAUDE.md) is the AI-collaboration entry point.

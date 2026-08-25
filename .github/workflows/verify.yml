@@ -154,3 +154,17 @@ jobs:
       - uses: cocogitto/cocogitto-action@v4.2.0
         with:
           command: check
+
+  edge-rules:
+    name: Bunny edge-rule plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # The pull zone's edge rules ARE the routing contract — the friendly
+      # per-shell URLs are not stored objects. `plan` renders the full rule set
+      # offline (no credentials, no network), so a change to the routing shows
+      # up in review as a diff. `apply`/`verify` need BUNNY_API_KEY and run
+      # out-of-band.
+      - name: Render the edge-rule plan
+        working-directory: deploy/bunny
+        run: python3 edge-rules.py plan

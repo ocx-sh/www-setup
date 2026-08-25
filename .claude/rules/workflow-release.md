@@ -24,9 +24,11 @@ The tag push triggers `.github/workflows/release.yml`.
 | Job | Action |
 |---|---|
 | `release` | Generates GitHub release notes from git-cliff `--latest`, creates the release. Marks it `prerelease: true` when the tag contains `-`, and SKIPS the "update major version tag" step for prerelease tags. |
-| `publish-installers` | Table-driven rsync of all five `src/install.*` to the channel-appropriate paths via `publish-installers.sh` (`DEPLOY_SSH_KEY` + `DEPLOY_HOST`/`DEPLOY_PORT`/`DEPLOY_SSH_KNOWN_HOSTS`), then refreshes + uploads `dist.json` via `publish-dist.sh` (which regenerates it from the `ocx-sh/ocx` Releases API via `gen-dist.sh`) |
+| `publish-installers` | Table-driven upload of all five `src/install.*` to the channel-appropriate Bunny Edge Storage keys via `publish-installers.sh` (`BUNNY_STORAGE_KEY` + `BUNNY_STORAGE_ZONE`), then refreshes + uploads `dist.json` via `publish-dist.sh` (which regenerates it from the `ocx-sh/ocx` Releases API via `gen-dist.sh`) |
 
 Both jobs run on every `v*` tag (prereleases included). There is no mirror-to-GitLab step — the GLF lives in a separate repo now.
+
+The **routing** layer is separate and is not deployed by CI: `deploy/bunny/edge-rules.py apply` writes the pull zone's edge rules out-of-band (it needs `BUNNY_API_KEY`, an account-wide credential that deliberately does not live in CI). Publishing content never touches routing, and applying routing never touches content. See [`deploy/bunny/README.md`](../../deploy/bunny/README.md).
 
 ## Stable vs. prerelease ("next") tags
 
@@ -34,14 +36,14 @@ Channel routing keys off the tag string (`-` present → prerelease). For each i
 
 | Tag shape | Example | GH release | Pointer dir(s) overwritten | Pinned copy |
 |---|---|---|---|---|
-| stable | `v0.5.0` | normal | `latest/install.<ext>` **and** `next/install.<ext>` (next never lags latest) | `archive/0.5.0/` |
-| prerelease | `v0.5.0-rc.1` | `prerelease: true` | `next/install.<ext>` only (`latest/` untouched) | `archive/0.5.0-rc.1/` |
+| stable | `v0.5.0` | normal | `latest/<shell>` **and** `next/<shell>` (next never lags latest) | `archive/0.5.0/` |
+| prerelease | `v0.5.0-rc.1` | `prerelease: true` | `next/<shell>` only (`latest/` untouched) | `archive/0.5.0-rc.1/` |
 
 Every installer release (either channel) also refreshes `dist.json` — but note the manifest is sourced from the **`ocx-sh/ocx` Releases API**, not this repo's tags, so its contents track OCX product versions independently of the installer-script tag you just pushed (see the Cross-repo manifest section below). Validate locally with `task publish:dry-run` (stable) or `task publish:dev-dry-run` (prerelease).
 
 ## Version policy
 
-The project is **pre-release**: there are zero git tags and nothing has shipped yet. The first release will cut the initial tag. Once versioning starts, the conventional-commit → bump mapping is:
+The project is **pre-release** but has shipped: `v0.1.0-rc.1`, `v0.1.0`, `v0.1.1` (plus the `v0` major alias). The conventional-commit → bump mapping is:
 
 - `feat:` → minor
 - `fix:`, `perf:` → patch

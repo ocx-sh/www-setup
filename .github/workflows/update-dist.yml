@@ -26,33 +26,9 @@ jobs:
         if: github.event_name == 'repository_dispatch'
         run: echo "Refreshing dist manifest for ocx version ${{ github.event.client_payload.version }}"
 
-      - name: Configure SSH
-        env:
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
-        run: |
-          test -n "$DEPLOY_SSH_KEY" || { echo "DEPLOY_SSH_KEY secret is empty" >&2; exit 1; }
-          test -n "$DEPLOY_SSH_KNOWN_HOSTS" || { echo "DEPLOY_SSH_KNOWN_HOSTS secret is empty" >&2; exit 1; }
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 644 ~/.ssh/known_hosts
-          # Validate the private key parses, and log its derived public key
-          # (public keys are not secret) so it can be matched against the deploy
-          # user's authorized_keys on the server.
-          if ! ssh-keygen -y -f ~/.ssh/id_ed25519 > ~/.ssh/id_ed25519.pub; then
-            echo "DEPLOY_SSH_KEY is not a valid OpenSSH private key (the secret must hold real newlines, not one collapsed line)" >&2
-            exit 1
-          fi
-          echo "Deploy public key (add to the deploy user's ~/.ssh/authorized_keys):" >&2
-          cat ~/.ssh/id_ed25519.pub >&2
-
       - name: Publish dist manifest
         env:
-          SETUP_OCX_HOST: ${{ secrets.DEPLOY_HOST }}
-          SSH_PORT: ${{ secrets.DEPLOY_PORT }}
-          SSH_KEY: /home/runner/.ssh/id_ed25519
+          BUNNY_STORAGE_KEY: ${{ secrets.BUNNY_STORAGE_KEY }}
+          BUNNY_STORAGE_ZONE: ${{ secrets.BUNNY_STORAGE_ZONE }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/publish-dist.sh

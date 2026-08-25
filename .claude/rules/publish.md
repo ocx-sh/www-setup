@@ -6,32 +6,46 @@ The installer-publish pipeline owns one job: keep `setup.ocx.sh` serving the lat
 
 Five entrypoints, one per shell (`<shell>` ∈ `sh pwsh nu fish elvish`; `<ext>` ∈ `sh ps1 nu fish elv`):
 
-**On-disk layout** (version-major — what the publish pipeline uploads):
+**Stored key layout** (version-major — what the publish pipeline uploads to Bunny Edge Storage). Edge Storage is DIRECTORY-backed, not a flat keyspace: a path is a file or a directory, never both, so `sh` and `sh/next` can never coexist as objects. The friendly URLs are therefore routed, never stored.
 
 ```
-setup.ocx.sh/archive/<VERSION>/install.<ext>  # pinned (immutable, append-only); all 5 installers per release
-setup.ocx.sh/latest/install.<ext>             # STABLE channel pointer (mutable, overwritten)
-setup.ocx.sh/next/install.<ext>               # "next" channel pointer: newest of prerelease + stable (mutable, overwritten)
+archive/<VERSION>/install.<ext>   # pinned (immutable, append-only); canonical artifact URL
+archive/<VERSION>/<shell>        # same bytes, shell-segment name (feeds the pinned rewrite)
+latest/<shell>                   # STABLE channel pointer (mutable, overwritten)
+next/<shell>                     # "next" channel pointer: newest of prerelease + stable (mutable)
 setup.ocx.sh/dist.json                        # distribution manifest (overwritten every release)
 setup.ocx.sh/dist.json.sha256                 # sha256sum-format sidecar for the rolling manifest
 setup.ocx.sh/dist/<sha256>.json               # immutable manifest snapshot (append-only)
 ```
 
-**Friendly per-shell URLs** (nginx rewrites onto the dirs above; no files of their own):
+Cache-Control is applied by pull-zone edge rules, per route, not stored per
+object: `archive/` and `dist/<sha256>.json` get `max-age=31536000`; everything
+else falls through to the zone default of `max-age=300`, which is what keeps a
+published release and the dispatch-triggered `dist.json` refresh actually
+visible instead of stale at the edge.
+
+**Friendly per-shell URLs** (edge-rule rewrites onto the keys above; no objects of their own):
 
 ```
-setup.ocx.sh/<shell>            # → latest/install.<ext>
-setup.ocx.sh/<shell>/next       # → next/install.<ext>                (alias: /<shell>/canary)
-setup.ocx.sh/<shell>/<VERSION>  # → archive/<VERSION>/install.<ext>   (optional trailing /install.<ext>)
+setup.ocx.sh/<shell>            # → latest/<shell>
+setup.ocx.sh/<shell>/next       # → next/<shell>                 (alias: /<shell>/canary)
+setup.ocx.sh/<shell>/<VERSION>  # → archive/<VERSION>/<shell>    (optional trailing /install.<ext>)
 setup.ocx.sh/dist               # → dist.json
 setup.ocx.sh/releases           # legacy alias → dist.json
 ```
 
-`/dist` is an EXACT-match `location`, so `/dist/<sha256>.json` is not shadowed by it — the snapshot is served straight from the static root.
+`/dist` is matched EXACTLY (not as a prefix), so `/dist/<sha256>.json` is not shadowed by it — the snapshot is served straight from storage.
 
 `<VERSION>` is the semver string without a leading `v` (e.g. `2.0.1`, not `v2.0.1`).
 
-The per-shell `/<shell>` URLs carry no files of their own — regex `location`s rewrite them onto `latest/`, `next/`, and `archive/<VERSION>/`; `/dist` is a `try_files` alias for `dist.json`. The `canary` segment is an nginx alias for `next` (the pipeline only ever writes the `next/` dir). The nginx routing contract is mirrored in `deploy/nginx/setup.ocx.sh.conf.example` — keep the two in sync. The host's live nginx config is authoritative; the example is reference.
+The per-shell `/<shell>` URLs carry no objects of their own — pull-zone edge rules rewrite them onto `latest/`, `next/`, and `archive/<VERSION>/`; `/dist` is an exact-match alias for `dist.json`. The `canary` segment is an alias for `next` (the pipeline only ever writes the `next/` prefix). **`deploy/bunny/edge-rules.py` IS the routing contract** — it is applied, not reference, and `edge-rules.py verify` probes every row of the table above against the live zone.
+
+Two Bunny-specific traps, both found the hard way:
+
+- **`*` is greedy across `/`.** A pattern of `https://*/sh` matches `/latest/sh` and `/archive/0.1.1/sh` too. Every wildcard must sit behind a fully anchored literal prefix and never in the host position — otherwise a pinned URL silently serves `latest`, which is an immutability violation that still returns 200.
+- **Max 5 patterns per trigger.** `edge-rules.py` chunks across multiple trigger objects (`TriggerMatchingType` 0 = MatchAny), which the API accepts.
+
+Matching is Lua patterns, not PCRE — no alternation, no lookaround. Rewrite targets use path-segment variable expansion (`%{Path.0}` is 0-indexed), and `ActionParameter1` must be a full URL; a relative path is rejected.
 
 ### `dist.json` (the distribution manifest)
 
@@ -66,38 +80,41 @@ The manifest is rebuilt and uploaded (overwrite) by `.github/workflows/update-di
 
 Generation uses the GitHub API (CI-side, with `GITHUB_TOKEN`); **resolution does not**. The installer reads the self-hosted `dist.json` over the HTTPS-enforced downloader to resolve the latest version + checksum + URL — there is no GitHub API dependency in the install path, and `GITHUB_TOKEN` is never consulted by `OCX_INSTALL_DIST_URL`. The API boundary lives entirely in the generator (CI), never in the installed-on-the-machine path.
 
-**Forwarded paths** (handled by nginx, *not* this repo):
+**Forwarded paths** (proxied to `ocx.sh` transparently by an OriginUrl edge rule):
 
 ```
 setup.ocx.sh/docs/...      → ocx.sh/docs/...
 setup.ocx.sh/actions/...   → GitHub Marketplace / GitLab CI Catalog
 ```
 
-Never publish a file under a path that nginx will reroute — it just confuses caches.
+Never publish an object under a key an edge rule reroutes — it just confuses caches.
 
 ## Channel routing (see `scripts/publish-installers.sh`)
 
 `publish-installers.sh` iterates the five `src/install.*` files; all five from one release land in the same `archive/<VERSION>/` dir. The channel is derived from `VERSION`: a `-` (prerelease) routes to `next` only; a stable version routes to **both** `latest` and `next`.
 
-- **Always** publish the pinned immutable copies: `archive/<VERSION>/install.<ext>` (all five).
-- **stable** → overwrite the `latest/install.<ext>` **and** `next/install.<ext>` pointers. `next` is the "bleeding edge" channel = newest of {latest stable, newest prerelease}; promoting a stable must not leave `next/` serving an older prerelease. (Edge case: patching an old stable line while a newer prerelease is pending would pull `next/` back — fix that by hand.)
-- **next (prerelease)** → overwrite the `next/install.<ext>` pointers only; do **not** touch `latest/`.
-- The remote dirs (`archive/<VERSION>` + the pointer dir) are created by rsync's `--mkpath` (rsync ≥ 3.2.3 on both ends). We do **not** `ssh mkdir` first: the deploy key is locked to a forced rsync command (`rrsync …,restrict`), which rejects arbitrary remote shell commands.
+- **Always** publish the pinned immutable copies: `archive/<VERSION>/install.<ext>` **and** `archive/<VERSION>/<shell>` (all five, both names).
+- **stable** → overwrite the `latest/<shell>` **and** `next/<shell>` pointers. `next` is the "bleeding edge" channel = newest of {latest stable, newest prerelease}; promoting a stable must not leave `next/` serving an older prerelease. (Edge case: patching an old stable line while a newer prerelease is pending would pull `next/` back — fix that by hand.)
+- **next (prerelease)** → overwrite the `next/<shell>` pointers only; do **not** touch `latest/`.
+- Edge Storage creates parent directories implicitly on PUT, so there is nothing to `mkdir` first. (This is what the old rsync `--mkpath` existed for.)
 - Every installer release also refreshes `dist.json` via `scripts/publish-dist.sh` (which calls `scripts/gen-dist.sh` against the `ocx-sh/ocx` Releases API). The manifest is otherwise kept current by `.github/workflows/update-dist.yml` (dispatch + hourly cron + manual), independently of installer releases.
+- Routing is applied out-of-band by `deploy/bunny/edge-rules.py apply`, never by CI — it needs `BUNNY_API_KEY`, an account-wide credential deliberately kept out of the release pipeline. Content publishing and routing changes are fully independent.
 
-## rsync flags (see `scripts/publish-installers.sh`)
+## Upload verbs (see `scripts/lib/bunny.sh`)
 
-- Pinned versioned uploads use `--ignore-existing` so a re-run of a release tag never silently overwrites a previously published artifact. If you ever need to overwrite, do it by hand, then audit the cache invalidation downstream.
-- The `latest/` + `next/` pointers and `dist.json` overwrite freely. They **never** use `--delete` — the `archive/` versioned dirs must be preserved.
+Two verbs, both plain `curl` against the Edge Storage HTTP API. Every upload carries a `Checksum` header (SHA256, uppercase hex) so Bunny verifies the body server-side and rejects a truncated transfer with 400:
+
+- **`bn_put_new KEY FILE`** — write-if-absent. Pinned versioned uploads and `dist/<sha256>.json` snapshots use it, so a re-run of a release tag never silently overwrites a previously published artifact. If you ever need to overwrite, do it by hand, then audit the cache invalidation downstream. It is a GET-then-PUT rather than a conditional write: the Storage API has no conditional-write header. The pipeline is single-writer (one release job; a `dist-manifest` concurrency group on the cron), so the TOCTOU window is not reachable.
+- **`bn_put KEY FILE`** — overwrite. The `latest/` + `next/` pointers and `dist.json` use it. **Nothing ever deletes** — there is no DELETE path anywhere in the pipeline, and the `archive/` versioned keys must be preserved. Publishing is an upload-only push, not a sync: removing a file from `src/` never removes it from the store.
 - `dist.json` is staged to a mktemp file first (`publish-dist.sh`); the generator is clobber-safe (exits non-zero on any fetch/parse/checksum failure and never emits a partial manifest), and `set -e` aborts the upload before the live `dist.json` is touched.
-- All transfers happen over SSH with a deploy key (`DEPLOY_SSH_KEY` secret, with `DEPLOY_HOST`/`DEPLOY_PORT`/`DEPLOY_SSH_KNOWN_HOSTS`) bound to the `setup.ocx.sh` environment. The key is single-purpose; it has no shell, no sudo, no read access outside the docroot.
+- Auth is `BUNNY_STORAGE_KEY` + `BUNNY_STORAGE_ZONE`, bound to the `setup.ocx.sh` environment. The storage key is scoped to that one storage zone. The account-wide `BUNNY_API_KEY` (used for edge rules and purges) is deliberately NOT in CI.
 
 ## Versioned vs latest
 
 Latest is a **convenience** for `curl ... | <shell>`; production CI pins (via `OCX_INSTALL_VERSION` or a pinned `<VERSION>` URL). Therefore:
 
 - A bug in an installer published to `archive/<VERSION>/` requires a new version (you can't unpublish — immutable). The `latest/` pointer should be moved off the bad version immediately.
-- The stable pointer (`latest/install.<ext>`, served at the bare `/<shell>`) always tracks the highest **stable** semver tag with a release, never a prerelease. The `next` pointer tracks the **newest** installer of either channel: a prerelease moves it ahead, and a stable promotion also advances it (so `next` is never behind `latest`).
+- The stable pointer (`latest/<shell>`, served at the bare `/<shell>`) always tracks the highest **stable** semver tag with a release, never a prerelease. The `next` pointer tracks the **newest** installer of either channel: a prerelease moves it ahead, and a stable promotion also advances it (so `next` is never behind `latest`).
 - `dist.json` lists both channels (newest-first). The installers' latest-resolution selects the first `stable` entry; `next` consumers use the `/<shell>/next` URL (or a pinned `<VERSION>`).
 
 ## Pre-release smoke
@@ -105,9 +122,11 @@ Latest is a **convenience** for `curl ... | <shell>`; production CI pins (via `O
 Before tagging:
 
 ```sh
-task publish:dry-run        # stable: validate archive/ + latest/ targets offline (no upload)
-task publish:dev-dry-run    # prerelease/next: validate archive/ + next/ targets offline (no upload)
+task publish:dry-run        # stable: validate archive/ + latest/ keys offline (no upload, no credentials)
+task publish:dev-dry-run    # prerelease/next: validate archive/ + next/ keys offline
 task dist                   # validate the dist.json manifest (live ocx-sh/ocx Releases API)
+task rules:plan             # render the edge-rule set offline
+task rules:verify           # probe every routed URL against the live zone
 ```
 
 After tagging, the release workflow handles upload. Verify post-release:
@@ -116,4 +135,6 @@ After tagging, the release workflow handles upload. Verify post-release:
 curl -fsSL https://setup.ocx.sh/sh/<VERSION>  | sh -s -- --version   # pinned
 curl -fsSL https://setup.ocx.sh/sh            | sh                   # bare stable
 curl -fsSL https://setup.ocx.sh/dist                                # distribution manifest
+curl -fsI  https://setup.ocx.sh/sh/<VERSION> | grep -i cache-control # immutable
+curl -fsI  https://setup.ocx.sh/sh          | grep -i cache-control  # max-age=300
 ```

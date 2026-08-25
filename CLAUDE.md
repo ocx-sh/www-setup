@@ -9,7 +9,7 @@ Guidance for Claude Code when working in this repository.
 `setup.ocx.sh` is the canonical website hosting the **shell installers** that bring [OCX](https://ocx.sh) to CI runners, developer machines, and Linux servers. There are **five thin installers**, one per supported shell entrypoint (`<shell>` ∈ `sh pwsh nu fish elvish`; `<ext>` ∈ `sh ps1 nu fish elv`):
 
 ```
-setup.ocx.sh/<shell>            # bare → latest-stable installer (nginx rewrite → latest/install.<ext>)
+setup.ocx.sh/<shell>            # bare → latest-stable installer (edge-rule rewrite → latest/<shell>)
 setup.ocx.sh/<shell>/next       # bleeding-edge ("next"): newest of prerelease + stable; alias /<shell>/canary
 setup.ocx.sh/<shell>/<VERSION>  # pinned (immutable) → archive/<VERSION>/install.<ext>
 setup.ocx.sh/dist               # → dist.json distribution manifest (OCX_INSTALL_DIST_URL)
@@ -27,11 +27,13 @@ Each installer is a **thin bootstrap**: detect platform → resolve the release 
 | `src/install.nu` | Nushell installer (env-driven; cross-platform) |
 | `src/install.fish` | fish installer (unix-only) |
 | `src/install.elv` | Elvish installer (cross-platform) |
-| `scripts/publish-installers.sh` | rsync of all five `src/install.*` → `setup.ocx.sh:archive/<VERSION>/` (immutable) + the `latest/` or `next/` pointer dir (channel-routed), then `publish-dist.sh` |
+| `scripts/publish-installers.sh` | Upload all five `src/install.*` → Bunny `archive/<VERSION>/` (immutable, write-if-absent; both `install.<ext>` and the shell-segment alias) + the `latest/` or `next/` pointer (channel-routed), then `publish-dist.sh` |
 | `scripts/gen-dist.sh` | Generate `dist.json` (distribution manifest) from the **`ocx-sh/ocx` GitHub Releases API**; targets DERIVED from each release's `sha256.sum` (inline per-target checksum + URL); uses `GITHUB_TOKEN` in CI |
-| `scripts/publish-dist.sh` | Regenerate + rsync the manifest: immutable `dist/<sha256>.json` snapshot, `dist.json.sha256` sidecar, then the rolling `dist.json` last (overwrite, clobber-safe) |
+| `scripts/publish-dist.sh` | Regenerate + upload the manifest: immutable `dist/<sha256>.json` snapshot, `dist.json.sha256` sidecar, then the rolling `dist.json` last (overwrite, clobber-safe) |
 | `external/` | Vendored Bats as git submodules (`bats-core`, `bats-support`, `bats-assert`) |
-| `deploy/nginx/` | Reference nginx server block: the per-shell `/sh /pwsh /nu /fish /elvish` (+ `/next`, `/<VERSION>`) regex-rewrite layer onto `archive/ latest/ next/`, plus `/dist` |
+| `scripts/lib/bunny.sh` | The upload transport: `bn_put` (overwrite) / `bn_put_new` (write-if-absent) over the Bunny Edge Storage HTTP API with plain `curl`. Sends a `Checksum` header so uploads are verified server-side |
+| `deploy/bunny/` | The live deployment: `edge-rules.py` (`plan`/`apply`/`verify`) owns the pull zone's routing — the per-shell `/sh /pwsh /nu /fish /elvish` (+ `/next`, `/<VERSION>`) rewrites onto `archive/ latest/ next/`, `/dist`, the `/docs/` + `/actions/` upstream proxies, the immutable-vs-300s cache split, and the `text/plain` content type. See its [README](deploy/bunny/README.md) |
+| `deploy/nginx/` | SUPERSEDED reference (the old self-hosted server block), kept as the rollback target until the Bunny DNS cutover is verified |
 | `deploy/github/` | Reference snippet (`ocx-release-dispatch.yml.example`) the `ocx-sh/ocx` repo adds to its release workflow to dispatch `ocx-released` at this repo |
 | `tests/install/*.bats` | Bats env-knob, exit-code, print-path, dist suites (sh) |
 | `tests/install/{nu,fish,elvish}/*.bats` | Per-shell installer suites (gate on shell presence) |
@@ -55,7 +57,10 @@ task test:bats                             # vendored bats: env-knob, exit-code,
 task test:pester                           # Pester (pwsh via ocx [group.linux]; installs Pester module on demand)
 task docker:integration DISTRO=alpine PLATFORM=linux/amd64
 task docker:integration:all                # full 3×2 matrix
-task publish:dry-run                       # validates rsync paths
+task publish:dry-run                       # validates storage keys (offline, no credentials)
+task rules:plan                            # render the Bunny edge-rule set (offline)
+task rules:apply                           # apply them to the pull zone (needs BUNNY_API_KEY)
+task rules:verify                          # probe every routed URL against the live zone
 
 task release:prepare                       # git-cliff bump + changelog + tag locally
 ```
@@ -97,11 +102,11 @@ Cross-installer parity is enforced manually across all FIVE installers on the th
 
 ## Releases
 
-This project is **pre-release**: there are zero git tags and nothing has shipped yet. The first release will cut the initial tag.
+This project is **pre-release** but has shipped: tags `v0.1.0-rc.1`, `v0.1.0`, `v0.1.1` exist (plus the `v0` major alias), so `archive/` was already populated — it was backfilled into Bunny from each tag's tree (byte-verified against the live host) rather than re-published from `main`, whose `src/` has since drifted.
 
 - Conventional Commits drive versioning via [git-cliff](https://git-cliff.org).
 - `task release:prepare` produces the version commit + tag locally; pushing the tag triggers `.github/workflows/release.yml`.
-- The release workflow does: gh release (git-cliff notes; `prerelease: true` for `-`-suffixed tags) → `publish-installers` job (channel-routed rsync of all five installers via the `DEPLOY_SSH_KEY` deploy key + refresh/upload `dist.json` via `publish-dist.sh`). The manifest is also rebuilt out-of-band by `update-dist.yml` on `repository_dispatch(ocx-released)` from `ocx-sh/ocx` + an hourly cron fallback + manual dispatch.
+- The release workflow does: gh release (git-cliff notes; `prerelease: true` for `-`-suffixed tags) → `publish-installers` job (channel-routed upload of all five installers to Bunny Edge Storage via `BUNNY_STORAGE_KEY` + refresh/upload `dist.json` via `publish-dist.sh`). The manifest is also rebuilt out-of-band by `update-dist.yml` on `repository_dispatch(ocx-released)` from `ocx-sh/ocx` + an hourly cron fallback + manual dispatch.
 - A `-`-suffixed tag (`vX.Y.Z-rc.1`) is a prerelease: it routes to the `next` channel and the GitHub prerelease flag; stable pointers are untouched.
 
 The conventional-commit → version-bump mapping (applies once the project starts versioning):
@@ -123,16 +128,14 @@ Scopes are optional: `feat(install): add OCX_INSTALL_MIRROR_URL`.
 
 | Secret | Used by |
 |---|---|
-| `DEPLOY_SSH_KEY` | Private SSH deploy key for the `publish-installers` + `update-dist` rsync to `setup.ocx.sh` (written to `~/.ssh/id_ed25519`) |
-| `DEPLOY_SSH_KNOWN_HOSTS` | Pre-pinned `known_hosts` line for the deploy host (replaces `ssh-keyscan` in the workflows) |
-| `DEPLOY_HOST` | rsync/ssh target host → `SETUP_OCX_HOST` |
-| `DEPLOY_PORT` | ssh port → `SSH_PORT` |
+| `BUNNY_STORAGE_KEY` | Bunny Storage Zone password for `sh-ocx-setup`, used by `publish-installers` + `update-dist`. Write access to the installer docroot — treat as high value |
+| `BUNNY_STORAGE_ZONE` | Storage zone name (`sh-ocx-setup`) |
 | `SETUP_OCX_DISPATCH_TOKEN` | Lives in **`ocx-sh/ocx`** (not this repo): a token scoped to setup.ocx.sh (fine-grained PAT `contents:read` + `actions:write`, or classic `repo`) that `ocx-sh/ocx` uses to fire the `repository_dispatch(ocx-released)` that rebuilds `dist.json`. See `deploy/github/ocx-release-dispatch.yml.example`. |
 
 ## Deep context
 
 - [`.claude/rules/installers.md`](.claude/rules/installers.md) — env-knob naming, stdout discipline, exit-code matrix
-- [`.claude/rules/publish.md`](.claude/rules/publish.md) — rsync flags, versioned-vs-latest path layout
+- [`.claude/rules/publish.md`](.claude/rules/publish.md) — storage key layout, write-if-absent vs overwrite, versioned-vs-latest
 - [`.claude/rules/testing-bash.md`](.claude/rules/testing-bash.md) — Bats + fixture HTTP server patterns
 - [`.claude/rules/testing-pwsh.md`](.claude/rules/testing-pwsh.md) — Pester patterns
 - [`.claude/rules/workflow-release.md`](.claude/rules/workflow-release.md) — git-cliff → tag → publish flow

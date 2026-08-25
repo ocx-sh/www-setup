@@ -1,4 +1,11 @@
-# setup.ocx.sh — nginx server block (EXAMPLE / reference)
+# setup.ocx.sh — nginx server block (SUPERSEDED / reference)
+#
+# ⚠️  SUPERSEDED by deploy/cloudflare/. Routing now lives in a deployed
+# Cloudflare Worker (deploy/cloudflare/src/worker.js) in front of an R2 bucket;
+# that file, not this one, is the authoritative routing contract, and
+# deploy/cloudflare/test/routes.test.js asserts it. This block is kept ONLY as
+# the rollback target until the Cloudflare cutover is verified — delete it and
+# this directory once DNS has settled. See deploy/cloudflare/README.md.
 #
 # This file is NOT applied by this repo's release pipeline. The live nginx
 # config is maintained out-of-band on the host that serves setup.ocx.sh. This

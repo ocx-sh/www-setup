@@ -2,65 +2,78 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
-# publish-installers.sh — rsync the five thin installers to setup.ocx.sh.
+# publish-installers.sh — upload the five thin installers to setup.ocx.sh
+# (Bunny Edge Storage).
 #
-# VERSION-MAJOR layout. All five installers from one release land in a single
-# immutable per-version dir; the mutable channel pointers live in their own dirs:
+# STORED LAYOUT. Edge Storage is directory-backed, so a path can be a file or a
+# directory but never both: `sh` and `sh/next` cannot coexist. The friendly
+# per-shell URLs are therefore NOT stored — they are served by Edge Rules
+# rewriting onto the layout below. See deploy/bunny/README.md.
 #
-#   archive/<VERSION>/install.{sh,ps1,nu,fish,elv}   pinned (immutable, append-only)
-#   latest/install.*                                  stable pointer  (overwritten)
-#   next/install.*                                    prerelease pointer (overwritten)
+#   archive/<VERSION>/install.{sh,ps1,nu,fish,elv}   pinned, immutable, append-only
+#   archive/<VERSION>/{sh,pwsh,nu,fish,elvish}       same bytes, shell-segment name
+#   latest/{sh,pwsh,nu,fish,elvish}                  stable pointer   (overwritten)
+#   next/{sh,pwsh,nu,fish,elvish}                    next pointer     (overwritten)
 #
-# nginx exposes the friendly per-shell URLs (/sh, /sh/next, /sh/<VERSION>, …) by
-# rewriting onto these dirs — see deploy/nginx/setup.ocx.sh.conf.example.
+# The shell-segment copies exist so ONE edge rule can serve all five shells:
+#   ^/(sh|pwsh|nu|fish|elvish)$            -> /latest/$1
+#   ^/(sh|pwsh|nu|fish|elvish)/(next|canary)$ -> /next/$1
+#   ^/(sh|pwsh|nu|fish|elvish)/([0-9][^/]*)$  -> /archive/$2/$1
+# Naming them by extension instead would cost five rules apiece against a
+# 20-rule-per-pull-zone budget. `archive/<VERSION>/install.<ext>` is kept because
+# it is the published canonical artifact URL (shipped contract, curl -O friendly).
 #
 # Channel routing (from VERSION):
-#   - VERSION contains a `-` (prerelease) -> pointer dir `next`.
-#   - otherwise                            -> pointer dir `latest`.
-#   The other pointer dir is left untouched (a prerelease never moves `latest`).
+#   - VERSION contains a `-` (prerelease) -> pointer prefix `next`.
+#   - otherwise                            -> pointer prefix `latest`.
+#   The other pointer is left untouched (a prerelease never moves `latest`).
 #
-# The pinned copy uses --ignore-existing so a re-run of a release tag never
-# silently overwrites a previously published artifact. Pointers and the manifest
-# never use --delete (so sibling versioned dirs are preserved).
+# Pinned copies use bn_put_new (write-if-absent), so a re-run of a release tag
+# never silently overwrites a published artifact. Pointers overwrite. Nothing is
+# ever deleted.
 #
-# After the installer transfers, the distribution manifest is refreshed via
-# scripts/publish-dist.sh (sourced from the OCX product repo's GitHub Releases
-# API) and uploaded to the docroot root as dist.json (overwrite). This is what
-# OCX_INSTALL_DIST_URL reads.
-#
-# Required env: VERSION (no leading v), SSH_KEY (path), SETUP_OCX_HOST.
-# Optional env: SSH_PORT (default 22), DRY_RUN=1, OCX_RELEASES_REPO, GITHUB_TOKEN.
+# Required env: VERSION (no leading v), BUNNY_STORAGE_ZONE, BUNNY_STORAGE_KEY
+#               (or BUNNY_STORAGE_KEY_FILE).
+# Optional env: BUNNY_STORAGE_HOST, OCX_SRC_DIR (publish from somewhere other
+#               than ./src — used to backfill a past tag), OCX_SKIP_DIST=1
+#               (skip the manifest refresh; backfilling history must not move
+#               the live dist.json), DRY_RUN=1, OCX_RELEASES_REPO, GITHUB_TOKEN.
 
 set -eu
 
 : "${VERSION:?VERSION is required (e.g. 1.2.3, no leading v)}"
-: "${SSH_KEY:?SSH_KEY (path to private key) is required}"
-: "${SETUP_OCX_HOST:=setup.ocx.sh}"
 
-SSH_PORT="${SSH_PORT:-22}"
 DRY_RUN="${DRY_RUN:-0}"
 
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
-SRC_DIR="$REPO_ROOT/src"
+SRC_DIR="${OCX_SRC_DIR:-$REPO_ROOT/src}"
 PUBLISH_DIST="$REPO_ROOT/scripts/publish-dist.sh"
+
+# bunny.sh is linted on its own via `git ls-files '*.sh'`; shellcheck cannot
+# resolve the runtime-computed $REPO_ROOT.
+# shellcheck source=scripts/lib/bunny.sh disable=SC1091
+. "$REPO_ROOT/scripts/lib/bunny.sh"
 
 [ -f "$PUBLISH_DIST" ] || {
     echo "publish-installers: $PUBLISH_DIST missing" >&2
     exit 1
 }
 
-# All five installers ship together; each lands under archive/<VERSION>/ and the
-# channel pointer dir under its own filename (destfile == srcfile).
-INSTALLER_FILES="install.sh install.ps1 install.nu install.fish install.elv"
+# <shell-segment>:<filename>. The segment is the public URL word (/sh, /pwsh…);
+# the filename is the canonical artifact name. Both are published.
+INSTALLERS="sh:install.sh pwsh:install.ps1 nu:install.nu fish:install.fish elvish:install.elv"
 
 # Pre-flight: every source file must exist before any upload. A plain for-loop
 # (not a pipe) so a miss aborts the whole script under `set -e`.
-for f in $INSTALLER_FILES; do
+for entry in $INSTALLERS; do
+    f=${entry#*:}
     [ -f "$SRC_DIR/$f" ] || {
         echo "publish-installers: $SRC_DIR/$f missing" >&2
         exit 1
     }
 done
+
+bn_require_auth
 
 # Channel routing: a `-` in VERSION marks a prerelease (`next`); else `stable`.
 case "$VERSION" in
@@ -68,21 +81,9 @@ case "$VERSION" in
     *) CHANNEL="stable" ;;
 esac
 
-RSYNC_OPTS="-avz"
-SSH_CMD="ssh -i $SSH_KEY -p $SSH_PORT -o StrictHostKeyChecking=accept-new"
+echo "publish-installers: VERSION=$VERSION CHANNEL=$CHANNEL ZONE=${BUNNY_STORAGE_ZONE:-<unset>} SRC=$SRC_DIR DRY_RUN=$DRY_RUN"
 
-# run_rsync <args…> — transfer, unless DRY_RUN (then skip the network entirely;
-# the logical target is echoed by the caller, so the dry-run still validates the
-# publish paths offline, with no reachable host or deploy key required).
-run_rsync() {
-    [ "$DRY_RUN" = "1" ] && return 0
-    # shellcheck disable=SC2086
-    rsync $RSYNC_OPTS "$@"
-}
-
-echo "publish-installers: VERSION=$VERSION CHANNEL=$CHANNEL HOST=$SETUP_OCX_HOST DRY_RUN=$DRY_RUN"
-
-# Channel pointer dirs:
+# Channel pointer prefixes:
 #   prerelease -> next/ only          (latest/ is never moved by a prerelease)
 #   stable     -> latest/ AND next/   (next is "bleeding edge" = newest of the
 #                                       two channels; a stable promotion must not
@@ -95,41 +96,39 @@ else
     POINTER_DIRS="latest next"
 fi
 
-# The remote dirs (archive/<VERSION>/ and the channel pointer) are created by
-# rsync itself via --mkpath. We deliberately do NOT `ssh mkdir` first: the
-# deploy key is locked to a forced rsync command (rrsync ...,restrict), so an
-# arbitrary remote shell command is rejected. --mkpath needs rsync >= 3.2.3 on
-# both ends (GitHub runners and the host both ship 3.2.7).
-
-# Upload each installer: pinned immutable copy under archive/<VERSION>/ + the
-# channel pointer. The path-echo before each transfer makes `task publish:dry-run`
-# a real target validator even when the host is unreachable (run_rsync no-ops
-# under DRY_RUN).
-for f in $INSTALLER_FILES; do
+# The key-echo before each transfer makes `task publish:dry-run` a real target
+# validator even with no credentials present (bn_put/bn_put_new no-op under
+# DRY_RUN).
+for entry in $INSTALLERS; do
+    seg=${entry%%:*}
+    f=${entry#*:}
     src="$SRC_DIR/$f"
 
     # Pinned (immutable, append-only) — always, regardless of channel.
     echo "publish-installers: -> archive/${VERSION}/${f} (pinned)"
-    run_rsync --mkpath --ignore-existing -e "$SSH_CMD" \
-        "$src" "${SETUP_OCX_HOST}:archive/${VERSION}/${f}"
+    bn_put_new "archive/${VERSION}/${f}" "$src"
 
-    # Channel pointer(s) (mutable, no --delete). Stable writes latest/ + next/.
+    echo "publish-installers: -> archive/${VERSION}/${seg} (pinned alias)"
+    bn_put_new "archive/${VERSION}/${seg}" "$src"
+
+    # Channel pointer(s) (mutable, overwrite). Stable writes latest/ + next/.
     for ptr in $POINTER_DIRS; do
-        echo "publish-installers: -> ${ptr}/${f} (pointer)"
-        run_rsync --mkpath -e "$SSH_CMD" \
-            "$src" "${SETUP_OCX_HOST}:${ptr}/${f}"
+        echo "publish-installers: -> ${ptr}/${seg} (pointer)"
+        bn_put "${ptr}/${seg}" "$src"
     done
 done
 
 # Refresh the distribution manifest (sourced from the OCX product repo's GitHub
 # Releases API) and upload it (overwrite). This is what OCX_INSTALL_DIST_URL
-# (default https://setup.ocx.sh/dist.json) reads. SSH_KEY/SETUP_OCX_HOST/SSH_PORT/
-# DRY_RUN are inherited; OCX_RELEASES_REPO + GITHUB_TOKEN (when set) feed the
-# generator. A generator failure aborts the manifest upload (clobber-safety)
-# without affecting the installer transfers above. Skipped under DRY_RUN (it
-# makes a live GitHub API call + upload) — validate the manifest with `task dist`.
+# (default https://setup.ocx.sh/dist.json) reads. The Bunny + DRY_RUN env is
+# inherited; OCX_RELEASES_REPO + GITHUB_TOKEN (when set) feed the generator. A
+# generator failure aborts the manifest upload (clobber-safety) without affecting
+# the installer transfers above. Skipped under DRY_RUN (it makes a live GitHub
+# API call + upload) — validate the manifest with `task dist`.
 if [ "$DRY_RUN" = "1" ]; then
     echo "publish-installers: [dry-run] skipping dist.json refresh — run 'task dist' to validate the manifest"
+elif [ "${OCX_SKIP_DIST:-0}" = "1" ]; then
+    echo "publish-installers: OCX_SKIP_DIST=1 — leaving dist.json untouched"
 else
     sh "$PUBLISH_DIST"
 fi
