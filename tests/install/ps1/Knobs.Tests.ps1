@@ -49,16 +49,25 @@ Describe 'install.ps1 env knobs' {
         $env:OCX_NO_MODIFY_PATH = '1'
         $env:OCX_INSTALL_NO_SMOKETEST = '1'
         $env:OCX_STUB_ARGV = $ArgvLog
+        $script:EnvLog = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-kn-env-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).log"
+        $env:OCX_STUB_ENV = $EnvLog
         $env:OCX_INSTALL_DIST_URL = $Server.DistUrl
         $env:OCX_INSTALL_MIRROR_URL = $Server.MirrorUrl
         foreach ($v in 'GITHUB_PATH', '__OCX_TESTING_INSTALL_BINARY', 'OCX_INSTALL_PRINT_PATH',
-            'OCX_INSTALL_QUIET', 'OCX_INSTALL_FORCE', 'OCX_INSTALL_NO_SETUP', 'OCX_INSTALL_VERSION') {
+            'OCX_INSTALL_QUIET', 'OCX_INSTALL_FORCE', 'OCX_INSTALL_NO_SETUP', 'OCX_INSTALL_VERSION',
+            'OCX_INSTALL_CA_BUNDLE', 'OCX_MANAGED_CONFIG', 'SSL_CERT_FILE', 'SSL_CERT_DIR') {
             Remove-Item "Env:$v" -ErrorAction SilentlyContinue
         }
     }
     AfterEach {
         if (Test-Path $OcxHome) { Remove-Item -Recurse -Force $OcxHome -ErrorAction SilentlyContinue }
         if (Test-Path $ArgvLog) { Remove-Item -Force $ArgvLog -ErrorAction SilentlyContinue }
+        if (Test-Path $EnvLog) { Remove-Item -Force $EnvLog -ErrorAction SilentlyContinue }
+        # Pester runs every suite in ONE process: an env var left set by the last
+        # test in this file leaks into the next file's tests. Clear on the way out.
+        foreach ($v in 'OCX_INSTALL_CA_BUNDLE', 'OCX_MANAGED_CONFIG', 'SSL_CERT_FILE', 'SSL_CERT_DIR') {
+            Remove-Item "Env:$v" -ErrorAction SilentlyContinue
+        }
     }
 
     It 'default install hands off to ocx self setup <version>' -Skip:($env:OS -eq 'Windows_NT') {
@@ -188,5 +197,133 @@ Describe 'install.ps1 env knobs' {
         $env:OCX_INSTALL_DIST_URL = "http://127.0.0.1:$($Server.Port)/dist/$DistPinBadSha.json"
         & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 4
+    }
+
+    # --- Embedded configuration block (corporate mirrors) ---
+    # Mirrors the "embedded config" scenarios in ../env-knobs.bats.
+
+    It 'a sed-ed dist URL is used when the env is unset' -Skip:($env:OS -eq 'Windows_NT') {
+        $copy = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-embedded-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).ps1"
+        New-EmbeddedInstaller -Source $InstallPs1 -Destination $copy -Tokens @{
+            OCX_INSTALL_DIST_URL   = $Server.DistUrl
+            OCX_INSTALL_MIRROR_URL = $Server.MirrorUrl
+        } | Out-Null
+        Remove-Item Env:OCX_INSTALL_DIST_URL, Env:OCX_INSTALL_MIRROR_URL -ErrorAction SilentlyContinue
+        try {
+            & pwsh -NoProfile -File $copy -Version '0.0.0' 2>$null | Out-Null
+            $LASTEXITCODE | Should -Be 0
+            (Get-Content $ArgvLog) | Should -Contain 'self setup 0.0.0 --no-modify-path'
+        }
+        finally { Remove-Item -Force $copy -ErrorAction SilentlyContinue }
+    }
+
+    It 'the environment wins over the embedded value' -Skip:($env:OS -eq 'Windows_NT') {
+        $copy = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-embedded-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).ps1"
+        # The embedded manifest URL is dead; BeforeEach still exports the fixture one.
+        New-EmbeddedInstaller -Source $InstallPs1 -Destination $copy -Tokens @{
+            OCX_INSTALL_DIST_URL = 'https://127.0.0.1:1/dead/dist.json'
+        } | Out-Null
+        try {
+            & pwsh -NoProfile -File $copy -Version '0.0.0' 2>$null | Out-Null
+            $LASTEXITCODE | Should -Be 0
+            (Get-Content $ArgvLog) | Should -Contain 'self setup 0.0.0 --no-modify-path'
+        }
+        finally { Remove-Item -Force $copy -ErrorAction SilentlyContinue }
+    }
+
+    It 'an embedded managed-config ref is forwarded to ocx self setup' -Skip:($env:OS -eq 'Windows_NT') {
+        $copy = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-managed-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).ps1"
+        New-EmbeddedInstaller -Source $InstallPs1 -Destination $copy -Tokens @{
+            OCX_MANAGED_CONFIG = 'registry.corp.example/ocx/managed-config:v1'
+        } | Out-Null
+        try {
+            & pwsh -NoProfile -File $copy -Version '0.0.0' 2>$null | Out-Null
+            $LASTEXITCODE | Should -Be 0
+            (Get-Content $ArgvLog) | Should -Contain 'self setup 0.0.0 --no-modify-path --managed-config registry.corp.example/ocx/managed-config:v1'
+        }
+        finally { Remove-Item -Force $copy -ErrorAction SilentlyContinue }
+    }
+
+    It 'OCX_MANAGED_CONFIG in the env suppresses the embedded flag' -Skip:($env:OS -eq 'Windows_NT') {
+        $copy = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-managed-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).ps1"
+        New-EmbeddedInstaller -Source $InstallPs1 -Destination $copy -Tokens @{
+            OCX_MANAGED_CONFIG = 'registry.corp.example/ocx/managed-config:v1'
+        } | Out-Null
+        # `ocx self setup` reads OCX_MANAGED_CONFIG itself, so the installer must
+        # not override it with the embedded default.
+        $env:OCX_MANAGED_CONFIG = 'registry.other.example/ocx/managed-config:v2'
+        try {
+            & pwsh -NoProfile -File $copy -Version '0.0.0' 2>$null | Out-Null
+            $LASTEXITCODE | Should -Be 0
+            (Get-Content $ArgvLog) | Should -Contain 'self setup 0.0.0 --no-modify-path'
+            (Get-Content $ArgvLog) -join "`n" | Should -Not -Match '--managed-config'
+        }
+        finally { Remove-Item -Force $copy -ErrorAction SilentlyContinue }
+    }
+
+    # ACCEPTED DIVERGENCE (see .claude/rules/installers.md): Invoke-WebRequest has
+    # no 5.1-safe CA-bundle parameter, so install.ps1 parses OCX_INSTALL_CA_BUNDLE
+    # and warns instead of honoring it. A uniformly sed-ed installer set must still
+    # install here rather than fail.
+    It 'OCX_INSTALL_CA_BUNDLE warns and does not fail the install' -Skip:($env:OS -eq 'Windows_NT') {
+        $env:OCX_INSTALL_CA_BUNDLE = Join-Path $PSScriptRoot '..\helpers\localhost-cert.pem'
+        $errLog = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-ca-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).err"
+        try {
+            & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$errLog | Out-Null
+            $LASTEXITCODE | Should -Be 0
+            (Get-Content $errLog -Raw) | Should -Match "not honored by install.ps1's own downloads"
+        }
+        finally { Remove-Item -Force $errLog -ErrorAction SilentlyContinue }
+    }
+
+    It 'OCX_INSTALL_CA_BUNDLE is handed to ocx self setup via SSL_CERT_FILE' -Skip:($env:OS -eq 'Windows_NT') {
+        # install.ps1 cannot use the bundle for its OWN downloads, but the second
+        # hop can: `ocx self setup` pulls the package store itself and reads the
+        # host trust store via SSL_CERT_FILE.
+        $ca = Join-Path $PSScriptRoot '..\helpers\localhost-cert.pem'
+        $env:OCX_INSTALL_CA_BUNDLE = $ca
+        & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+        $LASTEXITCODE | Should -Be 0
+        (Get-Content $EnvLog) | Should -Contain "SSL_CERT_FILE=$ca"
+    }
+
+    It 'OCX_INSTALL_CA_BUNDLE as an inline PEM block is materialized for SSL_CERT_FILE' -Skip:($env:OS -eq 'Windows_NT') {
+        $ca = Join-Path $PSScriptRoot '..\helpers\localhost-cert.pem'
+        $copy = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-ca-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).ps1"
+        # Prefixed with the comment header a real distro bundle carries, so the
+        # scenario exercises detection by CONTENT, not by a leading marker.
+        New-EmbeddedInstaller -Source $InstallPs1 -Destination $copy -Tokens @{
+            OCX_INSTALL_CA_BUNDLE = "# Corp Root CA`n#`n" + [System.IO.File]::ReadAllText($ca)
+        } | Out-Null
+        try {
+            & pwsh -NoProfile -File $copy -Version '0.0.0' 2>$null | Out-Null
+            $LASTEXITCODE | Should -Be 0
+            # SSL_CERT_FILE is a PATH, so the inline PEM must be materialized.
+            $recorded = (Get-Content $EnvLog) | Where-Object { $_ -like 'SSL_CERT_FILE=*' } | Select-Object -First 1
+            $recorded | Should -Match '^SSL_CERT_FILE=.+\.pem$'
+            $path = $recorded.Substring('SSL_CERT_FILE='.Length)
+            (Get-Content $path -Raw) | Should -Match '-----BEGIN CERTIFICATE-----'
+        }
+        finally { Remove-Item -Force $copy -ErrorAction SilentlyContinue }
+    }
+
+    It 'OCX_INSTALL_CA_BUNDLE neither a file nor inline PEM exits 2' {
+        $env:OCX_INSTALL_CA_BUNDLE = Join-Path ([System.IO.Path]::GetTempPath()) 'no-such-ca.pem'
+        & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+        $LASTEXITCODE | Should -Be 2
+    }
+
+    It 'OCX_INSTALL_CA_BUNDLE does not override an existing SSL_CERT_FILE' -Skip:($env:OS -eq 'Windows_NT') {
+        $ca = Join-Path $PSScriptRoot '..\helpers\localhost-cert.pem'
+        $preset = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-preset-ca-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).pem"
+        Copy-Item -Path $ca -Destination $preset -Force
+        $env:OCX_INSTALL_CA_BUNDLE = $ca
+        $env:SSL_CERT_FILE = $preset
+        try {
+            & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+            $LASTEXITCODE | Should -Be 0
+            (Get-Content $EnvLog) | Should -Contain "SSL_CERT_FILE=$preset"
+        }
+        finally { Remove-Item -Force $preset -ErrorAction SilentlyContinue }
     }
 }

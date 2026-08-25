@@ -124,7 +124,8 @@ function New-OcxStub {
 
     $record = ''
     if ($ArgvLog) {
-        $record = "if [ -n `"`$OCX_STUB_ARGV`" ]; then printf '%s\n' `"`$*`" >> `"`$OCX_STUB_ARGV`"; fi`n"
+        $record = "if [ -n `"`$OCX_STUB_ARGV`" ]; then printf '%s\n' `"`$*`" >> `"`$OCX_STUB_ARGV`"; fi`n" +
+            "if [ -n `"`$OCX_STUB_ENV`" ]; then printf 'SSL_CERT_FILE=%s\n' `"`$SSL_CERT_FILE`" >> `"`$OCX_STUB_ENV`"; fi`n"
     }
     $setupExit = if ($FailSelfSetup) { '9' } else { '0' }
     $body = "#!/bin/sh`n" +
@@ -322,9 +323,38 @@ function Get-ExpectedBinDir {
     return (Join-Path $OcxHome 'symlinks/ocx.sh/ocx/cli/current/content/bin')
 }
 
+<#
+.SYNOPSIS
+Copy install.ps1 and substitute its embedded-configuration placeholders.
+
+.DESCRIPTION
+The PowerShell mirror of server_embed_config in ../helpers/server.bash. Tokens
+are the bare environment-variable names (e.g. OCX_INSTALL_DIST_URL); the @...@
+wrapper is added here. The substitution is a plain literal replace over the whole
+file - the point of the token contract is that ONE such command works on every
+dialect, so no per-shell special-casing belongs here. A value may contain
+newlines (an inline PEM block).
+#>
+function New-EmbeddedInstaller {
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination,
+        [Parameter(Mandatory)][hashtable]$Tokens
+    )
+    $text = [System.IO.File]::ReadAllText($Source)
+    foreach ($key in $Tokens.Keys) {
+        $token = "@$key@"
+        if ($text -notlike "*$token*") { throw "placeholder $token not found in $Source" }
+        $text = $text.Replace($token, [string]$Tokens[$key])
+    }
+    [System.IO.File]::WriteAllText($Destination, $text)
+    return $Destination
+}
+
 Export-ModuleMember -Function `
     Get-FixtureTarget, Get-FixtureBinName, Get-FixtureArchiveExt, `
     New-OcxFixture, New-OcxStub, New-OcxArchive, New-OcxTestBinary, Write-OcxDist, `
+    New-EmbeddedInstaller, `
     Publish-DistSnapshot, `
     Start-FixtureServer, Stop-FixtureServer, Get-ExpectedBinDir, `
     Wait-FixturePort, Get-PythonExe, Test-FixtureIsWindows

@@ -31,10 +31,12 @@ setup() {
     export CURL_CA_BUNDLE
     CURL_CA_BUNDLE="$(server_ca_bundle)"
     export OCX_STUB_ARGV="${BATS_TEST_TMPDIR}/stub-argv.log"
+    export OCX_STUB_ENV="${BATS_TEST_TMPDIR}/stub-env.log"
     export OCX_INSTALL_DIST_URL="${FIXTURE_URL}/dist.json"
     export OCX_INSTALL_MIRROR_URL="${FIXTURE_URL}/releases/download"
     unset GITHUB_PATH OCX_INSTALL_NO_SETUP OCX_INSTALL_VERSION
     unset __OCX_TESTING_INSTALL_BINARY
+    unset OCX_INSTALL_CA_BUNDLE OCX_MANAGED_CONFIG SSL_CERT_FILE SSL_CERT_DIR
 }
 
 @test "elvish: default install hands off to 'ocx self setup <version>'" {
@@ -144,4 +146,78 @@ setup() {
         run elvish "$INSTALL_ELV"
     server_stop "$_pid"
     [ "$status" -eq 4 ]
+}
+
+# --- Embedded configuration block (corporate mirrors) -----------------------
+
+@test "elvish: a sed-ed dist URL is used when the env is unset" {
+    command -v elvish >/dev/null 2>&1 || skip "elvish not installed"
+    local _copy="${BATS_TEST_TMPDIR}/install-embedded.elv"
+    server_embed_config "$INSTALL_ELV" "$_copy" \
+        "OCX_INSTALL_DIST_URL=${FIXTURE_URL}/dist.json" \
+        "OCX_INSTALL_MIRROR_URL=${FIXTURE_URL}/releases/download"
+    unset OCX_INSTALL_DIST_URL OCX_INSTALL_MIRROR_URL
+    run elvish "$_copy" --version 0.0.0
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
+@test "elvish: the environment wins over the embedded value" {
+    command -v elvish >/dev/null 2>&1 || skip "elvish not installed"
+    local _copy="${BATS_TEST_TMPDIR}/install-embedded.elv"
+    # The embedded manifest URL is dead; setup() still exports the fixture one.
+    server_embed_config "$INSTALL_ELV" "$_copy" \
+        "OCX_INSTALL_DIST_URL=https://127.0.0.1:1/dead/dist.json"
+    run elvish "$_copy" --version 0.0.0
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
+@test "elvish: an embedded managed-config ref is forwarded to 'ocx self setup'" {
+    command -v elvish >/dev/null 2>&1 || skip "elvish not installed"
+    local _copy="${BATS_TEST_TMPDIR}/install-managed.elv"
+    server_embed_config "$INSTALL_ELV" "$_copy" \
+        "OCX_MANAGED_CONFIG=registry.corp.example/ocx/managed-config:v1"
+    run elvish "$_copy" --version 0.0.0
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path --managed-config registry.corp.example/ocx/managed-config:v1" "$OCX_STUB_ARGV"
+}
+
+@test "elvish: OCX_INSTALL_CA_BUNDLE as an inline PEM block is materialized" {
+    command -v elvish >/dev/null 2>&1 || skip "elvish not installed"
+    local _copy="${BATS_TEST_TMPDIR}/install-ca.elv"
+    server_embed_config "$INSTALL_ELV" "$_copy" \
+        "OCX_INSTALL_CA_BUNDLE=$(server_ca_bundle_inline)"
+    # Drop the CURL_CA_BUNDLE that setup() exports: the install can only succeed
+    # if the embedded PEM really reaches curl.
+    unset CURL_CA_BUNDLE
+    run elvish "$_copy" --version 0.0.0
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
+@test "elvish: OCX_INSTALL_CA_BUNDLE neither a file nor inline PEM → exit 2" {
+    command -v elvish >/dev/null 2>&1 || skip "elvish not installed"
+    OCX_INSTALL_CA_BUNDLE="${BATS_TEST_TMPDIR}/no-such-ca.pem" \
+        run elvish "$INSTALL_ELV" --version 0.0.0
+    [ "$status" -eq 2 ]
+}
+
+@test "elvish: no CA bundle - the fixture cert is rejected (negative control)" {
+    command -v elvish >/dev/null 2>&1 || skip "elvish not installed"
+    # Without CURL_CA_BUNDLE nothing trusts the fixture's self-signed cert. This
+    # is what makes the OCX_INSTALL_CA_BUNDLE success above meaningful.
+    unset CURL_CA_BUNDLE
+    run elvish "$INSTALL_ELV" --version 0.0.0
+    [ "$status" -ne 0 ]
+}
+
+@test "elvish: OCX_INSTALL_CA_BUNDLE is handed to 'ocx self setup' via SSL_CERT_FILE" {
+    command -v elvish >/dev/null 2>&1 || skip "elvish not installed"
+    unset CURL_CA_BUNDLE
+    OCX_INSTALL_CA_BUNDLE="$(server_ca_bundle)" run elvish "$INSTALL_ELV" --version 0.0.0
+    [ "$status" -eq 0 ]
+    # Second hop: `ocx self setup` pulls the package store itself and reads the
+    # host trust store via SSL_CERT_FILE. One bundle must cover both.
+    grep -qxF -- "SSL_CERT_FILE=$(server_ca_bundle)" "$OCX_STUB_ENV"
 }

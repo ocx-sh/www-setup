@@ -33,10 +33,12 @@ setup() {
     export CURL_CA_BUNDLE
     CURL_CA_BUNDLE="$(server_ca_bundle)"
     export OCX_STUB_ARGV="${BATS_TEST_TMPDIR}/stub-argv.log"
+    export OCX_STUB_ENV="${BATS_TEST_TMPDIR}/stub-env.log"
     export OCX_INSTALL_DIST_URL="${FIXTURE_URL}/dist.json"
     export OCX_INSTALL_MIRROR_URL="${FIXTURE_URL}/releases/download"
     unset GITHUB_PATH OCX_INSTALL_NO_SETUP OCX_INSTALL_VERSION
     unset __OCX_TESTING_INSTALL_BINARY
+    unset OCX_INSTALL_CA_BUNDLE OCX_MANAGED_CONFIG SSL_CERT_FILE SSL_CERT_DIR
 }
 
 @test "nu: default install hands off to 'ocx self setup <version>'" {
@@ -147,4 +149,101 @@ setup() {
         run nu "$INSTALL_NU"
     server_stop "$_pid"
     [ "$status" -eq 4 ]
+}
+
+# --- Embedded configuration block (corporate mirrors) -----------------------
+
+@test "nu: a sed-ed dist URL is used when the env is unset" {
+    command -v nu >/dev/null 2>&1 || skip "nu not installed"
+    local _copy="${BATS_TEST_TMPDIR}/install-embedded.nu"
+    server_embed_config "$INSTALL_NU" "$_copy" \
+        "OCX_INSTALL_DIST_URL=${FIXTURE_URL}/dist.json" \
+        "OCX_INSTALL_MIRROR_URL=${FIXTURE_URL}/releases/download"
+    unset OCX_INSTALL_DIST_URL OCX_INSTALL_MIRROR_URL
+    OCX_INSTALL_VERSION=0.0.0 run nu "$_copy"
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
+@test "nu: the environment wins over the embedded value" {
+    command -v nu >/dev/null 2>&1 || skip "nu not installed"
+    local _copy="${BATS_TEST_TMPDIR}/install-embedded.nu"
+    # The embedded manifest URL is dead; setup() still exports the fixture one.
+    server_embed_config "$INSTALL_NU" "$_copy" \
+        "OCX_INSTALL_DIST_URL=https://127.0.0.1:1/dead/dist.json"
+    OCX_INSTALL_VERSION=0.0.0 run nu "$_copy"
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
+@test "nu: an embedded managed-config ref is forwarded to 'ocx self setup'" {
+    command -v nu >/dev/null 2>&1 || skip "nu not installed"
+    local _copy="${BATS_TEST_TMPDIR}/install-managed.nu"
+    server_embed_config "$INSTALL_NU" "$_copy" \
+        "OCX_MANAGED_CONFIG=registry.corp.example/ocx/managed-config:v1"
+    OCX_INSTALL_VERSION=0.0.0 run nu "$_copy"
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path --managed-config registry.corp.example/ocx/managed-config:v1" "$OCX_STUB_ARGV"
+}
+
+@test "nu: OCX_INSTALL_CA_BUNDLE as an inline PEM block is materialized" {
+    command -v nu >/dev/null 2>&1 || skip "nu not installed"
+    local _copy="${BATS_TEST_TMPDIR}/install-ca.nu"
+    server_embed_config "$INSTALL_NU" "$_copy" \
+        "OCX_INSTALL_CA_BUNDLE=$(server_ca_bundle_inline)"
+    # Drop the CURL_CA_BUNDLE that setup() exports: the install can only succeed
+    # if the embedded PEM really reaches curl.
+    unset CURL_CA_BUNDLE
+    OCX_INSTALL_VERSION=0.0.0 run nu "$_copy"
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
+@test "nu: OCX_INSTALL_CA_BUNDLE neither a file nor inline PEM → exit 2" {
+    command -v nu >/dev/null 2>&1 || skip "nu not installed"
+    OCX_INSTALL_CA_BUNDLE="${BATS_TEST_TMPDIR}/no-such-ca.pem" \
+        OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
+    [ "$status" -eq 2 ]
+}
+
+@test "nu: no CA bundle - the fixture cert is rejected (negative control)" {
+    command -v nu >/dev/null 2>&1 || skip "nu not installed"
+    # Without CURL_CA_BUNDLE nothing trusts the fixture's self-signed cert. This
+    # is what makes the OCX_INSTALL_CA_BUNDLE success above meaningful.
+    unset CURL_CA_BUNDLE
+    OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
+    [ "$status" -ne 0 ]
+}
+
+@test "nu: OCX_INSTALL_CA_BUNDLE is handed to 'ocx self setup' via SSL_CERT_FILE" {
+    command -v nu >/dev/null 2>&1 || skip "nu not installed"
+    unset CURL_CA_BUNDLE
+    OCX_INSTALL_CA_BUNDLE="$(server_ca_bundle)" OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
+    [ "$status" -eq 0 ]
+    # Second hop: `ocx self setup` pulls the package store itself and reads the
+    # host trust store via SSL_CERT_FILE. One bundle must cover both.
+    grep -qxF -- "SSL_CERT_FILE=$(server_ca_bundle)" "$OCX_STUB_ENV"
+}
+
+@test "nu: a large manifest over the ^curl CA path does not deadlock" {
+    command -v nu >/dev/null 2>&1 || skip "nu not installed"
+    # Regression guard. An external command left in TAIL POSITION inside `try`
+    # hangs forever in nushell: `try` holds a stream nobody drains, and the
+    # deadlock only bites once the body outgrows the 64 KiB pipe buffer. The
+    # ordinary fixture manifest is a few hundred bytes, so it hid this
+    # completely while the real 73 KiB setup.ocx.sh manifest hung every install
+    # that took the ^curl path. Setting the CA bundle is what selects that path
+    # (`http get` has no CA-bundle option). `timeout` turns a regression into a
+    # failed assertion instead of a hung CI job.
+    # macOS ships no coreutils `timeout`; without it a regression would hang the
+    # run instead of failing it, so skip rather than assert blind.
+    command -v timeout >/dev/null 2>&1 || skip "timeout(1) not available"
+    server_pad_dist "$FIXTURE_DIR"
+    unset CURL_CA_BUNDLE
+    OCX_INSTALL_DIST_URL="${FIXTURE_URL}/dist-big.json" \
+        OCX_INSTALL_CA_BUNDLE="$(server_ca_bundle)" \
+        OCX_INSTALL_VERSION=0.0.0 \
+        run timeout 60 nu "$INSTALL_NU"
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
 }

@@ -37,6 +37,8 @@ setup() {
     # Record every fixture-stub invocation so tests can assert the exact
     # `ocx self setup` hand-off argv.
     export OCX_STUB_ARGV="${BATS_TEST_TMPDIR}/stub-argv.log"
+    # Record the SSL_CERT_FILE the installer hands down to `ocx self setup`.
+    export OCX_STUB_ENV="${BATS_TEST_TMPDIR}/stub-env.log"
     # The installer resolves latest + the per-target checksum/URL from the
     # self-hosted dist.json. The dist.json `url` is a dummy; OCX_INSTALL_MIRROR_URL
     # rewrites the download host to the fixture server.
@@ -45,6 +47,7 @@ setup() {
     unset GITHUB_PATH
     unset OCX_INSTALL_NO_SETUP OCX_INSTALL_VERSION
     unset __OCX_TESTING_INSTALL_BINARY
+    unset OCX_INSTALL_CA_BUNDLE OCX_MANAGED_CONFIG SSL_CERT_FILE SSL_CERT_DIR
 }
 
 @test "default install hands off to 'ocx self setup <version>'" {
@@ -261,5 +264,127 @@ setup() {
 @test "__OCX_TESTING_INSTALL_BINARY pointing at a non-file → exit 2" {
     __OCX_TESTING_INSTALL_BINARY="${BATS_TEST_TMPDIR}/does-not-exist" \
         run sh "$INSTALL_SH"
+    [ "$status" -eq 2 ]
+}
+
+# --- Embedded configuration block (corporate mirrors) -----------------------
+
+@test "embedded config: a sed-ed dist URL is used when the env is unset" {
+    local _copy="${BATS_TEST_TMPDIR}/install-embedded.sh"
+    server_embed_config "$INSTALL_SH" "$_copy" \
+        "OCX_INSTALL_DIST_URL=${FIXTURE_URL}/dist.json" \
+        "OCX_INSTALL_MIRROR_URL=${FIXTURE_URL}/releases/download"
+    unset OCX_INSTALL_DIST_URL OCX_INSTALL_MIRROR_URL
+    run sh "$_copy" --version 0.0.0
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
+@test "embedded config: the environment wins over the embedded value" {
+    local _copy="${BATS_TEST_TMPDIR}/install-embedded.sh"
+    # The embedded manifest URL is dead; setup() still exports the fixture one.
+    server_embed_config "$INSTALL_SH" "$_copy" \
+        "OCX_INSTALL_DIST_URL=https://127.0.0.1:1/dead/dist.json"
+    run sh "$_copy" --version 0.0.0
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
+@test "embedded config: a managed-config ref is forwarded to 'ocx self setup'" {
+    local _copy="${BATS_TEST_TMPDIR}/install-managed.sh"
+    server_embed_config "$INSTALL_SH" "$_copy" \
+        "OCX_MANAGED_CONFIG=registry.corp.example/ocx/managed-config:v1"
+    run sh "$_copy" --version 0.0.0
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path --managed-config registry.corp.example/ocx/managed-config:v1" "$OCX_STUB_ARGV"
+}
+
+@test "embedded config: OCX_MANAGED_CONFIG in the env suppresses the flag" {
+    local _copy="${BATS_TEST_TMPDIR}/install-managed.sh"
+    server_embed_config "$INSTALL_SH" "$_copy" \
+        "OCX_MANAGED_CONFIG=registry.corp.example/ocx/managed-config:v1"
+    # `ocx self setup` reads OCX_MANAGED_CONFIG itself, so the installer must not
+    # override it with the embedded default.
+    OCX_MANAGED_CONFIG="registry.other.example/ocx/managed-config:v2" run sh "$_copy" --version 0.0.0
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+    ! grep -q -- "--managed-config" "$OCX_STUB_ARGV"
+}
+
+# --- OCX_INSTALL_CA_BUNDLE --------------------------------------------------
+
+@test "no CA bundle: the fixture cert is rejected (negative control)" {
+    # Without CURL_CA_BUNDLE nothing trusts the fixture's self-signed cert. This
+    # is what makes every OCX_INSTALL_CA_BUNDLE success below meaningful.
+    unset CURL_CA_BUNDLE
+    run sh "$INSTALL_SH" --version 0.0.0
+    [ "$status" -ne 0 ]
+}
+
+@test "OCX_INSTALL_CA_BUNDLE: a CA file path is honored for downloads" {
+    # Drop the CURL_CA_BUNDLE that setup() exports: the install can only succeed
+    # if the knob really reaches curl/wget.
+    unset CURL_CA_BUNDLE
+    OCX_INSTALL_CA_BUNDLE="$(server_ca_bundle)" run sh "$INSTALL_SH" --version 0.0.0
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+    # Second hop: `ocx self setup` pulls the package store itself and reads the
+    # host trust store via SSL_CERT_FILE. One bundle must cover both.
+    grep -qxF -- "SSL_CERT_FILE=$(server_ca_bundle)" "$OCX_STUB_ENV"
+}
+
+@test "OCX_INSTALL_CA_BUNDLE: wget honors the CA bundle too" {
+    server_have_gnu_wget || skip "GNU wget not installed (BusyBox wget lacks the flags)"
+    unset CURL_CA_BUNDLE
+    OCX_INSTALL_DOWNLOADER=wget OCX_INSTALL_CA_BUNDLE="$(server_ca_bundle)" \
+        run sh "$INSTALL_SH" --version 0.0.0
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+    grep -qxF -- "SSL_CERT_FILE=$(server_ca_bundle)" "$OCX_STUB_ENV"
+}
+
+@test "OCX_INSTALL_CA_BUNDLE: wget with an inline PEM block" {
+    server_have_gnu_wget || skip "GNU wget not installed (BusyBox wget lacks the flags)"
+    local _copy="${BATS_TEST_TMPDIR}/install-ca-wget.sh"
+    server_embed_config "$INSTALL_SH" "$_copy" \
+        "OCX_INSTALL_CA_BUNDLE=$(server_ca_bundle_inline)"
+    unset CURL_CA_BUNDLE
+    OCX_INSTALL_DOWNLOADER=wget run sh "$_copy" --version 0.0.0
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
+@test "no CA bundle with wget: the fixture cert is rejected (negative control)" {
+    server_have_gnu_wget || skip "GNU wget not installed (BusyBox wget lacks the flags)"
+    unset CURL_CA_BUNDLE
+    OCX_INSTALL_DOWNLOADER=wget run sh "$INSTALL_SH" --version 0.0.0
+    [ "$status" -ne 0 ]
+}
+
+@test "OCX_INSTALL_CA_BUNDLE: an existing SSL_CERT_FILE is not overridden" {
+    unset CURL_CA_BUNDLE
+    cp "$(server_ca_bundle)" "${BATS_TEST_TMPDIR}/preset-ca.pem"
+    SSL_CERT_FILE="${BATS_TEST_TMPDIR}/preset-ca.pem" \
+        OCX_INSTALL_CA_BUNDLE="$(server_ca_bundle)" \
+        run sh "$INSTALL_SH" --version 0.0.0
+    [ "$status" -eq 0 ]
+    grep -qxF -- "SSL_CERT_FILE=${BATS_TEST_TMPDIR}/preset-ca.pem" "$OCX_STUB_ENV"
+}
+
+@test "OCX_INSTALL_CA_BUNDLE: an inline PEM block is materialized" {
+    local _copy="${BATS_TEST_TMPDIR}/install-ca.sh"
+    server_embed_config "$INSTALL_SH" "$_copy" \
+        "OCX_INSTALL_CA_BUNDLE=$(server_ca_bundle_inline)"
+    unset CURL_CA_BUNDLE
+    run sh "$_copy" --version 0.0.0
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+    # The materialized temp file is what `ocx self setup` is pointed at.
+    grep -qE -- '^SSL_CERT_FILE=/.+' "$OCX_STUB_ENV"
+}
+
+@test "OCX_INSTALL_CA_BUNDLE: neither a file nor inline PEM → exit 2" {
+    OCX_INSTALL_CA_BUNDLE="${BATS_TEST_TMPDIR}/no-such-ca.pem" \
+        run sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 2 ]
 }
