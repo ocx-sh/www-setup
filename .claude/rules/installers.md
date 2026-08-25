@@ -19,19 +19,25 @@ Global flags precede `self setup`; subcommand args follow it (clap parses them a
 
 | Path | argv |
 |---|---|
-| default | `<bin> self setup <version> [--no-modify-path]` (version is a positional) |
-| test hatch (`__OCX_TESTING_INSTALL_BINARY`) | `<bin> --offline self setup [--no-modify-path]` (no version positional — candidate is `local`) |
+| default | `<bin> self setup <version> [--no-modify-path] [--managed-config <REF>]` (version is a positional) |
+| test hatch (`__OCX_TESTING_INSTALL_BINARY`) | `<bin> --offline self setup [--no-modify-path]` (no version positional — candidate is `local`; no `--managed-config`, the OCI fetch cannot succeed offline) |
 | `OCX_INSTALL_NO_SETUP` | (no invocation — binary placed on the canonical bin dir only) |
+
+`--managed-config <REF>` is appended **only** when the embedded `@OCX_MANAGED_CONFIG@`
+placeholder has been replaced **and** `OCX_MANAGED_CONFIG` is unset in the
+environment. `ocx self setup` resolves the ref itself when the flag is absent
+(its own order is flag > `OCX_MANAGED_CONFIG` > existing seed), so omitting the
+flag is what keeps env ahead of embedded.
 
 A non-zero `self setup` exit → `err`/`Err` exit **6**. The recorded argv is asserted by the Bats/Pester suites (a regression to the old `--remote package install` would fail them).
 
 ## Env-knob naming (two-tier taxonomy)
 
-**Tier 1 — shared OCX env** (read by the binary too; no `INSTALL` infix): `OCX_HOME`, `OCX_NO_MODIFY_PATH`. Plus standard externals `NO_COLOR`, `TMPDIR`.
+**Tier 1 — shared OCX env** (read by the binary too; no `INSTALL` infix): `OCX_HOME`, `OCX_NO_MODIFY_PATH`, `OCX_MANAGED_CONFIG`. Plus standard externals `NO_COLOR`, `TMPDIR`.
 
 **Tier 2 — installer-only knobs**, all `OCX_INSTALL_*` with a strict grammar:
 
-- **values (bare nouns):** `OCX_INSTALL_VERSION` (empty = latest stable; the portable pinning channel for every shell), `OCX_INSTALL_REPO` (`ocx-sh/ocx`).
+- **values (bare nouns):** `OCX_INSTALL_VERSION` (empty = latest stable; the portable pinning channel for every shell), `OCX_INSTALL_REPO` (`ocx-sh/ocx`), `OCX_INSTALL_CA_BUNDLE` (CA bundle for every download — a PEM file path, or the PEM text itself; see below).
 - **endpoints (`_URL` suffix):** `OCX_INSTALL_DIST_URL` (manifest, default `https://setup.ocx.sh/dist.json`; a `dist/<sha256>.json` snapshot URL pins the manifest — see below), `OCX_INSTALL_MIRROR_URL` (artifact host override — rewrites the per-target URL to `<MIRROR_URL>/<tag>/<filename>`).
 - **opt-outs (`NO_` prefix):** `OCX_INSTALL_NO_SETUP` (skip `ocx self setup`), `OCX_INSTALL_NO_SMOKETEST`.
 - **opt-ins (bare verb/adj):** `OCX_INSTALL_FORCE`, `OCX_INSTALL_QUIET`, `OCX_INSTALL_PRINT_PATH`.
@@ -39,9 +45,93 @@ A non-zero `self setup` exit → `err`/`Err` exit **6**. The recorded argv is as
 
 > **`GITHUB_TOKEN` is not in the install path.** Latest-version resolution reads the self-hosted `dist.json`, not the GitHub Releases API. (`export_github_path()` / `GITHUB_PATH`, the unrelated CI PATH export, stays.)
 
-**Rename map (history)** — old → new: `OCX_INSTALL_INDEX_URL`→`OCX_INSTALL_DIST_URL`; `OCX_INSTALL_BASE_URL`→`OCX_INSTALL_MIRROR_URL`; `OCX_INSTALL_SKIP_SELF_INIT`→`OCX_INSTALL_NO_SETUP`; `OCX_INSTALL_NO_BIN_SMOKETEST`→`OCX_INSTALL_NO_SMOKETEST`. **Dropped:** `OCX_INSTALL_FORMAT_URL`, `OCX_INSTALL_CHECKSUM_FORMAT_URL` (URLs now come inline from `dist.json`). **Added:** `OCX_INSTALL_VERSION`.
+**Rename map (history)** — old → new: `OCX_INSTALL_INDEX_URL`→`OCX_INSTALL_DIST_URL`; `OCX_INSTALL_BASE_URL`→`OCX_INSTALL_MIRROR_URL`; `OCX_INSTALL_SKIP_SELF_INIT`→`OCX_INSTALL_NO_SETUP`; `OCX_INSTALL_NO_BIN_SMOKETEST`→`OCX_INSTALL_NO_SMOKETEST`. **Dropped:** `OCX_INSTALL_FORMAT_URL`, `OCX_INSTALL_CHECKSUM_FORMAT_URL` (URLs now come inline from `dist.json`). **Added:** `OCX_INSTALL_VERSION`, `OCX_INSTALL_CA_BUNDLE`.
 
 When introducing a new knob: pick the most boring possible name fitting the grammar above; default to empty/`0`; document it in `README.md` (env matrix) and the test suites; mirror it in **all five** installers (env name identical; pwsh adds a `[switch]`/`[string]` param that the env overrides).
+
+### The embedded configuration block (corporate mirrors)
+
+Every installer carries a sed-able configuration block near the top, so a site
+can host ONE patched copy carrying its own defaults. Four placeholders:
+`@OCX_INSTALL_DIST_URL@`, `@OCX_INSTALL_MIRROR_URL@`, `@OCX_INSTALL_CA_BUNDLE@`,
+`@OCX_MANAGED_CONFIG@` — each named for the environment variable it backs.
+
+**The uniform-sed contract is the point, and it is load-bearing.** Assignment
+syntax diverges across the five dialects (`X=`, `$X =`, `set -g X`, `def`,
+`var`), so the sed target can never be the LINE. What all five share is the `#`
+comment character and a single-quoted string literal, so the target is the
+**token inside the quotes**. Consequences to preserve:
+
+- Each token appears **exactly once per file**, on its assignment line. Never
+  write a complete token anywhere else — a live token in a header comment gets
+  rewritten too, which is why the in-file recipe says `<TOKEN>`, not a real one.
+- Values are **single-quoted** in all five dialects: no interpolation, and
+  newlines are allowed — an entire PEM block substitutes cleanly for
+  `@OCX_INSTALL_CA_BUNDLE@`. Values must not contain a single quote.
+- An unreplaced placeholder is **ignored**: the guard matches `@OCX_*@` (sh
+  `case`, fish/pwsh `-like`/`string match`, nu/elvish prefix+suffix). The guard
+  pattern deliberately carries **no complete token**, so no sed can corrupt it.
+  A pristine installer must therefore behave bit-identically to one with no
+  block at all.
+- **Precedence is environment > embedded > built-in default.** The dialect's
+  existing default idiom is preserved; only its fallback is rerouted through the
+  resolver (`ocx_cfg` / `__ocx_cfg` / `__ocx-cfg` / `ocx-cfg` /
+  `Resolve-EmbeddedConfig`).
+
+`tests/install/helpers/server.bash` (`server_embed_config`) and
+`tests/install/ps1/Fixture.psm1` (`New-EmbeddedInstaller`) patch a copy the same
+way a mirror would; both deliberately do a plain literal replace with no
+per-shell special-casing, which is what makes them a regression test for the
+uniform-sed contract itself.
+
+### `OCX_INSTALL_CA_BUNDLE`
+
+A PEM **file path**, or the PEM text itself, materialized to a temp file (which
+is what curl/wget need, and what `SSL_CERT_FILE` names). A value that is neither
+a readable file nor an inline PEM block → exit **2**.
+
+Detection is by **content, not by a leading marker**: the value counts as inline
+PEM when it *contains* `-----BEGIN` anywhere. A real distro bundle opens with
+comment lines or a certificate label (Fedora/RHEL's extracted
+`tls-ca-bundle.pem` does exactly that), so a `starts-with` test rejects genuine
+bundles; a filesystem path can never contain `-----BEGIN`, so the looser test
+costs nothing. The fixture suites feed a comment-prefixed bundle
+(`server_ca_bundle_inline`) to keep this honest.
+
+Threaded into curl as `--cacert` and wget as `--ca-certificate=`, passed as its
+own argv element so a path containing spaces works. In `install.nu` a configured
+bundle **skips the `http get` attempt entirely** and takes the `^curl` path —
+`http get` has no CA-bundle option, and letting it run would succeed against the
+wrong trust store.
+
+**Both hops, one bundle.** An install is two HTTPS conversations: the installer
+fetches manifest + archive, then `ocx self setup` pulls the package store from the
+registry. So when the knob is set (and `SSL_CERT_FILE` is not already in the
+environment) the installer **exports `SSL_CERT_FILE=<resolved path>`** for the
+child. That is how OCX discovers a host CA — it merges the host store into its
+compiled-in Mozilla roots, PEM only, no `OCX_` prefix. Covering only the first hop
+would leave `self setup` failing behind exactly the proxy the knob exists for.
+
+Note the asymmetry, and keep it documented: `curl --cacert` / `wget
+--ca-certificate` **replace** the system trust store, whereas OCX **merges**. A
+bundle that must reach a public host as well as an internal one needs the public
+roots in it.
+
+Trust only: the inline `sha256` from `dist.json` remains the integrity boundary.
+See [`mirror-auth.md`](mirror-auth.md).
+
+**ACCEPTED DIVERGENCE — `install.ps1` does not use it for its OWN downloads.**
+`Invoke-WebRequest` has no PowerShell 5.1-safe CA-bundle parameter, and a
+`ServerCertificateValidationCallback` override is out of scope. install.ps1
+therefore emits one `Warn` and continues on the system trust store for the
+manifest + archive fetch, so a uniformly sed-ed installer set still installs; on
+Windows the CA belongs in the machine certificate store. **Everything else stays
+symmetric**: it validates the value (exit **2**), materializes an inline PEM to a
+temp file, and exports `SSL_CERT_FILE` for the `ocx self setup` hand-off — the
+divergence is exactly one flag, not the knob.
+
+Materializing in ps1 is not optional: `SSL_CERT_FILE` names a PATH, so exporting
+raw PEM text would hand `ocx self setup` garbage.
 
 ### Content-addressed manifest pins
 
@@ -109,6 +199,7 @@ This divergence is accepted because PowerShell parameter binding owns unknown-ar
 `src/install.{sh,ps1,nu,fish,elv}` are independent implementations of the same thin contract. Whenever you change one, change the others in the same PR:
 
 - New env knob → all five
+- New embedded-config placeholder → all five, same token spelling, once per file
 - New exit code → all five
 - New flag → wherever the dialect parses flags (`sh`/`fish`/`pwsh`); for `nu`/`elvish` (env-driven) wire the equivalent env knob
 - Behavioral default change → all five

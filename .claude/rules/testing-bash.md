@@ -46,7 +46,9 @@ exposes:
 | `server_sha256 FILE` | Portable sha256 of `FILE` — coreutils `sha256sum` (Linux) or BSD/macOS `shasum -a 256`. Use this in suites instead of bare `sha256sum` so the tamper tests run on the macOS Bats leg. |
 | `server_start ROOT LOGFILE` | Spin a python3 `ssl`-wrapped server on an ephemeral port against `ROOT`; echo `PID PORT`. Serves **HTTPS** (see below). |
 | `server_stop PID` | Kill the server. |
+| `server_path_without_curl` | Echo a PATH mirroring the current one with `curl` genuinely absent (a symlink farm, built once per file). The only portable way to force a dialect's **wget** fallback — `command -v curl` skips non-executables and keeps searching, so shadowing does not work. |
 | `server_ca_bundle` | Echo the path to the vendored localhost CA cert; export as `CURL_CA_BUNDLE`. |
+| `server_embed_config SRC DEST TOKEN=VALUE...` | Copy an installer and substitute its embedded-config placeholders, the way a corporate mirror patches its copy. TOKEN is the bare env name (`OCX_INSTALL_DIST_URL`); the `@...@` wrapper is added for you. A plain literal replace with NO per-shell special-casing — that is what makes it a regression test for the uniform-sed contract. VALUE may contain newlines (an inline PEM). |
 
 ### HTTPS, not HTTP
 
@@ -87,7 +89,9 @@ The stub packed into the fixture archive (`server_stub_body`):
 - answers the `ocx self setup [...]` and `--offline self setup [...]` hand-off by
   exiting **0** (the thin installer hands off to `ocx self setup`; the stub no
   longer emits shims or completion — `ocx self setup` owns that),
-- **records its full argv** (one line per invocation) to `$OCX_STUB_ARGV` when set.
+- **records its full argv** (one line per invocation) to `$OCX_STUB_ARGV` when set,
+- **records `SSL_CERT_FILE`** to `$OCX_STUB_ENV` when set — the CA suites assert the
+  installer hands its bundle down to the `ocx self setup` hop, not just to curl/wget.
 
 The argv recording is load-bearing: it lets a test assert the **exact** hand-off
 
@@ -200,4 +204,6 @@ hatch.
 | Latest-resolution / manifest format change | `env-knobs.bats` (latest via `dist.json`) + `exit-codes.bats` (dead manifest → exit 3, message contains `latest version`) + `dist.bats` (generator shape) |
 | Manifest-pin (`dist/<sha256>.json`) behavior change | `env-knobs.bats` + every `tests/install/{nu,fish,elvish}/` suite — the happy path (installs) and the altered-body path (exit 4), both via `server_publish_dist_snapshot` |
 | `__OCX_TESTING_INSTALL_BINARY` behavior change | `env-knobs.bats` (happy: no download, binary placed, `--offline self setup` argv) + `exit-codes.bats` (bad → exit 2) + `print-path.bats` (PRINT_PATH honored) |
+| Embedded-config placeholder added/renamed | `env-knobs.bats` + every `tests/install/{nu,fish,elvish}/` suite + `ps1/Knobs.Tests.ps1` — patch a copy via `server_embed_config` / `New-EmbeddedInstaller` and assert the effect, plus one case proving the environment still wins |
+| `OCX_INSTALL_CA_BUNDLE` behavior change | all five suites — the inline-PEM happy path with `CURL_CA_BUNDLE` UNSET (that is what proves the flag reaches curl), the matching **negative control** (no bundle → non-zero; without it the happy path proves nothing), the `SSL_CERT_FILE` hand-down assertion, and the neither-file-nor-PEM → exit 2 case. `env-knobs.bats` additionally covers the **wget** backend via `OCX_INSTALL_DOWNLOADER=wget`, and the fish suite via `server_path_without_curl`. ps1 asserts the divergence warning + the hand-down instead |
 | New exotic installer behavior | the matching `tests/install/{nu,fish,elvish}/` suite |

@@ -62,7 +62,14 @@ Things the harness gets right that a naive `python -m http.server` does not:
    test has no Bats mirror — `install.sh` delegates redirect-following to `curl`,
    which has no equivalent strict-mode failure mode.
 
-5. **Content-addressed manifest snapshots.** `Publish-DistSnapshot -SrvRoot`
+5. **Embedded-config patching.** `New-EmbeddedInstaller -Source -Destination
+   -Tokens @{...}` copies install.ps1 and substitutes its `@OCX_*@` placeholders
+   — the PowerShell mirror of `server_embed_config` in
+   `../helpers/server.bash`. Both do a plain literal replace with no per-shell
+   special-casing, which is what makes them a regression test for the
+   uniform-sed contract itself.
+
+6. **Content-addressed manifest snapshots.** `Publish-DistSnapshot -SrvRoot`
    copies `dist.json` to `dist/<sha256>.json` and returns the digest, so
    `Knobs.Tests.ps1` can point `OCX_INSTALL_DIST_URL` at a pin. A second
    snapshot is written under a name (`'a' * 64`) whose digest the body does not
@@ -76,7 +83,8 @@ no-setup knob is **`OCX_INSTALL_NO_SETUP`** / `-NoSetup`; the smoketest knob is
 ## Stub `self setup` hand-off + `__OCX_TESTING_INSTALL_BINARY`
 
 The stub answers `version` (`0.0.0`), `about`, and the `ocx self setup [...]` /
-`--offline self setup [...]` hand-off (exits 0; records argv). It no longer emits
+`--offline self setup [...]` hand-off (exits 0; records argv, and records
+`SSL_CERT_FILE` to `$OCX_STUB_ENV` so the CA scenarios can assert the hand-down). It no longer emits
 shims or completion sentinels — `ocx self setup` owns that. The argv is recorded
 so the hand-off assertion (`self setup 0.0.0 --no-modify-path` on the default
 path; `--offline self setup --no-modify-path` on the test-hatch path) works.
@@ -153,7 +161,12 @@ body exits 4). The accepted pwsh divergence — an unknown flag (`-BogusFlag`) i
 by the `[CmdletBinding()]` binder at exit 1 (indeterminate through `irm | iex`),
 not the in-script exit 2 — is preserved. Exit code 7 (unsupported platform)
 cannot be triggered on an X64 host in either suite — it is exercised by
-`tests/docker/`.
+`tests/docker/`. The embedded-configuration scenarios mirror
+`env-knobs.bats` one-for-one. `OCX_INSTALL_CA_BUNDLE` keeps the exit-2, inline-PEM
+and `SSL_CERT_FILE` hand-down scenarios; only the curl/wget flag itself diverges
+(`Invoke-WebRequest` has no 5.1-safe CA-bundle parameter), so the Pester suite
+additionally asserts the warning and that the install still succeeds. The
+wget-backend scenarios have no ps1 mirror — install.ps1 never shells out.
 
 CI runs Bats on ubuntu (vendored bats) and Pester on windows-latest (both
 `powershell.exe` 5.1 and `pwsh` 7) + ubuntu-latest + macos-latest (pwsh 7).

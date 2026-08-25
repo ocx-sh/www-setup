@@ -102,8 +102,66 @@ The `OCX_INSTALL_*` prefix scopes a knob to install-time; the shared runtime env
 | `OCX_INSTALL_QUIET` | Suppress informational stderr output | `0` |
 | `OCX_INSTALL_PRINT_PATH` | Emit the bin dir as the final stdout line | `0` |
 | `OCX_INSTALL_DOWNLOADER` | Force a downloader (`curl` or `wget`); default auto-detects (sh only) | _(auto)_ |
+| `OCX_INSTALL_CA_BUNDLE` | CA bundle trusted for every download — a PEM **file path**, or the PEM text itself. For TLS-intercepting corporate proxies. Also handed to `ocx self setup` as `SSL_CERT_FILE`. Not used by `install.ps1`'s own downloads (see below). | _(system trust store)_ |
 
 The full list lives in `src/install.sh` (and its peers); see [`.claude/rules/installers.md`](.claude/rules/installers.md) for the naming + 5-way parity rules.
+
+## Corporate mirrors: one patched installer
+
+A site that mirrors OCX internally usually wants **one** copy of the installer that already knows the local manifest, artifact host, CA, and managed config — instead of asking every developer to export four environment variables.
+
+Each installer carries an embedded configuration block near the top, holding four placeholders:
+
+| Placeholder | Sets |
+|---|---|
+| `@OCX_INSTALL_DIST_URL@` | the distribution manifest URL (a `dist/<sha256>.json` pin works here too) |
+| `@OCX_INSTALL_MIRROR_URL@` | the artifact host override |
+| `@OCX_INSTALL_CA_BUNDLE@` | the CA bundle — a path, **or** an inline PEM block |
+| `@OCX_MANAGED_CONFIG@` | the managed-config OCI reference (`host/repo:tag`), forwarded as `ocx self setup --managed-config <REF>` |
+
+The placeholders are spelled identically in all five installers, so **one command patches every dialect**:
+
+```sh
+# Fetch whichever dialects your site needs (-O would name the file `sh`).
+for pair in sh:sh pwsh:ps1 nu:nu fish:fish elvish:elv; do
+  curl -fsSL "https://setup.ocx.sh/${pair%%:*}" -o "install.${pair##*:}"
+done
+
+sed -i \
+  -e "s|@OCX_INSTALL_DIST_URL@|https://artifactory.corp/ocx/dist.json|" \
+  -e "s|@OCX_INSTALL_MIRROR_URL@|https://artifactory.corp/ocx/releases|" \
+  -e "s|@OCX_MANAGED_CONFIG@|registry.corp.example/ocx/managed-config:v1|" \
+  install.*
+```
+
+The placeholder is single-quoted in every dialect, which means the value is never interpolated **and may span newlines** — so the CA bundle can be the certificate itself, leaving nothing to distribute alongside the script. A value spanning lines needs a tool that is not line-oriented:
+
+```sh
+python3 - install.sh <<'PY'
+import sys
+p = sys.argv[1]
+pem = open('corp-root-ca.pem').read()
+s = open(p).read().replace('@OCX_INSTALL_CA_BUNDLE@', pem)
+open(p, 'w').write(s)
+PY
+```
+
+Rules:
+
+- **Precedence is environment > embedded > built-in default**, so CI and one-off overrides keep working on a patched copy.
+- A placeholder **left unreplaced is ignored** — an unpatched installer behaves exactly as it always has.
+- Values must not contain a single quote.
+- The mirror must allow **anonymous read**; there is no credential knob in any dialect. See [`.claude/rules/mirror-auth.md`](.claude/rules/mirror-auth.md).
+
+### The CA bundle covers both hops
+
+An install is two HTTPS conversations, not one: the installer fetches the manifest and the archive, then `ocx self setup` pulls the package store from the registry. `OCX_INSTALL_CA_BUNDLE` covers both — the installer passes it to `curl --cacert` / `wget --ca-certificate`, and exports it as **`SSL_CERT_FILE`** for the `ocx self setup` child, which is how OCX picks up a host CA ([env reference](https://ocx.sh/docs/reference/environment#external-ca-certificates)). An `SSL_CERT_FILE` already in the environment is left alone.
+
+Three things worth knowing:
+
+- **PEM only.** `SSL_CERT_FILE` ignores DER; convert with `openssl x509 -inform der -in corp.crt -out corp.pem`. An inline value is recognised by containing `-----BEGIN`, so a bundle that opens with comment lines (as Fedora/RHEL's does) works unchanged.
+- **curl/wget _replace_ the system trust store** with the bundle you give them, while OCX _merges_ it with its compiled-in Mozilla roots. So if the installer must reach both an internal host and a public one in the same run, the bundle needs the public roots too (`cat corp-root.pem /etc/ssl/certs/ca-certificates.crt`). Same semantics as `CURL_CA_BUNDLE`.
+- **`install.ps1` does not use it for its own downloads**: `Invoke-WebRequest` has no PowerShell 5.1-safe CA-bundle option, so it warns and falls back to the system trust store (on Windows, install the CA into the machine certificate store). It still validates the value, materializes an inline PEM, and exports `SSL_CERT_FILE` for `ocx self setup` — the gap is one flag, not the knob. Patching all five copies uniformly is therefore safe.
 
 ## Stdout / stderr contract
 
