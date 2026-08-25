@@ -62,7 +62,7 @@ Things the harness gets right that a naive `python -m http.server` does not:
    test has no Bats mirror — `install.sh` delegates redirect-following to `curl`,
    which has no equivalent strict-mode failure mode.
 
-4. **Content-addressed manifest snapshots.** `Publish-DistSnapshot -SrvRoot`
+5. **Content-addressed manifest snapshots.** `Publish-DistSnapshot -SrvRoot`
    copies `dist.json` to `dist/<sha256>.json` and returns the digest, so
    `Knobs.Tests.ps1` can point `OCX_INSTALL_DIST_URL` at a pin. A second
    snapshot is written under a name (`'a' * 64`) whose digest the body does not
