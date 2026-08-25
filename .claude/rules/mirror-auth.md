@@ -7,6 +7,11 @@ anonymous read** — the download path has no credential knob in any dialect.
 
 - The `OCX_INSTALL_*` grammar has no auth entry. Adding one means all five
   dialects (`sh ps1 nu fish elv`) implement it, plus bats/Pester coverage.
+- **CA trust is covered; auth is not.** `OCX_INSTALL_CA_BUNDLE` (a PEM path or
+  an inline PEM block, also settable via the `@OCX_INSTALL_CA_BUNDLE@` embedded
+  placeholder) lets a mirror behind a TLS-intercepting proxy be reached. That is
+  trust in the transport, not a credential — the mirror must still allow
+  anonymous read. `install.ps1` does not honor it (see `installers.md`).
 - Future support (not now): a header knob (`curl -H`, `Invoke-WebRequest
   -Headers`) or netrc (`curl --netrc`). Pick one and keep it uniform.
 - Same gap exists in `find_ocx` (`file(DOWNLOAD)`, has `HTTPHEADER`/`NETRC`)
