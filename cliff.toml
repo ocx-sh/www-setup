@@ -30,7 +30,7 @@ trim = true
 
 [remote.github]
 owner = "ocx-sh"
-repo = "setup.ocx.sh"
+repo = "www-setup"
 
 [git]
 conventional_commits = true

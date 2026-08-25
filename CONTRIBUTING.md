@@ -87,10 +87,12 @@ The PR workflow runs `cocogitto check-latest-tag-only`; commits that aren't conv
 
 ## Releases
 
-The project is **pre-release** — no tags exist yet, so the first release cuts the initial tag. Releases are tag-driven:
+The project is **pre-release** but has shipped (`v0.1.0-rc.1`, `v0.1.0`, `v0.1.1`, plus the `v0` major alias). Releases are tag-driven:
 
 ```sh
-task release:prepare       # git-cliff bump + CHANGELOG + verify
+task release:prepare                           # interactive: pick auto|patch|minor|major, then CHANGELOG + verify
+task release:prepare BUMP=minor                # non-interactive (required on CI / no TTY)
+task release:prepare BUMP=auto VERSION=0.2.0   # pin an exact version
 git add -A && git commit -m "release: vX.Y.Z"
 git tag vX.Y.Z
 git push origin main && git push origin vX.Y.Z

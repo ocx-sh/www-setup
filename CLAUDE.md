@@ -62,7 +62,8 @@ task rules:plan                            # render the Bunny edge-rule set (off
 task rules:apply                           # apply them to the pull zone (needs BUNNY_API_KEY)
 task rules:verify                          # probe every routed URL against the live zone
 
-task release:prepare                       # git-cliff bump + changelog + tag locally
+task release:prepare                       # interactive bump (auto|patch|minor|major) + changelog + verify
+task release:prepare BUMP=minor            # non-interactive; VERSION=X.Y.Z pins exactly
 ```
 
 ## Stdout / stderr contract

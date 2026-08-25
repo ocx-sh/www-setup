@@ -3,7 +3,8 @@
 ## Local steps
 
 1. `git checkout main && git pull`
-2. `task release:prepare` — computes next version from conventional commits, regenerates `CHANGELOG.md`, runs `task verify`.
+2. `task release:prepare` — prompts for the bump level (`auto` = from conventional commits, or `patch`/`minor`/`major`), regenerates `CHANGELOG.md`, runs `task verify`.
+   The prompt needs a TTY (`interactive: true` in `.taskrc.yml`); without one, pass `BUMP=<level>` on the CLI. `VERSION=X.Y.Z` pins an exact version and wins over `BUMP`.
 3. Review the diff. Adjust `CHANGELOG.md` if `git-cliff` mis-grouped something.
 4. Commit and tag:
    ```bash

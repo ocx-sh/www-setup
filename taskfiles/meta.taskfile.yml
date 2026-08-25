@@ -37,4 +37,7 @@ tasks:
 
   lychee:
     desc: Link-check Markdown files (offline-friendly via --cache)
-    cmd: ocx run lychee -- lychee --cache --no-progress README.md CHANGELOG.md .claude/rules/
+    # CHANGELOG.md is deliberately NOT scanned (matches verify.yml): git-cliff
+    # writes the release-tag URL for the version being prepared, which 404s
+    # until that tag is pushed — it would fail `task release:prepare` every time.
+    cmd: ocx run lychee -- lychee --cache --no-progress README.md .claude/rules/
