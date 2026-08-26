@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0](https://github.com/ocx-sh/www-setup/releases/tag/v0.2.0) — 2026-08-26
+
+### Added
+
+- **install:** Sed-able embedded configuration block for corporate mirrors by @michael-herwig ([e8c62c0](https://github.com/ocx-sh/www-setup/commit/e8c62c035b5e8f552520496557b6f6589846a158))
+
+### Documentation
+
+- Document corporate-mirror patching and the CA bundle by @michael-herwig ([da4f5d9](https://github.com/ocx-sh/www-setup/commit/da4f5d91cf1e2641b8387422fa86cb0a2071410b))
+
+### Fixed
+
+- **ci:** Declare the release commit type so cog check passes on PRs by @michael-herwig ([2ae27fd](https://github.com/ocx-sh/www-setup/commit/2ae27fd4f49e1f5e7fa4bf237d02a1dc6cc1606a))
 ## [0.1.2](https://github.com/ocx-sh/www-setup/releases/tag/v0.1.2) — 2026-08-25
 
 ### Added
@@ -15,7 +28,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- **release:** Unbreak release:prepare and add interactive bump ([abe68a5](https://github.com/ocx-sh/www-setup/commit/abe68a5d1706d952afd9cd11e423cd5539da2654))
+- **release:** Unbreak release:prepare and add interactive bump by @michael-herwig ([abe68a5](https://github.com/ocx-sh/www-setup/commit/abe68a5d1706d952afd9cd11e423cd5539da2654))
 ## [0.1.1](https://github.com/ocx-sh/www-setup/releases/tag/v0.1.1) — 2026-06-30
 
 ### Fixed
