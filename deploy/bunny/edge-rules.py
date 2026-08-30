@@ -6,11 +6,14 @@
 The pull zone's Edge Rules ARE the routing contract — the friendly per-shell
 URLs are not stored objects (Edge Storage is directory-backed, so `sh` and
 `sh/next` cannot coexist as files). This script keeps that contract in git
-instead of in dashboard clicks.
+instead of in dashboard clicks. The same applies to the zone's resilience
+settings (ZONE_SETTINGS below) — see `zone` / `zone-apply`.
 
-  python3 edge-rules.py plan      # print what would be applied
-  python3 edge-rules.py apply     # delete existing rules, apply this set, purge
-  python3 edge-rules.py verify    # probe every route against the live zone
+  python3 edge-rules.py plan       # print what would be applied
+  python3 edge-rules.py apply      # delete existing rules, apply this set, purge
+  python3 edge-rules.py verify     # probe every route against the live zone
+  python3 edge-rules.py zone       # diff the live zone settings against desired
+  python3 edge-rules.py zone-apply # push the differing settings, then purge
 
 Env: BUNNY_API_KEY (account key, NOT the storage zone password).
      BUNNY_PULLZONE_ID (default 6415130), BUNNY_CDN_HOST, BUNNY_PUBLIC_HOST.
@@ -35,6 +38,41 @@ IMMUTABLE = "31536000"
 
 
 MAX_PATTERNS = 5  # hard API limit: "Maximum 5 triggers are allowed per condition"
+
+# Zone resilience settings. These shipped ALL DISABLED, which is how a single
+# bad edge PoP became a user-visible outage: from 2026-08-27 to 2026-08-30 the
+# PHX PoP returned HTTP 500 on 23 of 23 requests for /dist.json (100%), while
+# ~16 other PoPs served it fine. With no origin retry, no shield and no stale
+# fallback, that 500 went straight to `curl` and the installer exited 3 — for
+# CI and for real `curl | sh` users routed through Phoenix alike.
+#
+# Nothing here changes routing or cache lifetimes; `zone-apply` and `apply` are
+# independent. Anything not listed is left exactly as the dashboard has it.
+ZONE_SETTINGS = {
+    # Pull through one shield (FR, nearest the DE storage primary) instead of
+    # every PoP reaching origin on its own. This is what routes around a PoP
+    # whose own origin path is broken.
+    "EnableOriginShield": True,
+    # SafeHop is the umbrella toggle for the origin retry behaviour below.
+    "EnableSafeHop": True,
+    "OriginRetries": 2,
+    # SECONDS, and an enum: only 0/1/3/5/10 are accepted. Any other value is
+    # silently clamped down to the nearest allowed one and the API still
+    # answers 200 — which is exactly why zone-apply reads every setting back
+    # instead of trusting the status code.
+    "OriginRetryDelay": 1,
+    # Off by default, which is the surprising part: without it the edge does
+    # not retry a 5xx even when retries are otherwise enabled.
+    "OriginRetry5XXResponses": True,
+    # Serve the last good copy while revalidating, and when origin is down.
+    # Bounded by the 300s zone default, so a published dist.json is still
+    # visible within the usual window.
+    "UseStaleWhileUpdating": True,
+    "UseStaleWhileOffline": True,
+    # Collapse concurrent misses for the same object into one origin pull —
+    # the nightly docker matrix fires ~40 of them at once.
+    "EnableRequestCoalescing": True,
+}
 
 
 def rule(desc, patterns, target, action=ORIGIN, p2=""):
@@ -147,6 +185,54 @@ def cmd_plan():
             print(f"        {p}")
 
 
+def zone_diff():
+    """[(key, current, desired)] for every ZONE_SETTINGS key that differs."""
+    _, z = call("GET", API)
+    if not isinstance(z, dict):
+        sys.exit(f"could not read pull zone {ZONE}: {z}")
+    missing = [k for k in ZONE_SETTINGS if k not in z]
+    if missing:
+        # A renamed/removed API field must not be silently skipped — it would
+        # look like "no drift" forever.
+        sys.exit(f"pull zone has no such field(s): {', '.join(missing)}")
+    return [(k, z[k], v) for k, v in ZONE_SETTINGS.items() if z[k] != v]
+
+
+def cmd_zone():
+    diff = zone_diff()
+    if not diff:
+        print("  zone settings already match")
+        return 0
+    for k, cur, want in diff:
+        print(f"  {k:28} {str(cur):>6} -> {want}")
+    return 0
+
+
+def cmd_zone_apply():
+    diff = zone_diff()
+    if not diff:
+        print("  zone settings already match — nothing to apply")
+        return 0
+    payload = {k: want for k, _, want in diff}
+    for k, cur, want in diff:
+        print(f"  {k:28} {str(cur):>6} -> {want}")
+    s, resp = call("POST", API, payload)
+    print(f"  POST -> {s}")
+    if s not in (200, 201, 204):
+        sys.exit(f"update rejected: {resp}")
+    # Re-read: the API answers 204 for a body it partially ignored, so the
+    # write is only proven by reading it back.
+    left = zone_diff()
+    if left:
+        for k, cur, want in left:
+            print(f"  NOT APPLIED {k:24} {str(cur):>6} != {want}")
+        sys.exit("some settings did not take effect")
+    print("  all settings confirmed")
+    s, _ = call("POST", f"{API}/purgeCache")
+    print(f"  purge -> {s}")
+    return 0
+
+
 def cmd_apply():
     for r in existing():
         s, _ = call("DELETE", f"{API}/edgerules/{r['Guid']}")
@@ -209,6 +295,10 @@ if __name__ == "__main__":
         cmd_apply()
     elif c == "verify":
         sys.exit(cmd_verify())
+    elif c == "zone":
+        sys.exit(cmd_zone())
+    elif c == "zone-apply":
+        sys.exit(cmd_zone_apply())
     else:
         print(__doc__)
         sys.exit(2)

@@ -32,7 +32,7 @@ Each installer is a **thin bootstrap**: detect platform → resolve the release 
 | `scripts/publish-dist.sh` | Regenerate + upload the manifest: immutable `dist/<sha256>.json` snapshot, `dist.json.sha256` sidecar, then the rolling `dist.json` last (overwrite, clobber-safe) |
 | `external/` | Vendored Bats as git submodules (`bats-core`, `bats-support`, `bats-assert`) |
 | `scripts/lib/bunny.sh` | The upload transport: `bn_put` (overwrite) / `bn_put_new` (write-if-absent) over the Bunny Edge Storage HTTP API with plain `curl`. Sends a `Checksum` header so uploads are verified server-side |
-| `deploy/bunny/` | The live deployment: `edge-rules.py` (`plan`/`apply`/`verify`) owns the pull zone's routing — the per-shell `/sh /pwsh /nu /fish /elvish` (+ `/next`, `/<VERSION>`) rewrites onto `archive/ latest/ next/`, `/dist`, the `/docs/` + `/actions/` upstream proxies, the immutable-vs-300s cache split, and the `text/plain` content type. See its [README](deploy/bunny/README.md) |
+| `deploy/bunny/` | The live deployment: `edge-rules.py` (`plan`/`apply`/`verify`) owns the pull zone's routing — the per-shell `/sh /pwsh /nu /fish /elvish` (+ `/next`, `/<VERSION>`) rewrites onto `archive/ latest/ next/`, `/dist`, the `/docs/` + `/actions/` upstream proxies, the immutable-vs-300s cache split, and the `text/plain` content type. Also owns the zone **resilience settings** (`ZONE_SETTINGS` → `zone`/`zone-apply`: origin shield, origin retries, stale-while-*, request coalescing) on a separate axis from routing. See its [README](deploy/bunny/README.md) |
 | `deploy/nginx/` | SUPERSEDED reference (the old self-hosted server block), kept as the rollback target until the Bunny DNS cutover is verified |
 | `deploy/github/` | Reference snippet (`ocx-release-dispatch.yml.example`) the `ocx-sh/ocx` repo adds to its release workflow to dispatch `ocx-released` at this repo |
 | `tests/install/*.bats` | Bats env-knob, exit-code, print-path, dist suites (sh) |
@@ -61,6 +61,8 @@ task publish:dry-run                       # validates storage keys (offline, no
 task rules:plan                            # render the Bunny edge-rule set (offline)
 task rules:apply                           # apply them to the pull zone (needs BUNNY_API_KEY)
 task rules:verify                          # probe every routed URL against the live zone
+task zone:plan                             # diff the pull-zone resilience settings (needs BUNNY_API_KEY)
+task zone:apply                            # apply them + purge (needs BUNNY_API_KEY)
 
 task release:prepare                       # interactive bump (auto|patch|minor|major) + changelog + verify
 task release:prepare BUMP=minor            # non-interactive; VERSION=X.Y.Z pins exactly
