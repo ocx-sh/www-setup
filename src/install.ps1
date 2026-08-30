@@ -164,6 +164,10 @@ $OcxNoModifyPath      = if (Test-Truthy $env:OCX_NO_MODIFY_PATH)      { $true } 
 # on both Windows (\) and Unix (/).
 $OcxBinSubPath = (@('symlinks', 'ocx.sh', 'ocx', 'cli', 'current', 'content', 'bin') -join [System.IO.Path]::DirectorySeparatorChar)
 
+# Attempts per network fetch (see Download-File / Download-String). Deliberately
+# not an OCX_INSTALL_* knob - three is right for a transient edge failure.
+$OcxDownloadAttempts = 3
+
 # --- Output helpers (all go to STDERR) ---
 
 function Say {
@@ -327,7 +331,7 @@ function Resolve-DownloadUrl {
     Err "too many redirects resolving $Url" 3
 }
 
-function Download-File {
+function Download-FileOnce {
     param([string]$Url, [string]$Destination)
 
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
@@ -345,12 +349,55 @@ function Download-File {
     }
 }
 
-function Download-String {
+function Download-StringOnce {
     param([string]$Url)
     Assert-HttpsUrl $Url
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
     $ProgressPreference = 'SilentlyContinue'
     (Invoke-WebRequest -Uri $Url -MaximumRedirection 0 -UseBasicParsing).Content
+}
+
+# Bounded retry around every network hop. A single transient failure must not
+# abort an install: an edge PoP can serve a 5xx while every other one is
+# healthy, and both fetches (manifest, archive) are idempotent GETs.
+#
+# ponytail: retries on ANY failure instead of inspecting the status code -
+# doing that would mean parsing errors in five dialects. The ceiling is that a
+# genuine 404 costs two extra requests before it still exits 3.
+function Download-File {
+    param([string]$Url, [string]$Destination)
+
+    $attempt = 1
+    $delay = 1
+    while ($true) {
+        if (Download-FileOnce $Url $Destination) { return $true }
+        if ($attempt -ge $OcxDownloadAttempts) { return $false }
+        Say "download failed (attempt $attempt/$OcxDownloadAttempts), retrying in ${delay}s"
+        Start-Sleep -Seconds $delay
+        $attempt++
+        $delay = $delay * 2
+    }
+}
+
+# Rethrows the original exception once attempts are exhausted, so the caller's
+# existing try/catch -> Err 3 still fires unchanged.
+function Download-String {
+    param([string]$Url)
+
+    $attempt = 1
+    $delay = 1
+    while ($true) {
+        try {
+            return Download-StringOnce $Url
+        }
+        catch {
+            if ($attempt -ge $OcxDownloadAttempts) { throw }
+            Say "download failed (attempt $attempt/$OcxDownloadAttempts), retrying in ${delay}s"
+            Start-Sleep -Seconds $delay
+            $attempt++
+            $delay = $delay * 2
+        }
+    }
 }
 
 # --- Checksum verification ---

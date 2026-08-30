@@ -99,6 +99,10 @@ def __ocx-bin-subpath []: nothing -> string {
     'symlinks/ocx.sh/ocx/cli/current/content/bin'
 }
 
+# Attempts per network fetch. Deliberately not an OCX_INSTALL_* knob — three is
+# right for a transient edge failure.
+def __ocx-download-attempts []: nothing -> int { 3 }
+
 # --- Platform detection -----------------------------------------------------
 
 def __ocx-detect-target []: nothing -> string {
@@ -145,23 +149,53 @@ def __ocx-assert-https [url: string] {
 # command left in tail position inside `try` hangs forever in nushell: `try`
 # holds the stream nobody drains. `complete` collects stdout and the exit code
 # up front, which also removes the need to catch a nonzero exit at all.
-def __ocx-fetch-text [url: string]: nothing -> string {
+# Returns '' on failure. An empty body is a failure for the manifest anyway
+# (the contract is: fetch failure, empty body or no stable entry -> exit 3), so
+# one sentinel covers both and keeps the type `string` throughout.
+def __ocx-fetch-text-once [url: string]: nothing -> string {
     let ca = (__ocx-ca-bundle)
     if $ca == '' {
         let body = (try { http get --raw $url } catch { null })
-        if $body != null { return $body }
+        if $body != null { return ($body | into string) }
     }
     let ca_args = if $ca == '' { [] } else { ['--cacert' $ca] }
     let res = (^curl --proto '=https' --tlsv1.2 ...$ca_args -fsSL $url | complete)
-    if $res.exit_code != 0 {
-        __ocx-err $"failed to fetch ($url)" 3
-    }
+    if $res.exit_code != 0 { return '' }
     $res.stdout
+}
+
+# Bounded retry around every network hop. A single transient failure must not
+# abort an install: an edge PoP can serve a 5xx while every other one is
+# healthy, and both fetches (manifest, archive) are idempotent GETs.
+#
+# ponytail: retries on ANY failure instead of inspecting the status code —
+# doing that would mean parsing errors in five dialects. The ceiling is that a
+# genuine 404 costs two extra requests before it still exits 3.
+def __ocx-fetch-text [url: string]: nothing -> string {
+    let attempts = (__ocx-download-attempts)
+    mut attempt = 1
+    mut delay = 1
+    mut body = ''
+    # `while`, not `loop`: a `loop` evaluates to nothing, which fails the
+    # declared `-> string` return type under `nu --ide-check`.
+    while $body == '' {
+        $body = (__ocx-fetch-text-once $url)
+        if $body == '' {
+            if $attempt >= $attempts {
+                __ocx-err $"failed to fetch ($url)" 3
+            }
+            __ocx-say $"download failed \(attempt ($attempt)/($attempts)\), retrying in ($delay)s"
+            sleep ($delay * 1sec)
+            $attempt = $attempt + 1
+            $delay = $delay * 2
+        }
+    }
+    $body
 }
 
 # Download a URL to a file (the archive). Prefer `http get | save`, fall back to
 # `^curl`. Returns true on success.
-def __ocx-download-file [url: string, dest: string]: nothing -> bool {
+def __ocx-download-file-once [url: string, dest: string]: nothing -> bool {
     # `--raw` on the GET too: without it `http get` parses an application/json
     # body into a record and `save --raw` then writes nushell's repr of it, not
     # the served bytes — which the manifest-pin digest is taken over.
@@ -180,6 +214,26 @@ def __ocx-download-file [url: string, dest: string]: nothing -> bool {
     # external in tail position inside `try`.
     let res = (^curl --proto '=https' --tlsv1.2 ...$ca_args -fsSL -o $dest $url | complete)
     $res.exit_code == 0
+}
+
+# Retry wrapper — see __ocx-fetch-text for the rationale. Returns true on
+# success; the caller still owns the exit code.
+def __ocx-download-file [url: string, dest: string]: nothing -> bool {
+    let attempts = (__ocx-download-attempts)
+    mut attempt = 1
+    mut delay = 1
+    mut ok = false
+    while not $ok {
+        $ok = (__ocx-download-file-once $url $dest)
+        if not $ok {
+            if $attempt >= $attempts { break }
+            __ocx-say $"download failed \(attempt ($attempt)/($attempts)\), retrying in ($delay)s"
+            sleep ($delay * 1sec)
+            $attempt = $attempt + 1
+            $delay = $delay * 2
+        }
+    }
+    $ok
 }
 
 # --- Checksum verification --------------------------------------------------

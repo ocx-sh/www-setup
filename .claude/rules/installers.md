@@ -9,6 +9,7 @@ Every installer is a **thin bootstrap**. It does exactly four things and nothing
 1. **Detect** the platform (`<arch>-<os>-<libc/vendor>` target triple).
 2. **Resolve** the release from the distribution manifest (`dist.json`): the latest stable version (or `OCX_INSTALL_VERSION`), then the `(version, target)` row → inline `sha256` + download URL.
 3. **Download + verify** the archive against the manifest's inline `sha256` (no separate `sha256.sum` fetch), then `safe_extract`.
+   Every network fetch is **retried 3 times with 1s/2s backoff** — see *Download retry* below.
 4. **Hand off** to the downloaded binary's `ocx self setup`.
 
 `ocx self setup` owns *everything* that touches the user's machine: the package-store self-install, the per-shell env shims under `$OCX_HOME`, the managed shell-profile activation blocks, and completions. **The installers no longer write any of that** — there is no `create_env_file`, `modify_shell_profile`, completion sentinel, or `--remote package install` bootstrap. If you find yourself adding shim/profile/completion logic to an installer, stop: it belongs in `ocx self setup`.
@@ -83,6 +84,43 @@ comment character and a single-quoted string literal, so the target is the
 way a mirror would; both deliberately do a plain literal replace with no
 per-shell special-casing, which is what makes them a regression test for the
 uniform-sed contract itself.
+
+### Download retry
+
+Every network hop retries **3 times, 1s then 2s**, in all five dialects. Both
+fetches (manifest and archive) are idempotent GETs, so this is safe.
+
+| Dialect | Retry wrapper | Single-shot inner |
+|---|---|---|
+| sh | `download_to_file` | `download_once` |
+| fish | `__ocx_download_file` | `__ocx_download_once` |
+| nu | `__ocx-fetch-text`, `__ocx-download-file` | `…-once` variants |
+| elvish | `ocx-fetch-text`, `ocx-download-file` | inline `while` |
+| pwsh | `Download-File`, `Download-String` | `Download-FileOnce`, `Download-StringOnce` |
+
+Rules to preserve:
+
+- **Retries on ANY failure**, not on a parsed status code — status parsing would
+  mean five dialect-specific error grammars. The accepted ceiling: a genuine 404
+  costs two extra requests before it still exits 3.
+- **The attempt count is not a knob.** No `OCX_INSTALL_RETRIES` — three is right
+  for a transient edge failure and nothing has asked to tune it.
+- **Retry the fetch only.** Checksum mismatch (exit 4) sits outside these
+  functions and stays single-shot; a corrupt body is not a transient error.
+- **Exit codes are unchanged** — exhausted retries still `err … 3`.
+- The retry notice goes through `say`/`__ocx-say`/`Say` (stderr, silenced by
+  `OCX_INSTALL_QUIET`), never `warn`.
+- `Download-String` **rethrows** the original exception once exhausted, so the
+  caller's existing `try/catch → Err 3` fires unchanged.
+- nu: the wrapper must use `while`, not `loop` — a `loop` evaluates to
+  `nothing` and fails the declared return type under `nu --ide-check`. The
+  `-once` fetch returns `''` on failure rather than `null`, because a `mut`
+  seeded with `null` is typed `nothing` and poisons the `-> string` signature.
+
+This exists because a single CDN edge PoP served HTTP 500 for `dist.json` on
+100% of its requests for four days while every other PoP was healthy. Retry is
+defence in depth, not the cure — a client pinned to a bad PoP retries into the
+same wall. See [`deploy/bunny/README.md`](../../deploy/bunny/README.md).
 
 ### `OCX_INSTALL_CA_BUNDLE`
 
@@ -201,6 +239,7 @@ This divergence is accepted because PowerShell parameter binding owns unknown-ar
 - New env knob → all five
 - New embedded-config placeholder → all five, same token spelling, once per file
 - New exit code → all five
+- Download/retry semantics → all five (see *Download retry*)
 - New flag → wherever the dialect parses flags (`sh`/`fish`/`pwsh`); for `nu`/`elvish` (env-driven) wire the equivalent env knob
 - Behavioral default change → all five
 

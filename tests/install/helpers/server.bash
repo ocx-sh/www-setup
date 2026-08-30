@@ -40,6 +40,33 @@ server_start() {
         exec python3 -u -c '
 import http.server, ssl, os, sys, socketserver
 cert = os.environ["OCX_FIXTURE_CERT"]
+
+# /flaky/<n>/<path> answers 500 for the first <n> hits of that exact URL, then
+# serves <path> normally. This is how the installers retry behaviour is tested:
+# it reproduces the real failure (a single edge PoP 500ing while the object is
+# fine) without needing a live CDN. The counter is keyed by the full path and
+# lives on the class, because BaseHTTPRequestHandler builds a NEW instance per
+# request, so instance state would reset every time.
+class _Handler(http.server.SimpleHTTPRequestHandler):
+    hits = {}
+
+    def do_GET(self):
+        if self.path.startswith("/flaky/"):
+            rest = self.path[len("/flaky/"):]
+            count, _, target = rest.partition("/")
+            try:
+                limit = int(count)
+            except ValueError:
+                self.send_error(400, "bad flaky count")
+                return
+            seen = _Handler.hits.get(self.path, 0)
+            _Handler.hits[self.path] = seen + 1
+            if seen < limit:
+                self.send_error(500, "flaky fixture failure %d/%d" % (seen + 1, limit))
+                return
+            self.path = "/" + target
+        return http.server.SimpleHTTPRequestHandler.do_GET(self)
+
 class _Srv(http.server.HTTPServer):
     # Skip HTTPServer.server_bind getfqdn() reverse-DNS lookup: it blocks past
     # the 10s startup timeout on macOS runners (no /etc/hosts fast-path), so the
@@ -48,7 +75,7 @@ class _Srv(http.server.HTTPServer):
         socketserver.TCPServer.server_bind(self)
         self.server_name = self.server_address[0]
         self.server_port = self.server_address[1]
-httpd = _Srv(("127.0.0.1", 0), http.server.SimpleHTTPRequestHandler)
+httpd = _Srv(("127.0.0.1", 0), _Handler)
 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 ctx.load_cert_chain(cert)
 httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
@@ -83,6 +110,17 @@ httpd.serve_forever()
 
 server_stop() {
     [ -n "${1:-}" ] && kill "$1" 2>/dev/null || true
+}
+
+# server_request_count LOGFILE PATH_SUBSTRING
+#
+# Count how many GETs the fixture server received for a path. The python
+# handler's default access log already lands in LOGFILE (server_start redirects
+# both streams there), so this needs no extra plumbing — it is what lets a test
+# assert "the installer really did try 3 times".
+server_request_count() {
+    local _logfile="$1" _needle="$2"
+    grep -c "\"GET [^\"]*${_needle}" "$_logfile" 2>/dev/null || true
 }
 
 server_detect_target() {

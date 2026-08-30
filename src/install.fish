@@ -109,6 +109,10 @@ end
 # Canonical CLI bin dir relative to OCX_HOME (the real on-disk store layout).
 set -g OCX_BIN_SUBPATH 'symlinks/ocx.sh/ocx/cli/current/content/bin'
 
+# Attempts per network fetch (see __ocx_download_file). Deliberately not an
+# OCX_INSTALL_* knob — three is right for a transient edge failure.
+set -g __ocx_download_attempts 3
+
 # --- Output helpers (all go to STDERR) --------------------------------------
 
 function __ocx_say --argument-names msg
@@ -213,11 +217,11 @@ function __ocx_require_downloader
     end
 end
 
-# __ocx_download_file <url> <dest>
+# __ocx_download_once <url> <dest>
 #
 # The CA bundle is passed as its own argv element rather than spliced into an
 # unquoted flag string, so a path containing spaces still works.
-function __ocx_download_file --argument-names url dest
+function __ocx_download_once --argument-names url dest
     if command -q curl
         if test -n "$OCX_INSTALL_CA_BUNDLE"
             curl --proto '=https' --tlsv1.2 --cacert "$OCX_INSTALL_CA_BUNDLE" -fsSL -o $dest $url
@@ -233,6 +237,32 @@ function __ocx_download_file --argument-names url dest
         end
     else
         __ocx_err "either curl or wget is required to download OCX" 2
+    end
+end
+
+# __ocx_download_file <url> <dest>
+#
+# Bounded retry around every network hop. A single transient failure must not
+# abort an install: an edge PoP can serve a 5xx while every other one is
+# healthy, and both fetches (manifest, archive) are idempotent GETs.
+#
+# ponytail: retries on ANY failure instead of inspecting the status code —
+# doing that would mean parsing curl/wget errors in five dialects. The ceiling
+# is that a genuine 404 costs two extra requests before it still exits 3.
+function __ocx_download_file --argument-names url dest
+    set -l attempt 1
+    set -l delay 1
+    while true
+        if __ocx_download_once $url $dest
+            return 0
+        end
+        if test $attempt -ge $__ocx_download_attempts
+            return 1
+        end
+        __ocx_say "download failed (attempt $attempt/$__ocx_download_attempts), retrying in {$delay}s"
+        sleep $delay
+        set attempt (math "$attempt + 1")
+        set delay (math "$delay * 2")
     end
 end
 

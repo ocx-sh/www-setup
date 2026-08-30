@@ -69,7 +69,16 @@ Things the harness gets right that a naive `python -m http.server` does not:
    special-casing, which is what makes them a regression test for the
    uniform-sed contract itself.
 
-6. **Content-addressed manifest snapshots.** `Publish-DistSnapshot -SrvRoot`
+6. **A `/flaky/<n>/<path>` route.** The handler answers HTTP 500 for the first
+   `<n>` hits of that URL, then serves `<path>` — the mirror of the same route in
+   `../helpers/server.bash`. The counter is a **class** attribute (a new Handler
+   instance is built per request). `Start-FixtureServer` also returns `ErrLog`,
+   the python access log, so a test can count attempts:
+   `(Select-String -Path $srv.ErrLog -Pattern 'GET /flaky/2/dist.json' -AllMatches).Count`.
+   Assert the count, not just the exit code — an exit-code-only assertion passes
+   even if retry is silently removed.
+
+7. **Content-addressed manifest snapshots.** `Publish-DistSnapshot -SrvRoot`
    copies `dist.json` to `dist/<sha256>.json` and returns the digest, so
    `Knobs.Tests.ps1` can point `OCX_INSTALL_DIST_URL` at a pin. A second
    snapshot is written under a name (`'a' * 64`) whose digest the body does not
@@ -156,8 +165,9 @@ the latest-via-`dist.json` happy path, the dead-manifest → exit 3 (message
 contains `latest version`) scenario, the checksum-mismatch → exit 4 path, the
 `self setup`-failure → exit 6 path with the recorded argv, and the
 `__OCX_TESTING_INSTALL_BINARY` happy (`--offline self setup` argv) + bad (exit 2)
-paths, and the pinned-manifest pair (`dist/<sha256>.json` installs; an altered
-body exits 4). The accepted pwsh divergence — an unknown flag (`-BogusFlag`) is rejected
+paths, the pinned-manifest pair (`dist/<sha256>.json` installs; an altered
+body exits 4), and the three download-retry scenarios (`/flaky/2/` manifest,
+`/flaky/99/` → exit 3, `/flaky/2/` archive) with their attempt counts. The accepted pwsh divergence — an unknown flag (`-BogusFlag`) is rejected
 by the `[CmdletBinding()]` binder at exit 1 (indeterminate through `irm | iex`),
 not the in-script exit 2 — is preserved. Exit code 7 (unsupported platform)
 cannot be triggered on an X64 host in either suite — it is exercised by
