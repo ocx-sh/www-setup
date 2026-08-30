@@ -35,6 +35,8 @@ reference.
 task rules:plan      # render the set offline, no credentials
 task rules:apply     # delete + reapply + purge (needs BUNNY_API_KEY)
 task rules:verify    # probe every routed URL against the live zone
+task zone:plan       # diff the zone resilience settings (needs BUNNY_API_KEY)
+task zone:apply      # push the differing settings + purge (needs BUNNY_API_KEY)
 ```
 
 | Rule | Effect |
@@ -67,6 +69,59 @@ Nine rules of a 20 budget. `rules:verify` currently passes 26/26 against
   year: the cache rule matches on the request path, and `/sh/*` cannot be
   distinguished from `/sh/next` by pattern. The canonical
   `/archive/<VERSION>/install.<ext>` does get the year.
+
+## Zone resilience settings
+
+`ZONE_SETTINGS` in `edge-rules.py` owns these, applied by `task zone:apply`.
+They are a **separate axis from routing**: `zone-apply` never touches edge rules
+and `apply` never touches settings.
+
+| Setting | Value | Why |
+|---|---|---|
+| `EnableOriginShield` | `True` | Every PoP pulls through one FR shield instead of reaching origin itself — this is what routes around a PoP whose own origin path is broken |
+| `EnableSafeHop` | `True` | Umbrella toggle for the origin-retry behaviour below |
+| `OriginRetries` | `2` | Retry the origin before surfacing a failure |
+| `OriginRetryDelay` | `1` | **Seconds, and an enum — only 0/1/3/5/10.** Any other value is silently clamped down and the API still answers 200 |
+| `OriginRetry5XXResponses` | `True` | Off by default, which is the surprising part: without it the edge does not retry a 5xx even with retries enabled |
+| `UseStaleWhileUpdating` | `True` | Serve the last good copy while revalidating |
+| `UseStaleWhileOffline` | `True` | Serve the last good copy when origin is down |
+| `EnableRequestCoalescing` | `True` | Collapse concurrent misses for one object into a single origin pull — the nightly docker matrix fires ~40 at once |
+
+Deliberately left alone: `CacheErrorResponses=False` (never cache a 5xx),
+`EnableCacheSlice`, and the storage zone's `SG/NY/MI` replication regions.
+
+`zone-apply` **reads every setting back** after the POST and fails loudly if one
+did not land. That is not paranoia: the API answers `200` for a body it
+partially ignored, which is exactly how `OriginRetryDelay` was found to be an
+enum.
+
+### Why this exists
+
+From 2026-08-27 to 2026-08-30 the **PHX** PoP returned HTTP 500 on **23 of 23**
+requests for `/dist.json` (100%, always `MISS`), while ~16 other PoPs served it
+fine. With every resilience knob off, that 500 went straight to `curl` and the
+installer exited 3 — for CI and for real `curl | sh` users routed through
+Phoenix alike. Config cannot fix a broken PoP, but a shield routes around it.
+
+### Reading the CDN logs
+
+The diagnostic of record — it is what turned "flaky 8% CI failure" into "one
+named PoP, 100% broken":
+
+```sh
+curl -H "AccessKey: $BUNNY_API_KEY" \
+  https://logging.bunnycdn.com/$(date -u +%m-%d-%y)/6415130.log
+```
+
+Pipe-separated, retained ~4 days, one line per request:
+
+```
+CacheStatus|Status|Timestamp|BytesSent|ZoneId|IP|Referer|Url|PoP|UserAgent|RequestId|Country
+```
+
+Group 5xx by the **PoP** column before assuming a random failure rate. A
+per-request random failure and one wholly broken PoP look identical from a CI
+pass rate, and only the first is fixed by retrying.
 
 ## Cost controls
 
