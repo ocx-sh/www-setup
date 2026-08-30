@@ -194,6 +194,11 @@ fi
 # Canonical CLI bin dir relative to OCX_HOME (the real on-disk store layout).
 OCX_BIN_SUBPATH="symlinks/ocx.sh/ocx/cli/current/content/bin"
 
+# Attempts per network fetch (see download_to_file). Deliberately not an
+# OCX_INSTALL_* knob — three is right for a transient edge failure and nothing
+# has asked to tune it.
+DOWNLOAD_ATTEMPTS=3
+
 # --- Usage ------------------------------------------------------------------
 
 usage() {
@@ -330,7 +335,7 @@ detect_downloader() {
 
 # The CA bundle is passed as its own argv element rather than spliced into an
 # unquoted flag string, so a path containing spaces still works.
-download_to_file() {
+download_once() {
     local _url="$1" _dest="$2"
 
     if [ "$_downloader" = "curl" ]; then
@@ -351,21 +356,30 @@ download_to_file() {
     fi
 }
 
-download() {
-    if [ "$_downloader" = "curl" ]; then
-        if [ -n "$OCX_INSTALL_CA_BUNDLE" ]; then
-            curl --proto '=https' --tlsv1.2 --cacert "$OCX_INSTALL_CA_BUNDLE" -fsSL "$1"
-        else
-            curl --proto '=https' --tlsv1.2 -fsSL "$1"
+# Bounded retry around every network hop. A single transient failure must not
+# abort an install: an edge PoP can serve a 5xx while every other one is
+# healthy, and both fetches (manifest, archive) are idempotent GETs.
+#
+# ponytail: retries on ANY failure instead of inspecting the status code —
+# doing that would mean parsing curl/wget/http-client errors in five dialects.
+# The ceiling is that a genuine 404 costs two extra requests before it still
+# exits 3. Raise this to status-aware retry only if that shows up as a real
+# cost.
+download_to_file() {
+    local _url="$1" _dest="$2" _attempt=1 _delay=1
+
+    while :; do
+        if download_once "$_url" "$_dest"; then
+            return 0
         fi
-    else
-        assert_https_url "$1"
-        if [ -n "$OCX_INSTALL_CA_BUNDLE" ]; then
-            wget --secure-protocol=TLSv1_2 --https-only --ca-certificate="$OCX_INSTALL_CA_BUNDLE" -qO- "$1"
-        else
-            wget --secure-protocol=TLSv1_2 --https-only -qO- "$1"
+        if [ "$_attempt" -ge "$DOWNLOAD_ATTEMPTS" ]; then
+            return 1
         fi
-    fi
+        say "download failed (attempt ${_attempt}/${DOWNLOAD_ATTEMPTS}), retrying in ${_delay}s"
+        sleep "$_delay"
+        _attempt=$((_attempt + 1))
+        _delay=$((_delay * 2))
+    done
 }
 
 # --- Checksum verification --------------------------------------------------

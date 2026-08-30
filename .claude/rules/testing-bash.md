@@ -49,6 +49,27 @@ exposes:
 | `server_path_without_curl` | Echo a PATH mirroring the current one with `curl` genuinely absent (a symlink farm, built once per file). The only portable way to force a dialect's **wget** fallback — `command -v curl` skips non-executables and keeps searching, so shadowing does not work. |
 | `server_ca_bundle` | Echo the path to the vendored localhost CA cert; export as `CURL_CA_BUNDLE`. |
 | `server_embed_config SRC DEST TOKEN=VALUE...` | Copy an installer and substitute its embedded-config placeholders, the way a corporate mirror patches its copy. TOKEN is the bare env name (`OCX_INSTALL_DIST_URL`); the `@...@` wrapper is added for you. A plain literal replace with NO per-shell special-casing — that is what makes it a regression test for the uniform-sed contract. VALUE may contain newlines (an inline PEM). |
+| `server_request_count LOGFILE NEEDLE` | Count `GET` lines matching NEEDLE in the server log. The python access log already lands in LOGFILE, so this is a `grep -c` — it is what lets a test assert the installer really did try N times. |
+
+### The `/flaky/<n>/<path>` route
+
+`server_start`'s handler answers **HTTP 500 for the first `<n>` requests** to a
+given `/flaky/<n>/<path>` URL, then serves `<path>` normally. The hit counter is
+a **class** attribute, because `BaseHTTPRequestHandler` builds a new instance
+per request — instance state would reset every time.
+
+This is how the retry contract is tested. Point a knob at a flaky prefix:
+
+```bash
+OCX_INSTALL_DIST_URL="${FIXTURE_URL}/flaky/2/dist.json"          # manifest fails twice
+OCX_INSTALL_MIRROR_URL="${FIXTURE_URL}/flaky/2/releases/download" # archive fails twice
+OCX_INSTALL_DIST_URL="${FIXTURE_URL}/flaky/99/dist.json"          # never succeeds → exit 3
+```
+
+It reproduces the real incident (one CDN edge PoP 500ing while the object is
+fine) without a live CDN. Pair the exit-code assertion with
+`server_request_count` — asserting only the exit code would pass even if retry
+were silently removed.
 
 ### HTTPS, not HTTP
 
@@ -204,6 +225,7 @@ hatch.
 | Latest-resolution / manifest format change | `env-knobs.bats` (latest via `dist.json`) + `exit-codes.bats` (dead manifest → exit 3, message contains `latest version`) + `dist.bats` (generator shape) |
 | Manifest-pin (`dist/<sha256>.json`) behavior change | `env-knobs.bats` + every `tests/install/{nu,fish,elvish}/` suite — the happy path (installs) and the altered-body path (exit 4), both via `server_publish_dist_snapshot` |
 | `__OCX_TESTING_INSTALL_BINARY` behavior change | `env-knobs.bats` (happy: no download, binary placed, `--offline self setup` argv) + `exit-codes.bats` (bad → exit 2) + `print-path.bats` (PRINT_PATH honored) |
+| Download-retry behavior change | `exit-codes.bats` + every `tests/install/{nu,fish,elvish}/` suite + `ps1/ExitCodes.Tests.ps1` — the transient-500-then-success path (`/flaky/2/`), the never-succeeds path (`/flaky/99/` → exit 3), and the archive-retry path, each asserting the ATTEMPT COUNT via `server_request_count`, not just the exit code |
 | Embedded-config placeholder added/renamed | `env-knobs.bats` + every `tests/install/{nu,fish,elvish}/` suite + `ps1/Knobs.Tests.ps1` — patch a copy via `server_embed_config` / `New-EmbeddedInstaller` and assert the effect, plus one case proving the environment still wins |
 | `OCX_INSTALL_CA_BUNDLE` behavior change | all five suites — the inline-PEM happy path with `CURL_CA_BUNDLE` UNSET (that is what proves the flag reaches curl), the matching **negative control** (no bundle → non-zero; without it the happy path proves nothing), the `SSL_CERT_FILE` hand-down assertion, and the neither-file-nor-PEM → exit 2 case. `env-knobs.bats` additionally covers the **wget** backend via `OCX_INSTALL_DOWNLOADER=wget`, and the fish suite via `server_path_without_curl`. ps1 asserts the divergence warning + the hand-down instead |
 | New exotic installer behavior | the matching `tests/install/{nu,fish,elvish}/` suite |

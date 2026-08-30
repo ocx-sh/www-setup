@@ -147,6 +147,31 @@ setup() {
     [ "$status" -eq 4 ]
 }
 
+# Retry. The real incident: one CDN edge PoP answered 500 for dist.json while
+# every other PoP served it fine, and a single unretried GET aborted the whole
+# install with exit 3.
+@test "fish: retry: a transient 500 on the manifest is retried and the install succeeds" {
+    OCX_INSTALL_DIST_URL="${FIXTURE_URL}/flaky/2/dist.json" run fish "$INSTALL_FISH"
+    [ "$status" -eq 0 ]
+    # Two failures then a success = three GETs of that URL.
+    [ "$(server_request_count "${BATS_FILE_TMPDIR}/server.log" "/flaky/2/dist.json")" -eq 3 ]
+}
+
+@test "fish: retry: exhausted attempts still exit 3, after exactly 3 tries" {
+    OCX_INSTALL_DIST_URL="${FIXTURE_URL}/flaky/99/dist.json" run fish "$INSTALL_FISH"
+    [ "$status" -eq 3 ]
+    echo "$output" | grep -qi 'latest version'
+    [ "$(server_request_count "${BATS_FILE_TMPDIR}/server.log" "/flaky/99/dist.json")" -eq 3 ]
+}
+
+@test "fish: retry: the archive download is retried too" {
+    # Point the mirror at a flaky prefix so the ARCHIVE fetch (not the manifest)
+    # is the one that fails twice.
+    OCX_INSTALL_MIRROR_URL="${FIXTURE_URL}/flaky/2/releases/download" run fish "$INSTALL_FISH"
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
 # --- Embedded configuration block (corporate mirrors) -----------------------
 
 @test "fish: a sed-ed dist URL is used when the env is unset" {

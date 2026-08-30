@@ -254,6 +254,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     # /redirect/<path> answers 302 -> http://127.0.0.1:<port>/<path>, mirroring
     # GitHub's release-asset redirect so the installer's redirect resolver is
     # exercised. The Location is an absolute (cross-"host") https-on-localhost URL.
+    # /flaky/<n>/<path> answers 500 for the first <n> hits of that exact URL,
+    # then serves <path> normally — the retry path. Counter is a CLASS attribute
+    # because a new Handler instance is built per request.
+    hits = {}
+
     def do_GET(self):
         if self.path.startswith('/redirect/'):
             target = self.path[len('/redirect'):]
@@ -262,6 +267,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Location', 'http://127.0.0.1:%d%s' % (port, target))
             self.end_headers()
             return
+        if self.path.startswith('/flaky/'):
+            rest = self.path[len('/flaky/'):]
+            count, _, target = rest.partition('/')
+            try:
+                limit = int(count)
+            except ValueError:
+                self.send_error(400, 'bad flaky count')
+                return
+            seen = Handler.hits.get(self.path, 0)
+            Handler.hits[self.path] = seen + 1
+            if seen < limit:
+                self.send_error(500, 'flaky fixture failure')
+                return
+            self.path = '/' + target
         return super().do_GET()
 
 with socketserver.TCPServer(('127.0.0.1', 0), Handler) as httpd:
@@ -290,6 +309,9 @@ with socketserver.TCPServer(('127.0.0.1', 0), Handler) as httpd:
         MirrorUrl = "http://127.0.0.1:$port/releases/download"
         # Same artifact, reached through a 302 hop (see the /redirect route above).
         RedirectMirrorUrl = "http://127.0.0.1:$port/redirect/releases/download"
+        # The python access log — one line per request, so a retry test can
+        # count attempts (see the /flaky route above).
+        ErrLog    = $errLog
     }
 }
 

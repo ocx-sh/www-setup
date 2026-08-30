@@ -113,4 +113,64 @@ Describe 'install.ps1 exit codes' {
         & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 2
     }
+
+    # Retry. The real incident: one CDN edge PoP answered 500 for dist.json while
+    # every other PoP served it fine, and a single unretried GET aborted the whole
+    # install with exit 3.
+    It 'retry: a transient 500 on the manifest is retried and the install succeeds' -Skip:($env:OS -eq 'Windows_NT') {
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-ec-r1-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+        $fx = New-OcxFixture -Root $root -ArgvLog 'on'
+        $srv = Start-FixtureServer -SrvRoot $fx.SrvRoot
+        try {
+            $env:OCX_INSTALL_DIST_URL = "http://127.0.0.1:$($srv.Port)/flaky/2/dist.json"
+            $env:OCX_INSTALL_MIRROR_URL = $srv.MirrorUrl
+            & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+            $LASTEXITCODE | Should -Be 0
+            # Two failures then a success = three GETs of that URL.
+            $hits = (Select-String -Path $srv.ErrLog -Pattern 'GET /flaky/2/dist.json' -AllMatches).Count
+            $hits | Should -Be 3
+        }
+        finally {
+            Stop-FixtureServer -Server $srv
+            Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'retry: exhausted attempts still exit 3, after exactly 3 tries' {
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-ec-r2-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+        $fx = New-OcxFixture -Root $root -ArgvLog 'on'
+        $srv = Start-FixtureServer -SrvRoot $fx.SrvRoot
+        $errFile = Join-Path $root 'stderr.log'
+        try {
+            $env:OCX_INSTALL_DIST_URL = "http://127.0.0.1:$($srv.Port)/flaky/99/dist.json"
+            $env:OCX_INSTALL_MIRROR_URL = $srv.MirrorUrl
+            & pwsh -NoProfile -File $InstallPs1 2>$errFile | Out-Null
+            $LASTEXITCODE | Should -Be 3
+            (Get-Content $errFile -Raw) | Should -Match 'latest version'
+            $hits = (Select-String -Path $srv.ErrLog -Pattern 'GET /flaky/99/dist.json' -AllMatches).Count
+            $hits | Should -Be 3
+        }
+        finally {
+            Stop-FixtureServer -Server $srv
+            Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'retry: the archive download is retried too' -Skip:($env:OS -eq 'Windows_NT') {
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-ec-r3-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+        $fx = New-OcxFixture -Root $root -ArgvLog 'on'
+        $srv = Start-FixtureServer -SrvRoot $fx.SrvRoot
+        try {
+            $env:OCX_INSTALL_DIST_URL = $srv.DistUrl
+            # Flaky prefix on the MIRROR, so the archive fetch is the failing one.
+            $env:OCX_INSTALL_MIRROR_URL = "http://127.0.0.1:$($srv.Port)/flaky/2/releases/download"
+            & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+            $LASTEXITCODE | Should -Be 0
+            (Get-Content $ArgvLog) | Should -Contain 'self setup 0.0.0 --no-modify-path'
+        }
+        finally {
+            Stop-FixtureServer -Server $srv
+            Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+        }
+    }
 }

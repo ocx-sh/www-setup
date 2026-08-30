@@ -101,6 +101,10 @@ fn ocx-err {|msg code|
 
 var bin-subpath = symlinks/ocx.sh/ocx/cli/current/content/bin
 
+# Attempts per network fetch. Deliberately not an OCX_INSTALL_* knob — three is
+# right for a transient edge failure.
+var download-attempts = 3
+
 # --- Platform detection -----------------------------------------------------
 
 fn ocx-detect-target {
@@ -146,21 +150,53 @@ fn ocx-ca-args {
     if (eq $ca '') { put [] } else { put [--cacert $ca] }
 }
 
+# Bounded retry around every network hop. A single transient failure must not
+# abort an install: an edge PoP can serve a 5xx while every other one is
+# healthy, and both fetches (manifest, archive) are idempotent GETs.
+#
+# ponytail: retries on ANY failure instead of inspecting the status code —
+# doing that would mean parsing curl errors in five dialects. The ceiling is
+# that a genuine 404 costs two extra requests before it still exits 3.
 # Fetch a URL as text (the manifest) -> stdout. Uses external curl.
 fn ocx-fetch-text {|url|
     var ca = (ocx-ca-args)
     var out = ''
-    if ?(set out = (e:curl --proto '=https' --tlsv1.2 $@ca -fsSL $url 2>/dev/null | slurp)) {
-        put $out
-    } else {
-        ocx-err "failed to fetch "$url 3
+    var attempt = 1
+    var delay = 1
+    while $true {
+        if ?(set out = (e:curl --proto '=https' --tlsv1.2 $@ca -fsSL $url 2>/dev/null | slurp)) {
+            put $out
+            return
+        }
+        if (>= $attempt $download-attempts) {
+            ocx-err "failed to fetch "$url 3
+        }
+        ocx-say "download failed (attempt "$attempt"/"$download-attempts"), retrying in "$delay"s"
+        e:sleep $delay
+        set attempt = (+ $attempt 1)
+        set delay = (* $delay 2)
     }
 }
 
 # Download a URL to a file (the archive). Returns via exit status of curl.
 fn ocx-download-file {|url dest|
     var ca = (ocx-ca-args)
-    put ?(e:curl --proto '=https' --tlsv1.2 $@ca -fsSL -o $dest $url 2>/dev/null)
+    var attempt = 1
+    var delay = 1
+    while $true {
+        if ?(e:curl --proto '=https' --tlsv1.2 $@ca -fsSL -o $dest $url 2>/dev/null) {
+            put $true
+            return
+        }
+        if (>= $attempt $download-attempts) {
+            put $false
+            return
+        }
+        ocx-say "download failed (attempt "$attempt"/"$download-attempts"), retrying in "$delay"s"
+        e:sleep $delay
+        set attempt = (+ $attempt 1)
+        set delay = (* $delay 2)
+    }
 }
 
 # --- Checksum verification --------------------------------------------------
