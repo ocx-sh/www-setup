@@ -148,8 +148,14 @@ case "$SHELL_UNDER_TEST" in
         # completion spec for ocx (e.g. "complete -F _ocx ocx"); it fails / is
         # empty when nothing is registered. Run it AFTER the shim has sourced so
         # the `complete -F _ocx ocx` line the installer's shim emits has taken.
+        # PATH resolution uses `type -P`, not `command -v`: since ocx 0.6.0 the
+        # activation block registers an `ocx` shell FUNCTION wrapper (it runs the
+        # binary, then the reconcile prompt hook), and `command -v` answers with
+        # the bare name `ocx` for a function — which reads as a PATH shadow. Only
+        # `type -P` (bash) / `whence -p` (zsh) skips functions and aliases and
+        # resolves PATH alone, which is what this test asserts.
         run_probe bash -lic '
-            p="$(command -v ocx || true)"
+            p="$(type -P ocx || true)"
             echo "OCX_RESOLVED=${p}"
             if [ -n "$p" ]; then ocx about >/dev/null 2>&1 || ocx version >/dev/null 2>&1; fi
             c="$(complete -p ocx 2>/dev/null || true)"
@@ -167,8 +173,9 @@ case "$SHELL_UNDER_TEST" in
         # completer is registered at runtime, not shipped as an fpath file),
         # yielding a false "no completion" negative (exit 10). Just read the key
         # after the profile has sourced.
+        # See the bash branch on why this is `whence -p`, not `command -v`.
         run_probe zsh -lic '
-            p="$(command -v ocx || true)"
+            p="$(whence -p ocx || true)"
             echo "OCX_RESOLVED=${p}"
             if [ -n "$p" ]; then ocx about >/dev/null 2>&1 || ocx version >/dev/null 2>&1; fi
             c="$(print -l ${(k)_comps[ocx]} 2>/dev/null || true)"
