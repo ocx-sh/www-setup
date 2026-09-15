@@ -85,7 +85,8 @@ function Wait-FixturePort {
         [Parameter(Mandatory)][string]$OutLog,
         [Parameter(Mandatory)][string]$ErrLog
     )
-    for ($i = 0; $i -lt 100; $i++) {
+    # 30s: a cold python spawn on a windows-latest runner has exceeded 10s (nightly flake).
+    for ($i = 0; $i -lt 300; $i++) {
         foreach ($lf in @($ErrLog, $OutLog)) {
             if (Test-Path $lf) {
                 $content = Get-Content $lf -Raw -ErrorAction SilentlyContinue
