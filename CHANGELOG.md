@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1](https://github.com/ocx-sh/www-setup/releases/tag/v0.2.1) — 2026-09-15
+
+### Added
+
+- **bunny:** Codify the pull-zone resilience settings by @michael-herwig ([08f68ab](https://github.com/ocx-sh/www-setup/commit/08f68ab59ca4f4c548f272428a44fe6721cfa3f0))
+- **install:** Hand OCX_INSTALL_CA_BUNDLE to ocx self setup as OCX_EXTRA_CA_CERTS by @michael-herwig ([d759d12](https://github.com/ocx-sh/www-setup/commit/d759d12e6d538136547adcfcf91d889681a66760))
+
+### Fixed
+
+- **install:** Retry transient download failures in all five installers by @michael-herwig ([f1c6745](https://github.com/ocx-sh/www-setup/commit/f1c67459569b7df7f0bc68065b482d86195872a5))
 ## [0.2.0](https://github.com/ocx-sh/www-setup/releases/tag/v0.2.0) — 2026-08-26
 
 ### Added
