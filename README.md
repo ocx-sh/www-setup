@@ -102,7 +102,7 @@ The `OCX_INSTALL_*` prefix scopes a knob to install-time; the shared runtime env
 | `OCX_INSTALL_QUIET` | Suppress informational stderr output | `0` |
 | `OCX_INSTALL_PRINT_PATH` | Emit the bin dir as the final stdout line | `0` |
 | `OCX_INSTALL_DOWNLOADER` | Force a downloader (`curl` or `wget`); default auto-detects (sh only) | _(auto)_ |
-| `OCX_INSTALL_CA_BUNDLE` | CA bundle trusted for every download — a PEM **file path**, or the PEM text itself. For TLS-intercepting corporate proxies. Also handed to `ocx self setup` as `SSL_CERT_FILE`. Not used by `install.ps1`'s own downloads (see below). | _(system trust store)_ |
+| `OCX_INSTALL_CA_BUNDLE` | CA bundle trusted for every download — a PEM **file path**, or the PEM text itself. For TLS-intercepting corporate proxies. Also handed to `ocx self setup` as `OCX_EXTRA_CA_CERTS` (persisted into `config.toml`) and `SSL_CERT_FILE`. Not used by `install.ps1`'s own downloads (see below). | _(system trust store)_ |
 
 The full list lives in `src/install.sh` (and its peers); see [`.claude/rules/installers.md`](.claude/rules/installers.md) for the naming + 5-way parity rules.
 
@@ -155,13 +155,13 @@ Rules:
 
 ### The CA bundle covers both hops
 
-An install is two HTTPS conversations, not one: the installer fetches the manifest and the archive, then `ocx self setup` pulls the package store from the registry. `OCX_INSTALL_CA_BUNDLE` covers both — the installer passes it to `curl --cacert` / `wget --ca-certificate`, and exports it as **`SSL_CERT_FILE`** for the `ocx self setup` child, which is how OCX picks up a host CA ([env reference](https://ocx.sh/docs/reference/environment#external-ca-certificates)). An `SSL_CERT_FILE` already in the environment is left alone.
+An install is two HTTPS conversations, not one: the installer fetches the manifest and the archive, then `ocx self setup` pulls the package store from the registry. `OCX_INSTALL_CA_BUNDLE` covers both — the installer passes it to `curl --cacert` / `wget --ca-certificate`, and hands it to the `ocx self setup` child as **`OCX_EXTRA_CA_CERTS`** (the value as supplied, path or PEM text; `ocx self setup` persists the certificate text into `$OCX_HOME/config.toml` so every later `ocx` command trusts it, on every OS — [env reference](https://ocx.sh/docs/reference/environment#ocx-extra-ca-certs)). It also exports the bundle path as **`SSL_CERT_FILE`**, which is how an older `ocx` picks up a host CA on Linux ([external CA certificates](https://ocx.sh/docs/reference/environment#external-ca-certificates)). Either variable already in the environment is left alone.
 
 Three things worth knowing:
 
-- **PEM only.** `SSL_CERT_FILE` ignores DER; convert with `openssl x509 -inform der -in corp.crt -out corp.pem`. An inline value is recognised by containing `-----BEGIN`, so a bundle that opens with comment lines (as Fedora/RHEL's does) works unchanged.
-- **curl/wget _replace_ the system trust store** with the bundle you give them, while OCX _merges_ it with its compiled-in Mozilla roots. So if the installer must reach both an internal host and a public one in the same run, the bundle needs the public roots too (`cat corp-root.pem /etc/ssl/certs/ca-certificates.crt`). Same semantics as `CURL_CA_BUNDLE`.
-- **`install.ps1` does not use it for its own downloads**: `Invoke-WebRequest` has no PowerShell 5.1-safe CA-bundle option, so it warns and falls back to the system trust store (on Windows, install the CA into the machine certificate store). It still validates the value, materializes an inline PEM, and exports `SSL_CERT_FILE` for `ocx self setup` — the gap is one flag, not the knob. Patching all five copies uniformly is therefore safe.
+- **PEM only.** Both `OCX_EXTRA_CA_CERTS` and `SSL_CERT_FILE` ignore DER; convert with `openssl x509 -inform der -in corp.crt -out corp.pem`. An inline value is recognised by containing `-----BEGIN`, so a bundle that opens with comment lines (as Fedora/RHEL's does) works unchanged.
+- **curl/wget _replace_ the system trust store** with the bundle you give them, while OCX _merges_ it with its compiled-in Mozilla roots. So if the installer must reach both an internal host and a public one in the same run, the bundle needs the public roots too (`cat corp-root.pem /etc/ssl/certs/ca-certificates.crt`). Same semantics as `CURL_CA_BUNDLE`. Note that `ocx` caps `OCX_EXTRA_CA_CERTS` at 32 KiB — a bundle with the full Mozilla set concatenated exceeds it and `ocx self setup` refuses it (installer exit 6). Since the environment wins, pre-set `OCX_EXTRA_CA_CERTS=/path/to/corp-root.pem` (the corporate root alone) beside the concatenated `OCX_INSTALL_CA_BUNDLE`.
+- **`install.ps1` does not use it for its own downloads**: `Invoke-WebRequest` has no PowerShell 5.1-safe CA-bundle option, so it warns and falls back to the system trust store (on Windows, install the CA into the machine certificate store). It still validates the value, materializes an inline PEM, and hands it to `ocx self setup` as `OCX_EXTRA_CA_CERTS` (and `SSL_CERT_FILE`, which no Windows or macOS client reads) — the gap is one flag, not the knob. Patching all five copies uniformly is therefore safe.
 
 ## Stdout / stderr contract
 

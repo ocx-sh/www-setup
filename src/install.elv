@@ -399,12 +399,20 @@ fn ocx-main {|@args|
         ocx-err "OCX_INSTALL_CA_BUNDLE is neither a readable file nor an inline PEM block: "$ca_bundle 2
     }
     # `ocx self setup` does its own HTTPS work (it pulls the package store from
-    # the registry). It merges the host trust store into its compiled-in Mozilla
-    # roots and discovers that store via SSL_CERT_FILE / SSL_CERT_DIR (PEM only)
-    # — so handing the same bundle down is what makes ONE corporate CA cover
-    # BOTH hops. An SSL_CERT_FILE already in the environment wins, as everywhere.
+    # the registry), so the same bundle is handed down — that is what makes ONE
+    # corporate CA cover BOTH hops. Two variables, because two ocx generations:
+    #   * OCX_EXTRA_CA_CERTS — the value AS SUPPLIED (path or PEM text; ocx does
+    #     the same content sniff). `ocx self setup` persists the certificate
+    #     text into $OCX_HOME/config.toml, so every later ocx invocation trusts
+    #     the CA, on every OS. An older ocx ignores the unknown variable.
+    #   * SSL_CERT_FILE — the materialized PATH, which is how an older ocx
+    #     discovers a host trust store (Linux only; a no-op elsewhere).
+    # A value already in the environment wins, as everywhere.
     if (and (not-eq (ocx-ca-bundle) '') (eq (ocx-env SSL_CERT_FILE '') '')) {
         set-env SSL_CERT_FILE (ocx-ca-bundle)
+    }
+    if (and (not-eq $ca_bundle '') (eq (ocx-env OCX_EXTRA_CA_CERTS '') '')) {
+        set-env OCX_EXTRA_CA_CERTS $ca_bundle
     }
 
     # Corporate managed-config OCI ref, forwarded to `ocx self setup

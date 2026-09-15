@@ -126,7 +126,8 @@ function New-OcxStub {
     $record = ''
     if ($ArgvLog) {
         $record = "if [ -n `"`$OCX_STUB_ARGV`" ]; then printf '%s\n' `"`$*`" >> `"`$OCX_STUB_ARGV`"; fi`n" +
-            "if [ -n `"`$OCX_STUB_ENV`" ]; then printf 'SSL_CERT_FILE=%s\n' `"`$SSL_CERT_FILE`" >> `"`$OCX_STUB_ENV`"; fi`n"
+            "if [ -n `"`$OCX_STUB_ENV`" ]; then printf 'SSL_CERT_FILE=%s\n' `"`$SSL_CERT_FILE`" >> `"`$OCX_STUB_ENV`"; fi`n" +
+            "if [ -n `"`$OCX_STUB_ENV`" ]; then printf 'OCX_EXTRA_CA_CERTS=%s\n' `"`$OCX_EXTRA_CA_CERTS`" >> `"`$OCX_STUB_ENV`"; fi`n"
     }
     $setupExit = if ($FailSelfSetup) { '9' } else { '0' }
     $body = "#!/bin/sh`n" +

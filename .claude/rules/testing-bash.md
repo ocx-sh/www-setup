@@ -111,8 +111,9 @@ The stub packed into the fixture archive (`server_stub_body`):
   exiting **0** (the thin installer hands off to `ocx self setup`; the stub no
   longer emits shims or completion — `ocx self setup` owns that),
 - **records its full argv** (one line per invocation) to `$OCX_STUB_ARGV` when set,
-- **records `SSL_CERT_FILE`** to `$OCX_STUB_ENV` when set — the CA suites assert the
-  installer hands its bundle down to the `ocx self setup` hop, not just to curl/wget.
+- **records `SSL_CERT_FILE` and `OCX_EXTRA_CA_CERTS`** to `$OCX_STUB_ENV` when set —
+  the CA suites assert the installer hands its bundle down to the `ocx self setup`
+  hop, not just to curl/wget (an inline PEM lands multi-line; grep line-wise).
 
 The argv recording is load-bearing: it lets a test assert the **exact** hand-off
 
@@ -227,5 +228,5 @@ hatch.
 | `__OCX_TESTING_INSTALL_BINARY` behavior change | `env-knobs.bats` (happy: no download, binary placed, `--offline self setup` argv) + `exit-codes.bats` (bad → exit 2) + `print-path.bats` (PRINT_PATH honored) |
 | Download-retry behavior change | `exit-codes.bats` + every `tests/install/{nu,fish,elvish}/` suite + `ps1/ExitCodes.Tests.ps1` — the transient-500-then-success path (`/flaky/2/`), the never-succeeds path (`/flaky/99/` → exit 3), and the archive-retry path, each asserting the ATTEMPT COUNT via `server_request_count`, not just the exit code |
 | Embedded-config placeholder added/renamed | `env-knobs.bats` + every `tests/install/{nu,fish,elvish}/` suite + `ps1/Knobs.Tests.ps1` — patch a copy via `server_embed_config` / `New-EmbeddedInstaller` and assert the effect, plus one case proving the environment still wins |
-| `OCX_INSTALL_CA_BUNDLE` behavior change | all five suites — the inline-PEM happy path with `CURL_CA_BUNDLE` UNSET (that is what proves the flag reaches curl), the matching **negative control** (no bundle → non-zero; without it the happy path proves nothing), the `SSL_CERT_FILE` hand-down assertion, and the neither-file-nor-PEM → exit 2 case. `env-knobs.bats` additionally covers the **wget** backend via `OCX_INSTALL_DOWNLOADER=wget`, and the fish suite via `server_path_without_curl`. ps1 asserts the divergence warning + the hand-down instead |
+| `OCX_INSTALL_CA_BUNDLE` behavior change | all five suites — the inline-PEM happy path with `CURL_CA_BUNDLE` UNSET (that is what proves the flag reaches curl), the matching **negative control** (no bundle → non-zero; without it the happy path proves nothing), the hand-down assertion (`OCX_EXTRA_CA_CERTS` = value as supplied, `SSL_CERT_FILE` = materialized path), and the neither-file-nor-PEM → exit 2 case. `env-knobs.bats` additionally covers the **wget** backend via `OCX_INSTALL_DOWNLOADER=wget`, and the fish suite via `server_path_without_curl`. ps1 asserts the divergence warning + the hand-down instead |
 | New exotic installer behavior | the matching `tests/install/{nu,fish,elvish}/` suite |

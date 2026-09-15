@@ -177,10 +177,13 @@ server_stub_body() {
 if [ -n "${OCX_STUB_ARGV:-}" ]; then
     printf '%s\n' "$*" >>"$OCX_STUB_ARGV"
 fi
-# `ocx self setup` reads the host trust store through SSL_CERT_FILE; record what
-# the installer handed down so the CA tests can assert BOTH hops are covered.
+# `ocx self setup` takes the CA as OCX_EXTRA_CA_CERTS (persisted; path or PEM
+# text) and, for older ocx, SSL_CERT_FILE (a path); record what the installer
+# handed down so the CA tests can assert BOTH hops are covered. An inline PEM
+# spans lines — the log is grepped line-wise, so that is fine.
 if [ -n "${OCX_STUB_ENV:-}" ]; then
     printf 'SSL_CERT_FILE=%s\n' "${SSL_CERT_FILE:-}" >>"$OCX_STUB_ENV"
+    printf 'OCX_EXTRA_CA_CERTS=%s\n' "${OCX_EXTRA_CA_CERTS:-}" >>"$OCX_STUB_ENV"
 fi
 case "$1" in
     version)

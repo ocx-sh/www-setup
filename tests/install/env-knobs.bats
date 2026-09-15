@@ -47,7 +47,7 @@ setup() {
     unset GITHUB_PATH
     unset OCX_INSTALL_NO_SETUP OCX_INSTALL_VERSION
     unset __OCX_TESTING_INSTALL_BINARY
-    unset OCX_INSTALL_CA_BUNDLE OCX_MANAGED_CONFIG SSL_CERT_FILE SSL_CERT_DIR
+    unset OCX_INSTALL_CA_BUNDLE OCX_MANAGED_CONFIG SSL_CERT_FILE SSL_CERT_DIR OCX_EXTRA_CA_CERTS
 }
 
 @test "default install hands off to 'ocx self setup <version>'" {
@@ -328,8 +328,10 @@ setup() {
     OCX_INSTALL_CA_BUNDLE="$(server_ca_bundle)" run sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
     grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
-    # Second hop: `ocx self setup` pulls the package store itself and reads the
-    # host trust store via SSL_CERT_FILE. One bundle must cover both.
+    # Second hop: `ocx self setup` pulls the package store itself. One bundle
+    # must cover both: OCX_EXTRA_CA_CERTS (persisted, every OS) as supplied, and
+    # SSL_CERT_FILE for an older ocx (Linux only).
+    grep -qxF -- "OCX_EXTRA_CA_CERTS=$(server_ca_bundle)" "$OCX_STUB_ENV"
     grep -qxF -- "SSL_CERT_FILE=$(server_ca_bundle)" "$OCX_STUB_ENV"
 }
 
@@ -340,6 +342,7 @@ setup() {
         run sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
     grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+    grep -qxF -- "OCX_EXTRA_CA_CERTS=$(server_ca_bundle)" "$OCX_STUB_ENV"
     grep -qxF -- "SSL_CERT_FILE=$(server_ca_bundle)" "$OCX_STUB_ENV"
 }
 
@@ -361,14 +364,16 @@ setup() {
     [ "$status" -ne 0 ]
 }
 
-@test "OCX_INSTALL_CA_BUNDLE: an existing SSL_CERT_FILE is not overridden" {
+@test "OCX_INSTALL_CA_BUNDLE: an existing SSL_CERT_FILE / OCX_EXTRA_CA_CERTS is not overridden" {
     unset CURL_CA_BUNDLE
     cp "$(server_ca_bundle)" "${BATS_TEST_TMPDIR}/preset-ca.pem"
     SSL_CERT_FILE="${BATS_TEST_TMPDIR}/preset-ca.pem" \
+        OCX_EXTRA_CA_CERTS="${BATS_TEST_TMPDIR}/preset-ca.pem" \
         OCX_INSTALL_CA_BUNDLE="$(server_ca_bundle)" \
         run sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
     grep -qxF -- "SSL_CERT_FILE=${BATS_TEST_TMPDIR}/preset-ca.pem" "$OCX_STUB_ENV"
+    grep -qxF -- "OCX_EXTRA_CA_CERTS=${BATS_TEST_TMPDIR}/preset-ca.pem" "$OCX_STUB_ENV"
 }
 
 @test "OCX_INSTALL_CA_BUNDLE: an inline PEM block is materialized" {
@@ -379,8 +384,11 @@ setup() {
     run sh "$_copy" --version 0.0.0
     [ "$status" -eq 0 ]
     grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
-    # The materialized temp file is what `ocx self setup` is pointed at.
+    # SSL_CERT_FILE names the materialized temp file; OCX_EXTRA_CA_CERTS carries
+    # the PEM text AS SUPPLIED (ocx sniffs it the same way and persists it).
     grep -qE -- '^SSL_CERT_FILE=/.+' "$OCX_STUB_ENV"
+    grep -qxF -- 'OCX_EXTRA_CA_CERTS=# Corp Root CA' "$OCX_STUB_ENV"
+    grep -qF -- '-----BEGIN CERTIFICATE-----' "$OCX_STUB_ENV"
 }
 
 @test "OCX_INSTALL_CA_BUNDLE: neither a file nor inline PEM → exit 2" {

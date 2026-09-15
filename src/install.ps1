@@ -744,10 +744,16 @@ function Main {
     }
 
     # `ocx self setup` does its own HTTPS work (it pulls the package store from
-    # the registry). It merges the host trust store into its compiled-in Mozilla
-    # roots and discovers that store via SSL_CERT_FILE / SSL_CERT_DIR (PEM only)
-    # - so the bundle is handed down even though install.ps1 cannot use it for
-    # its OWN downloads. An SSL_CERT_FILE already in the environment wins.
+    # the registry), so the bundle is handed down even though install.ps1 cannot
+    # use it for its OWN downloads. Two variables, because two ocx generations:
+    #   * OCX_EXTRA_CA_CERTS - the value AS SUPPLIED (path or PEM text; ocx does
+    #     the same content sniff). `ocx self setup` persists the certificate
+    #     text into $OCX_HOME/config.toml, so every later ocx invocation trusts
+    #     the CA, on every OS. An older ocx ignores the unknown variable.
+    #   * SSL_CERT_FILE - the materialized PATH, which is how an older ocx
+    #     discovers a host trust store. reqwest's platform verifier reads it on
+    #     Linux/BSD only; on Windows and macOS it is a no-op.
+    # A value already in the environment wins.
     #
     # The value is either a path or the PEM text itself (the embedded placeholder
     # is single-quoted, and single quotes span newlines in every dialect). Inline
@@ -756,7 +762,7 @@ function Main {
     if ($OcxInstallCaBundle) {
         Warn ("OCX_INSTALL_CA_BUNDLE is not honored by install.ps1's own downloads " +
             '(Invoke-WebRequest has no CA-bundle option) - install the CA into the machine ' +
-            'certificate store instead. It is still passed to `ocx self setup` via SSL_CERT_FILE.')
+            'certificate store instead. It is still handed to `ocx self setup` as OCX_EXTRA_CA_CERTS.')
         $caPath = $OcxInstallCaBundle
         # A real bundle may open with comment lines or a certificate label
         # (Fedora/RHEL ship exactly that), so detect PEM by CONTENT, not by a
@@ -776,6 +782,7 @@ function Main {
             }
         }
         if (-not $env:SSL_CERT_FILE) { $env:SSL_CERT_FILE = $caPath }
+        if (-not $env:OCX_EXTRA_CA_CERTS) { $env:OCX_EXTRA_CA_CERTS = $OcxInstallCaBundle }
     }
 
     $ocxHome = Get-DefaultOcxHome

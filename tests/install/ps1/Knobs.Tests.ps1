@@ -55,7 +55,7 @@ Describe 'install.ps1 env knobs' {
         $env:OCX_INSTALL_MIRROR_URL = $Server.MirrorUrl
         foreach ($v in 'GITHUB_PATH', '__OCX_TESTING_INSTALL_BINARY', 'OCX_INSTALL_PRINT_PATH',
             'OCX_INSTALL_QUIET', 'OCX_INSTALL_FORCE', 'OCX_INSTALL_NO_SETUP', 'OCX_INSTALL_VERSION',
-            'OCX_INSTALL_CA_BUNDLE', 'OCX_MANAGED_CONFIG', 'SSL_CERT_FILE', 'SSL_CERT_DIR') {
+            'OCX_INSTALL_CA_BUNDLE', 'OCX_MANAGED_CONFIG', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'OCX_EXTRA_CA_CERTS') {
             Remove-Item "Env:$v" -ErrorAction SilentlyContinue
         }
     }
@@ -65,7 +65,7 @@ Describe 'install.ps1 env knobs' {
         if (Test-Path $EnvLog) { Remove-Item -Force $EnvLog -ErrorAction SilentlyContinue }
         # Pester runs every suite in ONE process: an env var left set by the last
         # test in this file leaks into the next file's tests. Clear on the way out.
-        foreach ($v in 'OCX_INSTALL_CA_BUNDLE', 'OCX_MANAGED_CONFIG', 'SSL_CERT_FILE', 'SSL_CERT_DIR') {
+        foreach ($v in 'OCX_INSTALL_CA_BUNDLE', 'OCX_MANAGED_CONFIG', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'OCX_EXTRA_CA_CERTS') {
             Remove-Item "Env:$v" -ErrorAction SilentlyContinue
         }
     }
@@ -276,14 +276,16 @@ Describe 'install.ps1 env knobs' {
         finally { Remove-Item -Force $errLog -ErrorAction SilentlyContinue }
     }
 
-    It 'OCX_INSTALL_CA_BUNDLE is handed to ocx self setup via SSL_CERT_FILE' -Skip:($env:OS -eq 'Windows_NT') {
+    It 'OCX_INSTALL_CA_BUNDLE is handed to ocx self setup as OCX_EXTRA_CA_CERTS + SSL_CERT_FILE' -Skip:($env:OS -eq 'Windows_NT') {
         # install.ps1 cannot use the bundle for its OWN downloads, but the second
-        # hop can: `ocx self setup` pulls the package store itself and reads the
-        # host trust store via SSL_CERT_FILE.
+        # hop can: `ocx self setup` pulls the package store itself. It takes the
+        # CA as OCX_EXTRA_CA_CERTS (persisted, every OS) as supplied, and as
+        # SSL_CERT_FILE for an older ocx (Linux only).
         $ca = Join-Path $PSScriptRoot '..\helpers\localhost-cert.pem'
         $env:OCX_INSTALL_CA_BUNDLE = $ca
         & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
+        (Get-Content $EnvLog) | Should -Contain "OCX_EXTRA_CA_CERTS=$ca"
         (Get-Content $EnvLog) | Should -Contain "SSL_CERT_FILE=$ca"
     }
 
@@ -303,6 +305,10 @@ Describe 'install.ps1 env knobs' {
             $recorded | Should -Match '^SSL_CERT_FILE=.+\.pem$'
             $path = $recorded.Substring('SSL_CERT_FILE='.Length)
             (Get-Content $path -Raw) | Should -Match '-----BEGIN CERTIFICATE-----'
+            # OCX_EXTRA_CA_CERTS carries the PEM text AS SUPPLIED (ocx sniffs it
+            # the same way and persists it), not the temp path.
+            (Get-Content $EnvLog) | Should -Contain 'OCX_EXTRA_CA_CERTS=# Corp Root CA'
+            (Get-Content $EnvLog) | Should -Contain '-----BEGIN CERTIFICATE-----'
         }
         finally { Remove-Item -Force $copy -ErrorAction SilentlyContinue }
     }
@@ -313,16 +319,18 @@ Describe 'install.ps1 env knobs' {
         $LASTEXITCODE | Should -Be 2
     }
 
-    It 'OCX_INSTALL_CA_BUNDLE does not override an existing SSL_CERT_FILE' -Skip:($env:OS -eq 'Windows_NT') {
+    It 'OCX_INSTALL_CA_BUNDLE does not override an existing SSL_CERT_FILE / OCX_EXTRA_CA_CERTS' -Skip:($env:OS -eq 'Windows_NT') {
         $ca = Join-Path $PSScriptRoot '..\helpers\localhost-cert.pem'
         $preset = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-preset-ca-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).pem"
         Copy-Item -Path $ca -Destination $preset -Force
         $env:OCX_INSTALL_CA_BUNDLE = $ca
         $env:SSL_CERT_FILE = $preset
+        $env:OCX_EXTRA_CA_CERTS = $preset
         try {
             & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
             $LASTEXITCODE | Should -Be 0
             (Get-Content $EnvLog) | Should -Contain "SSL_CERT_FILE=$preset"
+            (Get-Content $EnvLog) | Should -Contain "OCX_EXTRA_CA_CERTS=$preset"
         }
         finally { Remove-Item -Force $preset -ErrorAction SilentlyContinue }
     }

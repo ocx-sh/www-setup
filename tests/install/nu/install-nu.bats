@@ -38,7 +38,7 @@ setup() {
     export OCX_INSTALL_MIRROR_URL="${FIXTURE_URL}/releases/download"
     unset GITHUB_PATH OCX_INSTALL_NO_SETUP OCX_INSTALL_VERSION
     unset __OCX_TESTING_INSTALL_BINARY
-    unset OCX_INSTALL_CA_BUNDLE OCX_MANAGED_CONFIG SSL_CERT_FILE SSL_CERT_DIR
+    unset OCX_INSTALL_CA_BUNDLE OCX_MANAGED_CONFIG SSL_CERT_FILE SSL_CERT_DIR OCX_EXTRA_CA_CERTS
 }
 
 @test "nu: default install hands off to 'ocx self setup <version>'" {
@@ -224,6 +224,11 @@ setup() {
     OCX_INSTALL_VERSION=0.0.0 run nu "$_copy"
     [ "$status" -eq 0 ]
     grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+    # SSL_CERT_FILE names the materialized temp file; OCX_EXTRA_CA_CERTS carries
+    # the PEM text AS SUPPLIED (ocx sniffs it the same way and persists it).
+    grep -qE -- '^SSL_CERT_FILE=/.+' "$OCX_STUB_ENV"
+    grep -qxF -- 'OCX_EXTRA_CA_CERTS=# Corp Root CA' "$OCX_STUB_ENV"
+    grep -qF -- '-----BEGIN CERTIFICATE-----' "$OCX_STUB_ENV"
 }
 
 @test "nu: OCX_INSTALL_CA_BUNDLE neither a file nor inline PEM → exit 2" {
@@ -242,13 +247,15 @@ setup() {
     [ "$status" -ne 0 ]
 }
 
-@test "nu: OCX_INSTALL_CA_BUNDLE is handed to 'ocx self setup' via SSL_CERT_FILE" {
+@test "nu: OCX_INSTALL_CA_BUNDLE is handed to 'ocx self setup' as OCX_EXTRA_CA_CERTS + SSL_CERT_FILE" {
     command -v nu >/dev/null 2>&1 || skip "nu not installed"
     unset CURL_CA_BUNDLE
     OCX_INSTALL_CA_BUNDLE="$(server_ca_bundle)" OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
     [ "$status" -eq 0 ]
-    # Second hop: `ocx self setup` pulls the package store itself and reads the
-    # host trust store via SSL_CERT_FILE. One bundle must cover both.
+    # Second hop: `ocx self setup` pulls the package store itself. One bundle
+    # must cover both: OCX_EXTRA_CA_CERTS (persisted, every OS) as supplied, and
+    # SSL_CERT_FILE for an older ocx (Linux only).
+    grep -qxF -- "OCX_EXTRA_CA_CERTS=$(server_ca_bundle)" "$OCX_STUB_ENV"
     grep -qxF -- "SSL_CERT_FILE=$(server_ca_bundle)" "$OCX_STUB_ENV"
 }
 

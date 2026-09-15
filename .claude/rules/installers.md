@@ -144,11 +144,25 @@ wrong trust store.
 
 **Both hops, one bundle.** An install is two HTTPS conversations: the installer
 fetches manifest + archive, then `ocx self setup` pulls the package store from the
-registry. So when the knob is set (and `SSL_CERT_FILE` is not already in the
-environment) the installer **exports `SSL_CERT_FILE=<resolved path>`** for the
-child. That is how OCX discovers a host CA — it merges the host store into its
-compiled-in Mozilla roots, PEM only, no `OCX_` prefix. Covering only the first hop
-would leave `self setup` failing behind exactly the proxy the knob exists for.
+registry. Covering only the first hop would leave `self setup` failing behind
+exactly the proxy the knob exists for, so when the knob is set the installer
+hands the bundle to the child through **two** variables (each only when not
+already in the environment — env wins, as everywhere):
+
+- **`OCX_EXTRA_CA_CERTS=<value as supplied>`** — path or PEM text, unchanged;
+  ocx does the same `-----BEGIN` content sniff. `ocx self setup` (ocx ≥ the
+  release carrying [ocx-sh/ocx#465](https://github.com/ocx-sh/ocx/pull/465))
+  reads it before any network hop and persists the certificate text as
+  `extra_ca_certs_pem` in `$OCX_HOME/config.toml`, so every later `ocx`
+  invocation trusts the CA — on Windows and macOS too. Roots are additive. An
+  older ocx ignores the unknown variable; an env var, not a flag, is what keeps
+  the installers compatible with every released ocx. ocx caps the value at
+  32 KiB (a concatenated public-roots bundle exceeds it → `self setup` refuses →
+  exit 6; the README tells users to pre-set the corporate root alone).
+- **`SSL_CERT_FILE=<resolved path>`** — how an older ocx discovers a host CA
+  (merged into its compiled-in Mozilla roots, PEM only). reqwest's platform
+  verifier reads it on **Linux/BSD only**; on Windows and macOS it is a no-op.
+  Kept for that older ocx, never the primary hand-off.
 
 Note the asymmetry, and keep it documented: `curl --cacert` / `wget
 --ca-certificate` **replace** the system trust store, whereas OCX **merges**. A
@@ -165,8 +179,8 @@ therefore emits one `Warn` and continues on the system trust store for the
 manifest + archive fetch, so a uniformly sed-ed installer set still installs; on
 Windows the CA belongs in the machine certificate store. **Everything else stays
 symmetric**: it validates the value (exit **2**), materializes an inline PEM to a
-temp file, and exports `SSL_CERT_FILE` for the `ocx self setup` hand-off — the
-divergence is exactly one flag, not the knob.
+temp file, and exports `OCX_EXTRA_CA_CERTS` + `SSL_CERT_FILE` for the `ocx self
+setup` hand-off — the divergence is exactly one flag, not the knob.
 
 Materializing in ps1 is not optional: `SSL_CERT_FILE` names a PATH, so exporting
 raw PEM text would hand `ocx self setup` garbage.

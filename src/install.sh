@@ -709,6 +709,7 @@ main() {
     # A real bundle may open with comment lines or a certificate label
     # (Fedora/RHEL ship exactly that), so detect PEM by CONTENT, not by a
     # leading marker: a filesystem path can never contain "-----BEGIN".
+    _ca_raw="$OCX_INSTALL_CA_BUNDLE"
     case "$OCX_INSTALL_CA_BUNDLE" in
         "") ;;
         *"-----BEGIN"*)
@@ -725,13 +726,22 @@ main() {
             ;;
     esac
     # `ocx self setup` does its own HTTPS work (it pulls the package store from
-    # the registry). It merges the host trust store into its compiled-in Mozilla
-    # roots and discovers that store via SSL_CERT_FILE / SSL_CERT_DIR (PEM only)
-    # — so handing the same bundle down is what makes ONE corporate CA cover
-    # BOTH hops. An SSL_CERT_FILE already in the environment wins, as everywhere.
+    # the registry), so the same bundle is handed down — that is what makes ONE
+    # corporate CA cover BOTH hops. Two variables, because two ocx generations:
+    #   * OCX_EXTRA_CA_CERTS — the value AS SUPPLIED (path or PEM text; ocx does
+    #     the same content sniff). `ocx self setup` persists the certificate
+    #     text into $OCX_HOME/config.toml, so every later ocx invocation trusts
+    #     the CA, on every OS. An older ocx ignores the unknown variable.
+    #   * SSL_CERT_FILE — the materialized PATH, which is how an older ocx
+    #     discovers a host trust store (Linux only; a no-op elsewhere).
+    # A value already in the environment wins, as everywhere.
     if [ -n "$OCX_INSTALL_CA_BUNDLE" ] && [ -z "${SSL_CERT_FILE:-}" ]; then
         SSL_CERT_FILE="$OCX_INSTALL_CA_BUNDLE"
         export SSL_CERT_FILE
+    fi
+    if [ -n "$_ca_raw" ] && [ -z "${OCX_EXTRA_CA_CERTS:-}" ]; then
+        OCX_EXTRA_CA_CERTS="$_ca_raw"
+        export OCX_EXTRA_CA_CERTS
     fi
 
     _ocx_home="${OCX_HOME:-$HOME/.ocx}"
