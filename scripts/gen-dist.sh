@@ -165,7 +165,7 @@ else
         --silent --show-error --location \
         --proto "=https" \
         --max-time 30 \
-        --retry 2 \
+        --retry 5 --retry-all-errors \
         --fail \
         -H "Accept: application/vnd.github+json" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
@@ -225,9 +225,13 @@ for rel in data:
 TAB=$(printf '\t')
 
 # Fetch one URL to stdout over enforced HTTPS (network mode only).
+# ponytail: --retry 5 --retry-all-errors (~31s of backoff). A present asset that
+# 500s is a transient release-CDN blip, and one such blip aborts the whole run
+# (clobber-safety, by design) -- so buy headroom rather than soften the abort.
 fetch_sha() {
     curl --silent --show-error --location --proto "=https" \
-        --max-time 30 --retry 2 --fail --user-agent "${USER_AGENT}" "$1"
+        --max-time 30 --retry 5 --retry-all-errors --fail \
+        --user-agent "${USER_AGENT}" "$1"
 }
 
 # Read the plan from a FILE (not a pipe) so this loop runs in the current shell:
