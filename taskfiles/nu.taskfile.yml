@@ -1,19 +1,17 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 #
-# Nushell quality gate. The `nu` interpreter is bootstrapped from ocx.toml
-# (binding `nushell`) via `ocx run` — no system Nushell required. install.nu is
-# parse-checked with --ide-check.
+# Nushell quality gate. The `nu` interpreter is bootstrapped from ocx.toml (binding `nushell`) via
+# `ocx run`. nu-gate.nu --strict is the gate: a bare `nu --ide-check` or `nu-check` exits 0 on
+# deprecations, removed commands and barewords that fall through to an external.
 
 version: '3'
 
 tasks:
   verify:
-    desc: Nushell quality gate (nu --ide-check parse check, nu via ocx.toml)
-    # --ide-check emits diagnostics as one JSON record per line. A genuine parse
-    # error surfaces as a `{"type":"diagnostic",...,"severity":"Error",...}` line
-    # (or a hard nonzero exit); fail the gate if any Error diagnostic appears.
-    cmd: |
-      out="$(ocx run nushell -- nu --ide-check 1000 src/install.nu 2>&1)" || { printf '%s\n' "$out"; exit 1; }
-      printf '%s\n' "$out"
-      printf '%s\n' "$out" | grep -qi '"severity":[[:space:]]*"error"' && exit 1
-      exit 0
+    desc: Nushell quality gate (scripts/nu-gate.nu --strict on the locked nu and on both ends of install.nu's nu-range)
+    # install.nu declares '# nu-range: FLOOR..CEILING'; ocx.toml [group.nurange] pins both ends, so a
+    # deprecation that only the newest nu prints, or a form the oldest nu cannot parse, is red here.
+    cmds:
+      - ocx run nushell -- nu --no-config-file scripts/nu-gate.nu --strict --allow ocx src/install.nu
+      - ocx run -g nurange nushell-floor -- nu --no-config-file scripts/nu-gate.nu --strict --allow ocx src/install.nu
+      - ocx run -g nurange nushell-ceiling -- nu --no-config-file scripts/nu-gate.nu --strict --allow ocx src/install.nu

@@ -1,26 +1,26 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 #
 # Tool execution template backed by OCX. Each include creates a tool
-# namespace (e.g., `shellcheck:`, `shfmt:`) — callers interact with
+# namespace (e.g., `lychee:`, `git-cliff:`) — callers interact with
 # the tool, not with OCX directly.
 #
 # `ocx run NAME -- BINARY ...` composes the project toolchain env. NAME is the
 # binding declared in ocx.toml [tools] (ocx run takes binding NAMES, not
-# package refs). The package ref (e.g. ocx.sh/shfmt/shfmt:3) lives ONLY in
+# package refs). The package ref (e.g. ocx.sh/lychee/lychee:0) lives ONLY in
 # ocx.toml.
 #
 # Root taskfile registers tools:
 #
-#   shellcheck:
+#   lychee:
 #     taskfile: ./taskfiles/ocx.taskfile.yml
 #     internal: true
-#     vars: { NAME: shellcheck, TOOL: shellcheck, GLOB: '*.sh' }
+#     vars: { NAME: lychee, TOOL: lychee, GLOB: '*.md' }
 #
 # Subsystem taskfiles call the tool:
 #
-#   - task: :shellcheck:exec                        # defaults (no extra args)
-#   - task: :shfmt:exec
-#     vars: { ARGS: '-d -i 4 -ci' }                 # check mode
+#   - task: :lychee:exec                            # defaults (no extra args)
+#   - task: :lychee:exec
+#     vars: { ARGS: '--offline' }                   # extra args
 #
 # Identity vars (set at include time):
 #   NAME — ocx.toml [tools] binding name (passed to `ocx run`)
@@ -41,7 +41,7 @@ tasks:
     vars:
       ARGS: '{{.ARGS | default ""}}'
       FILES:
-        sh: git ls-files '{{.GLOB}}' | tr '\n' ' '
+        sh: set -o pipefail; git ls-files '{{.GLOB}}' | tr '\n' ' '
 
   exec:no-files:
     internal: true

@@ -1,17 +1,31 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
+#
+# Shell quality gate: scripts/shell-gate.sh is the gate of record (ShellCheck + shfmt at default
+# severity over the git-fed file list, hygiene, parse-only checks for nu/fish/elvish). The interpreters
+# it parses with come from ocx.toml; fish lives in [group.unix], hence `-g all`.
 
 version: '3'
 
 tasks:
   verify:
-    desc: Shell script quality gate (shellcheck + shfmt)
+    desc: Shell script quality gate (scripts/shell-gate.sh, bats lint, comment hex scan)
     cmds:
-      - task: :shellcheck:exec
-      - task: :shfmt:exec
-        vars: { ARGS: '-d -i 4 -ci' }
+      - ocx run -g all shellcheck shfmt nushell fish elvish -- bash scripts/shell-gate.sh
+      - task: :test:bats:lint
+      - |
+        hits=$(awk -f scripts/hex_in_comment.awk src/install.sh src/install.ps1 src/install.nu src/install.fish src/install.elv)
+        if [ -n "$hits" ]; then
+          printf '%s\n' "$hits" >&2
+          exit 1
+        fi
 
   format:
-    desc: Format shell scripts with shfmt
+    desc: Format shell scripts with shfmt (style from .editorconfig)
+    cmd: ocx run shfmt -- bash scripts/shell-format.sh
+
+  weaken:
+    desc: Print every added line that weakens a check (SH-CORE-01); BASE defaults to origin/main
+    # `git add -N` makes new files part of the compared change; it only records intent-to-add.
     cmds:
-      - task: :shfmt:exec
-        vars: { ARGS: '-w -i 4 -ci' }
+      - git add -N .
+      - sh scripts/core-weaken.sh {{.BASE | default "origin/main"}}
