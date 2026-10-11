@@ -18,6 +18,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   # Classify the change so per-commit jobs skip when their installer surface is
   # untouched (e.g. install.ps1-only -> Pester only; docs/ci -> nothing heavy).
@@ -40,9 +44,87 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
+          persist-credentials: false
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+      # The sh suite also runs the installer under dash, busybox ash, ksh and zsh; the runner lacks ksh and zsh.
+      - name: Install the POSIX shells the sh suite runs under
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends dash busybox ksh zsh
+      # bats-ci.sh asserts the pinned bats, runs the canary, then the censused suite. An absent
+      # interpreter fails (OCX_TEST_REQUIRE_SHELLS) and the skip budget is zero on this runner.
       - name: Run bats (vendored, shells via ocx.toml)
-        run: ocx run -g all nushell fish elvish -- external/bats-core/bin/bats -r tests/install/
+        env:
+          OCX_TEST_REQUIRE_SHELLS: '1'
+          CENSUS_SKIP_OK: ''
+        run: ocx run -g all nushell fish elvish -- bash scripts/bats-ci.sh
+      # The publish/dist scripts and the docker harness. Linux only: docker-harness.bats reads /etc/os-release.
+      - name: Run bats for the scripts and the docker harness (tests/scripts)
+        env:
+          OCX_TEST_REQUIRE_SHELLS: '1'
+          CENSUS_SKIP_OK: ''
+          TESTS_DIR: tests/scripts
+        run: ocx run -g all shellcheck shfmt nushell fish elvish -- bash scripts/bats-ci.sh tests/scripts
+
+  # Interpreter floors. The main legs run the newest nu, fish and elvish the toolchain locks; each suite
+  # below runs the same file on the oldest interpreter its installer declares, in the distro that ships
+  # it (fish 3.6.0 = Debian 12, elvish 0.20.1 = Alpine 3.20), or from the ocx.toml [group.nurange] pins
+  # (nu floor and ceiling). A skip is a failure: OCX_TEST_REQUIRE_SHELLS forbids a missing interpreter.
+  bats-nu-range:
+    name: Bats nu ${{ matrix.end }} (ubuntu-latest)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.bats == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        end: [floor, ceiling]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+        with:
+          groups: default,nurange
+      - name: Run the nu suite on the ${{ matrix.end }} nu
+        env:
+          OCX_TEST_REQUIRE_SHELLS: '1'
+          CENSUS_SKIP_OK: ''
+          TESTS_DIR: tests/install/nu
+          BINDING: nushell-${{ matrix.end }}
+        run: ocx run -g nurange "$BINDING" -- bash scripts/bats-ci.sh tests/install/nu
+
+  bats-floor-containers:
+    name: Bats ${{ matrix.shell }} floor (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.bats == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shell: fish
+            image: 'debian:12'
+          - shell: elvish
+            image: 'alpine:3.20'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+      # The container is a root-owned bind mount, so tests/ci/floor-suite.sh marks it safe for the census.
+      - name: Run the ${{ matrix.shell }} suite on the distro's own ${{ matrix.shell }}
+        env:
+          SHELL_UNDER_TEST: ${{ matrix.shell }}
+          IMAGE: ${{ matrix.image }}
+        run: |
+          docker run --rm \
+            --volume "$PWD:/work" \
+            --workdir /work \
+            --env OCX_TEST_REQUIRE_SHELLS=1 \
+            "$IMAGE" \
+            sh tests/ci/floor-suite.sh "$SHELL_UNDER_TEST"
 
   # macOS Bats: the suites are bash-3.2-safe (no negative array subscripts; the
   # fixture helper uses sha256sum-or-shasum), so the stock /bin/bash 3.2 runner
@@ -60,15 +142,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
+          persist-credentials: false
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
         with:
           # Pre-warm default + unix only. pwsh lives in [group.linux]
           # (ocx.sh/powershell/powershell ships linux-glibc leaves only); a
           # whole-scope pull on darwin would fail on its missing leaf.
           groups: default,unix
+      # The census compares the TAP plan with the .bats files on disk, so the dist.bats
+      # this leg leaves out is excluded from the count too. macOS has no GNU wget, timeout(1) or busybox.
       - name: Run bats (vendored; nu/fish/elvish via ocx.toml)
+        env:
+          OCX_TEST_REQUIRE_SHELLS: '1'
+          CENSUS_SKIP_OK: 'GNU wget not installed|timeout[(]1[)] not available|busybox has no macOS build'
+          CENSUS_EXCLUDE: ':(exclude)tests/install/dist.bats'
         run: |
-          ocx run -g all nushell fish elvish -- external/bats-core/bin/bats \
+          ocx run -g all nushell fish elvish -- bash scripts/bats-ci.sh \
             tests/install/env-knobs.bats \
             tests/install/exit-codes.bats \
             tests/install/print-path.bats \
@@ -99,6 +188,8 @@ jobs:
             entry: elvish src/install.elv
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
         with:
           # Pre-warm only the default [tools] group. fish ([group.unix]) and
@@ -144,19 +235,37 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-26]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Pester (v5)
+        with:
+          persist-credentials: false
+      - name: Install Pester (pinned)
         shell: pwsh
-        run: |
-          Install-Module -Name Pester -MinimumVersion 5.0 -Force -Scope CurrentUser -Repository PSGallery -SkipPublisherCheck
-      - name: Run Pester
+        run: ./scripts/Install-PinnedModule.ps1 -Name Pester -Version 6.2.0
+      # The gate is red on zero tests and on skips over the budget. Windows skips the
+      # scenarios that execute the shell-script stub (it is not a PE there).
+      - name: Run Pester (census gate)
         shell: pwsh
+        env:
+          MAX_SKIPPED: ${{ matrix.os == 'windows-latest' && '20' || '0' }}
+        run: ./scripts/Invoke-PesterGate.ps1 -Path tests/install/ps1 -RequiredVersion 6.2.0 -MaxSkipped $env:MAX_SKIPPED
+      # install.ps1 is delivered as `irm | iex`. Drive it down its failure path (an unreachable manifest
+      # URL) in a child pwsh 7: the host must survive, the failure must reach the step status, and the
+      # caller's session must come out unchanged. The 5.1 twins run in smoke-windows-51.
+      - name: iex survival and leak (pwsh 7)
+        shell: pwsh
+        env:
+          FAIL_ENV: OCX_INSTALL_DIST_URL=https://127.0.0.1:9/dist.json;OCX_HOME=${{ runner.temp }}/iex-home;OCX_NO_MODIFY_PATH=1;OCX_INSTALL_QUIET=1
         run: |
-          Import-Module Pester -MinimumVersion 5.0
-          $cfg = New-PesterConfiguration
-          $cfg.Run.Path = "tests/install/ps1"
-          $cfg.Run.Exit = $true
-          $cfg.Output.Verbosity = "Detailed"
-          Invoke-Pester -Configuration $cfg
+          ./scripts/ps-sec-iex-survival.ps1 -Path src/install.ps1 -HostModel repl -EnvVar $env:FAIL_ENV
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/ps-sec-iex-survival.ps1 -Path src/install.ps1 -HostModel ci -EnvVar $env:FAIL_ENV
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # The leak probe takes the success path: the failure path hands its exit code over through
+          # $global:LASTEXITCODE on purpose, which it would count as a leaked variable.
+          $stub = Join-Path $env:RUNNER_TEMP 'ocx-stub'
+          Set-Content -Path $stub -Value 'stub' -Encoding ascii
+          $ok = "__OCX_TESTING_INSTALL_BINARY=$stub;OCX_INSTALL_NO_SETUP=1;OCX_INSTALL_NO_SMOKETEST=1;OCX_HOME=$env:RUNNER_TEMP/iex-home-ok;OCX_NO_MODIFY_PATH=1;OCX_INSTALL_QUIET=1"
+          ./scripts/ps-sec-iex-leak.ps1 -Path src/install.ps1 -EnvVar $ok
+          exit $LASTEXITCODE
 
   # Windows PowerShell 5.1 (Desktop) leg — the installer's floor. The full Pester
   # suite runs on pwsh 7 (windows + ubuntu above): it invokes install.ps1 via
@@ -171,6 +280,8 @@ jobs:
     if: needs.changes.outputs.ps1 == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: 5.1 smoke install (powershell.exe)
         shell: powershell
         run: |
@@ -185,6 +296,38 @@ jobs:
           if (-not (Test-Path (Join-Path $binDir 'ocx.exe'))) {
             throw "expected ocx.exe under printed bin dir: $binDir"
           }
+      # The 5.1 parse is the gate of record for the installer: a pwsh 7 parse accepts 7-only syntax.
+      # Each step below runs one native and exits with its status (custom shell, no runner epilogue).
+      - name: 5.1 parse gate (gates-parse-gate.ps1)
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {0}
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/gates-parse-gate.ps1 src
+          exit $LASTEXITCODE
+      # install.ps1 is delivered as `irm | iex`. Drive it down its failure path (an unreachable
+      # manifest URL): the host must survive and the failure must still reach the step status.
+      - name: iex survival, interactive host (ps-sec-iex-survival.ps1)
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {0}
+        env:
+          IEX_ENV: OCX_INSTALL_DIST_URL=https://127.0.0.1:9/dist.json;OCX_HOME=${{ runner.temp }}\iex-home;OCX_NO_MODIFY_PATH=1;OCX_INSTALL_QUIET=1
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/ps-sec-iex-survival.ps1 -Path src/install.ps1 -HostModel repl -EnvVar $env:IEX_ENV
+          exit $LASTEXITCODE
+      - name: iex survival, CI host (ps-sec-iex-survival.ps1)
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {0}
+        env:
+          IEX_ENV: OCX_INSTALL_DIST_URL=https://127.0.0.1:9/dist.json;OCX_HOME=${{ runner.temp }}\iex-home;OCX_NO_MODIFY_PATH=1;OCX_INSTALL_QUIET=1
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/ps-sec-iex-survival.ps1 -Path src/install.ps1 -HostModel ci -EnvVar $env:IEX_ENV
+          exit $LASTEXITCODE
+      # The success path (the test hatch, no network): the failure path above hands its exit code to the
+      # caller through $global:LASTEXITCODE on purpose, which this probe would count as a leaked variable.
+      - name: iex leaves the session unchanged (ps-sec-iex-leak.ps1)
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {0}
+        env:
+          IEX_ENV: __OCX_TESTING_INSTALL_BINARY=${{ runner.temp }}\ocx.exe;OCX_INSTALL_NO_SETUP=1;OCX_INSTALL_NO_SMOKETEST=1;OCX_HOME=${{ runner.temp }}\iex-home;OCX_NO_MODIFY_PATH=1;OCX_INSTALL_QUIET=1
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/ps-sec-iex-leak.ps1 -Path src/install.ps1 -EnvVar $env:IEX_ENV
+          exit $LASTEXITCODE
 
   # Real-release smoke: installs the real ocx from the live dist.json (network,
   # non-hermetic). Runs nightly + on manual dispatch — kept off per-commit because
@@ -200,16 +343,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Run install.sh against the real release
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          args=""
+          set --
           if [ -n "$RELEASE_TAG" ]; then
-            args="--version ${RELEASE_TAG#v}"
+            set -- --version "${RELEASE_TAG#v}"
           fi
-          # shellcheck disable=SC2086
-          OCX_NO_MODIFY_PATH=1 OCX_INSTALL_PRINT_PATH=1 sh src/install.sh $args
+          OCX_NO_MODIFY_PATH=1 OCX_INSTALL_PRINT_PATH=1 sh src/install.sh "$@"
       - name: Verify
         run: |
           export PATH="$HOME/.ocx/symlinks/ocx.sh/ocx/cli/current/content/bin:$PATH"
@@ -231,6 +375,8 @@ jobs:
         shell: [powershell, pwsh]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # Host shell is pwsh; the matrix selects the interpreter that actually RUNS
       # install.ps1 (5.1 powershell.exe is on PATH on windows runners). The edition
       # under test is the nested process, not the harness shell.
@@ -266,6 +412,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Run install.ps1
         shell: pwsh
         env:

@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=https://docs.zizmor.sh/schema.json
+#
+# zizmor, default 'regular' persona, medium floor (SH-CI-21): `task ci:zizmor`.
+# A finding is fixed in the workflow; an ignore here needs a reason.
+rules:
+  artipacked:
+    ignore:
+      # The release job's last step is `git push origin "$major" --force` (moves the vN major
+      # tag), so it needs the token the checkout persists. Job is contents:write, tag-triggered.
+      - release.yml:22:9

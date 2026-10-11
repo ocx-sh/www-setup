@@ -6,7 +6,7 @@ name: changes
 # duplicate the filter in the callers.
 #
 # SHARED paths (workflows, test helpers, the sh-contract *.bats suites, pipeline
-# scripts, the toolchain lock, vendored bats, taskfiles) appear in EVERY filter,
+# scripts, the toolchain lock, vendored bats, taskfiles, lint profiles) appear in EVERY filter,
 # so any shared change lights up every output and the full matrix runs. The
 # five-way installer parity rule (.claude/rules/installers.md) means real
 # installer changes usually touch all five at once and run everything anyway; the
@@ -55,6 +55,8 @@ jobs:
       bats: ${{ steps.f.outputs.sh == 'true' || steps.f.outputs.nu == 'true' || steps.f.outputs.fish == 'true' || steps.f.outputs.elvish == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: f
         with:
@@ -68,13 +70,23 @@ jobs:
               - 'ocx.lock'
               - 'external/**'
               - 'taskfiles/**'
+              - 'taskfile.yml'
+              - 'tests/scripts/**'
+              - '.gitmodules'
+              - 'zizmor.yml'
+              - '.shellcheckrc'
+              - '.editorconfig'
+              - '.gitattributes'
             sh:
               - *shared
               - 'src/install.sh'
+              - 'tests/docker/**'
+              - 'tests/ci/**'
             ps1:
               - *shared
               - 'src/install.ps1'
               - 'tests/install/ps1/**'
+              - 'PSScriptAnalyzerSettings*.psd1'
             nu:
               - *shared
               - 'src/install.nu'

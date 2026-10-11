@@ -2,14 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
+# Kind: CI (POSIX sh: runs on dash and busybox ash)
+
 # Install the base toolchain a clean distro container needs before the OCX
 # project toolchain takes over: VCS (git, for checkout submodules + `git
 # ls-files`), the download/extract chain (curl, ca-certificates, tar, xz), and
 # the Bats fixture harness deps (python3 for the HTTPS server, coreutils for
 # sha256sum, findutils, grep, bash). The target SHELLS themselves (nu/fish/
-# elvish) are NOT installed here — they come from ocx.toml via `ocx run`.
+# elvish) are NOT installed here -- they come from ocx.toml via `ocx run`.
 # (pwsh is not among them: ocx.sh/powershell/powershell ships glibc-only
-# leaves, so it cannot come from ocx on Alpine/musl.)
+# leaves, so it cannot come from ocx on Alpine/musl.) The sh suite also runs
+# the installer under dash, busybox ash, ksh and zsh, and the elvish suite needs
+# openssl; under OCX_TEST_REQUIRE_SHELLS a missing one fails the leg.
 #
 # Usage: setup-distro.sh [alpine|fedora|ubuntu|debian]
 # Distro auto-detected from /etc/os-release when omitted.
@@ -18,7 +22,7 @@ set -eu
 
 DISTRO="${1:-}"
 if [ -z "$DISTRO" ] && [ -r /etc/os-release ]; then
-    # shellcheck disable=SC1091
+    # shellcheck disable=SC1091 # /etc/os-release exists only on the target distro
     DISTRO=$(. /etc/os-release 2>/dev/null && printf '%s' "${ID:-}")
 fi
 
@@ -26,12 +30,14 @@ case "$DISTRO" in
     alpine)
         apk add --no-cache \
             git curl ca-certificates tar xz gzip \
-            coreutils findutils grep bash python3
+            coreutils findutils grep bash python3 \
+            dash busybox loksh zsh openssl
         ;;
     fedora)
         dnf install -y --setopt=install_weak_deps=False \
             git curl ca-certificates tar xz gzip \
-            coreutils findutils grep bash python3
+            coreutils findutils grep bash python3 \
+            dash busybox ksh zsh openssl
         dnf clean all || true
         ;;
     ubuntu | debian)
@@ -39,7 +45,8 @@ case "$DISTRO" in
         apt-get update
         apt-get install -y --no-install-recommends \
             git curl ca-certificates tar xz-utils gzip \
-            coreutils findutils grep bash python3
+            coreutils findutils grep bash python3 \
+            dash busybox ksh zsh openssl
         rm -rf /var/lib/apt/lists/*
         ;;
     *)
