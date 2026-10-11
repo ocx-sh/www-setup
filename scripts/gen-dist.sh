@@ -2,17 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
-# gen-dist.sh — emit the self-hosted distribution manifest (dist.json) from the
+# Kind: CI (POSIX sh: runs on dash and busybox ash)
+
+# gen-dist.sh -- emit the self-hosted distribution manifest (dist.json) from the
 # OCX *product* repo's GitHub Releases API.
 #
 # dist.json is a Node-`dist`-style manifest: it lists every published OCX
-# release × build target with an inline sha256 checksum and a download URL. The
+# release x build target with an inline sha256 checksum and a download URL. The
 # installers read it to (a) resolve the latest stable version and (b) resolve
 # the (version,target) row -> sha256 + url for the download. There is NO
 # separate sha256.sum fetch in the install path anymore; the checksum is inline.
 #
 # Source of truth: ocx-sh/ocx GitHub Releases API (NOT this repo's git tags).
-# This repo's `v*` tags version the installer scripts only — decoupled.
+# This repo's `v*` tags version the installer scripts only -- decoupled.
 #
 # Key boundary: this generator runs in CI (where GITHUB_TOKEN is available) and
 # MAY call the GitHub Releases API. That does NOT reintroduce a GitHub dependency
@@ -21,7 +23,7 @@
 #
 # Output (stdout): a single JSON object. The two latest pointers and every
 # `releases[]` element are FLAT objects (no nested braces) so the installers'
-# jq-free parses are safe — POSIX `grep -o '{[^{}]*}'` and fish `string match -r`
+# jq-free parses are safe -- POSIX `grep -o '{[^{}]*}'` and fish `string match -r`
 # both extract each leaf object cleanly; nu/elvish use native JSON.
 #
 #   {
@@ -29,8 +31,8 @@
 #     "latest": {"version":"0.5.0","channel":"stable"},
 #     "latest_next": {"version":"0.6.0-rc.1","channel":"next"},
 #     "releases": [
-#       {"version":"0.5.0","channel":"stable","tag":"v0.5.0","target":"x86_64-unknown-linux-gnu","filename":"ocx-x86_64-unknown-linux-gnu.tar.gz","sha256":"abc…","url":"https://github.com/ocx-sh/ocx/releases/download/v0.5.0/ocx-x86_64-unknown-linux-gnu.tar.gz"},
-#       …
+#       {"version":"0.5.0","channel":"stable","tag":"v0.5.0","target":"x86_64-unknown-linux-gnu","filename":"ocx-x86_64-unknown-linux-gnu.tar.gz","sha256":"abc...","url":"https://github.com/ocx-sh/ocx/releases/download/v0.5.0/ocx-x86_64-unknown-linux-gnu.tar.gz"},
+#       ...
 #     ]
 #   }
 #
@@ -38,11 +40,11 @@
 #   are sorted by target string for determinism.
 # - Build targets are DERIVED from each release's sha256.sum (filenames
 #   `ocx-<target>.<ext>`), never hardcoded. A full release carries 8 targets
-#   (linux gnu+musl, darwin, windows × x86_64/aarch64).
+#   (linux gnu+musl, darwin, windows x x86_64/aarch64).
 # - `latest` is the newest stable release's {version,channel}; `latest_next` the
 #   newest prerelease's. Either is `null` when that channel has no release.
 # - Draft releases are skipped. Releases with no sha256.sum source are skipped
-#   (warned) — they are not binary releases.
+#   (warned) -- they are not binary releases.
 #
 # Clobber-safety (load-bearing): any sha256.sum FETCH failure (a present asset
 # URL that curl cannot retrieve, or a missing --checksums-dir file) -> exit 3,
@@ -53,7 +55,8 @@
 # default ocx-sh/ocx.
 #
 # Auth: sends `Authorization: Bearer $GITHUB_TOKEN` only when GITHUB_TOKEN is
-# non-empty (CI). Works unauthenticated otherwise (best-effort, may rate-limit).
+# non-empty (CI), on curl's stdin (-H @-) so it never shows in `ps`. Works
+# unauthenticated otherwise (best-effort, may rate-limit).
 #
 # Testing hatches (offline / deterministic):
 #   --releases-file <path>   read a raw GitHub-API releases JSON array from a
@@ -61,7 +64,8 @@
 #   --checksums-dir <dir>    read each release's checksums from
 #                            <dir>/<tag>/sha256.sum instead of fetching the asset.
 #
-# Exit codes: 0 success; 2 unknown argument; 3 network / API / parse / fetch.
+# Exit codes: 0 success; 2 unknown argument; 3 network / API / parse / fetch;
+# 129/130/143 HUP/INT/TERM.
 
 set -eu
 
@@ -78,7 +82,7 @@ Usage: gen-dist.sh [--repo <owner/repo>] [--releases-file <path>]
                    [--checksums-dir <dir>]
 
 Emit the distribution manifest (dist.json) to stdout, sourced from the OCX
-product repo's GitHub Releases API, with an inline sha256 per release × target.
+product repo's GitHub Releases API, with an inline sha256 per release x target.
 
 Options:
   --repo <owner/repo>      Source repo (default: $OCX_RELEASES_REPO or ocx-sh/ocx).
@@ -105,6 +109,11 @@ err() {
 
 warn() {
     printf 'gen-dist: %s\n' "$1" >&2
+}
+
+# A header file for `curl -H @-`: argv is world-readable, stdin is not.
+github_auth_header() {
+    [ -z "${GITHUB_TOKEN:-}" ] || printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN"
 }
 
 # --- argument parsing -------------------------------------------------------
@@ -170,10 +179,8 @@ else
         -H "Accept: application/vnd.github+json" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
         --user-agent "${USER_AGENT}"
-    if [ -n "${GITHUB_TOKEN:-}" ]; then
-        set -- "$@" -H "Authorization: Bearer ${GITHUB_TOKEN}"
-    fi
-    if API_JSON=$(curl "$@" "$API_URL" 2>&1); then
+    # shellcheck disable=SC2310 # github_auth_header is one printf, nothing for -e to abort on
+    if API_JSON=$(github_auth_header | curl "$@" -H @- "$API_URL" 2>&1); then
         :
     else
         rc=$?
@@ -188,8 +195,21 @@ fi
 # python parses the (nested) GitHub payload; we keep network in the shell. The
 # sha_url is the browser_download_url of the asset named exactly "sha256.sum"
 # (empty when absent).
+# Temp state goes on every exit path; HUP/INT/TERM end the run with 128+N. A
+# returning cleanup trap on EXIT INT TERM would let a cancelled run carry on.
+WORKDIR=
+cleanup() { [ -z "$WORKDIR" ] || rm -rf "$WORKDIR"; }
+on_exit() {
+    rc=$?
+    trap - EXIT
+    cleanup
+    exit "$rc"
+}
+trap on_exit EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 WORKDIR=$(mktemp -d)
-trap 'rm -rf "$WORKDIR"' EXIT INT TERM
 
 printf '%s' "$API_JSON" | python3 -c '
 import json, sys
@@ -244,21 +264,22 @@ while IFS="$TAB" read -r tag channel sha_url; do
     if [ -n "$CHECKSUMS_DIR" ]; then
         sha_path="$CHECKSUMS_DIR/$tag/sha256.sum"
         if [ ! -f "$sha_path" ]; then
-            warn "no checksums for $tag at $sha_path — skipping"
+            warn "no checksums for $tag at $sha_path -- skipping"
             continue
         fi
         cp "$sha_path" "$WORKDIR/$tag.sha" || err "failed to read $sha_path" 3
     else
         if [ -z "$sha_url" ]; then
-            warn "release $tag has no sha256.sum asset — skipping"
+            warn "release $tag has no sha256.sum asset -- skipping"
             continue
         fi
         # Fetch failure of a PRESENT asset -> exit 3, no partial manifest.
+        # shellcheck disable=SC2310 # fetch_sha is one curl, its status is the test
         fetch_sha "$sha_url" >"$WORKDIR/$tag.sha" ||
             err "failed to fetch sha256.sum for $tag from $sha_url" 3
     fi
     if [ ! -s "$WORKDIR/$tag.sha" ]; then
-        warn "empty sha256.sum for $tag — skipping"
+        warn "empty sha256.sum for $tag -- skipping"
         rm -f "$WORKDIR/$tag.sha"
         continue
     fi

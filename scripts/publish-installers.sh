@@ -2,12 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
-# publish-installers.sh — upload the five thin installers to setup.ocx.sh
+# Kind: CI (POSIX sh: runs on dash and busybox ash)
+# Exit: 0 ok, 1 missing input, 3 refused probe, curl's status on a failed upload
+
+# publish-installers.sh -- upload the five thin installers to setup.ocx.sh
 # (Bunny Edge Storage).
 #
 # STORED LAYOUT. Edge Storage is directory-backed, so a path can be a file or a
 # directory but never both: `sh` and `sh/next` cannot coexist. The friendly
-# per-shell URLs are therefore NOT stored — they are served by Edge Rules
+# per-shell URLs are therefore NOT stored -- they are served by Edge Rules
 # rewriting onto the layout below. See deploy/bunny/README.md.
 #
 #   archive/<VERSION>/install.{sh,ps1,nu,fish,elv}   pinned, immutable, append-only
@@ -35,7 +38,7 @@
 # Required env: VERSION (no leading v), BUNNY_STORAGE_ZONE, BUNNY_STORAGE_KEY
 #               (or BUNNY_STORAGE_KEY_FILE).
 # Optional env: BUNNY_STORAGE_HOST, OCX_SRC_DIR (publish from somewhere other
-#               than ./src — used to backfill a past tag), OCX_SKIP_DIST=1
+#               than ./src -- used to backfill a past tag), OCX_SKIP_DIST=1
 #               (skip the manifest refresh; backfilling history must not move
 #               the live dist.json), DRY_RUN=1, OCX_RELEASES_REPO, GITHUB_TOKEN.
 
@@ -49,9 +52,7 @@ REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SRC_DIR="${OCX_SRC_DIR:-$REPO_ROOT/src}"
 PUBLISH_DIST="$REPO_ROOT/scripts/publish-dist.sh"
 
-# bunny.sh is linted on its own via `git ls-files '*.sh'`; shellcheck cannot
-# resolve the runtime-computed $REPO_ROOT.
-# shellcheck source=scripts/lib/bunny.sh disable=SC1091
+# shellcheck source=lib/bunny.sh
 . "$REPO_ROOT/scripts/lib/bunny.sh"
 
 [ -f "$PUBLISH_DIST" ] || {
@@ -59,7 +60,7 @@ PUBLISH_DIST="$REPO_ROOT/scripts/publish-dist.sh"
     exit 1
 }
 
-# <shell-segment>:<filename>. The segment is the public URL word (/sh, /pwsh…);
+# <shell-segment>:<filename>. The segment is the public URL word (/sh, /pwsh...);
 # the filename is the canonical artifact name. Both are published.
 INSTALLERS="sh:install.sh pwsh:install.ps1 nu:install.nu fish:install.fish elvish:install.elv"
 
@@ -89,7 +90,7 @@ echo "publish-installers: VERSION=$VERSION CHANNEL=$CHANNEL ZONE=${BUNNY_STORAGE
 #                                       two channels; a stable promotion must not
 #                                       leave next/ serving an OLDER prerelease)
 # Edge case (out of order): patching an old stable line while a newer prerelease
-# is pending would pull next/ back — handle that by hand on the rare occasion.
+# is pending would pull next/ back -- handle that by hand on the rare occasion.
 if [ "$CHANNEL" = "next" ]; then
     POINTER_DIRS="next"
 else
@@ -104,7 +105,7 @@ for entry in $INSTALLERS; do
     f=${entry#*:}
     src="$SRC_DIR/$f"
 
-    # Pinned (immutable, append-only) — always, regardless of channel.
+    # Pinned (immutable, append-only) -- always, regardless of channel.
     echo "publish-installers: -> archive/${VERSION}/${f} (pinned)"
     bn_put_new "archive/${VERSION}/${f}" "$src"
 
@@ -124,11 +125,11 @@ done
 # inherited; OCX_RELEASES_REPO + GITHUB_TOKEN (when set) feed the generator. A
 # generator failure aborts the manifest upload (clobber-safety) without affecting
 # the installer transfers above. Skipped under DRY_RUN (it makes a live GitHub
-# API call + upload) — validate the manifest with `task dist`.
+# API call + upload) -- validate the manifest with `task dist`.
 if [ "$DRY_RUN" = "1" ]; then
-    echo "publish-installers: [dry-run] skipping dist.json refresh — run 'task dist' to validate the manifest"
+    echo "publish-installers: [dry-run] skipping dist.json refresh -- run 'task dist' to validate the manifest"
 elif [ "${OCX_SKIP_DIST:-0}" = "1" ]; then
-    echo "publish-installers: OCX_SKIP_DIST=1 — leaving dist.json untouched"
+    echo "publish-installers: OCX_SKIP_DIST=1 -- leaving dist.json untouched"
 else
     sh "$PUBLISH_DIST"
 fi

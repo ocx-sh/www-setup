@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
+# Kind: TEST. Dialect: bash 3.2 under bats; drives scripts/gen-dist.sh through its offline hatches.
 #
 # Coverage for scripts/gen-dist.sh (the dist.json manifest generator).
 #
@@ -70,6 +71,7 @@ run_gen() {
     # --separate-stderr so $output is the manifest only (the generator logs
     # "skipping" warnings to stderr, which would otherwise corrupt $output).
     run --separate-stderr "$SCRIPT" --releases-file "$RELEASES" --checksums-dir "$CKS"
+    [ "$status" -eq 0 ]
 }
 
 @test "emits valid JSON" {
@@ -157,7 +159,7 @@ PY
 @test "draft release and no-asset release are skipped" {
     run_gen
     [ "$status" -eq 0 ]
-    [[ "$output" != *"0.11.0"* ]]
+    [[ "$output" != *"0.11.0"* ]] || false
     run python3 - "$output" <<'PY'
 import json, sys
 d = json.loads(sys.argv[1])
