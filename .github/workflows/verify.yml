@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   # Classify the change so each shell's lint gate runs only when its installer
   # (or a shared path) changed. Single source of truth: _changes.yml.
@@ -25,6 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
         with:
           groups: default
@@ -39,17 +45,68 @@ jobs:
   # to the group(s) its gate actually names, so it does not download the whole
   # toolchain (pwsh alone is ~140 MB, in [group.linux]).
   # ---------------------------------------------------------------------------
+  # scripts/shell-gate.sh parses every shell family the repo holds (nu, fish,
+  # elvish too) and lints the bats suites, so it runs on every change; it is cheap.
   shell:
     name: shellcheck + shfmt
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.sh == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+        with:
+          groups: default,unix
+      - run: task shell:verify
+
+  # Workflow and Taskfile checks (ci-steps, ci-taint, ci-orand, ci-task-pipefail,
+  # ci-extract-lint, job and pwsh run lint). They read top-level workflow files and
+  # Taskfiles only, so every change runs them.
+  ci-checks:
+    name: workflow + Taskfile checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
         with:
           groups: default
-      - run: task shell:verify
+      - run: task ci:verify
+
+  # Workflow security audit (SH-CI-21): zizmor, regular persona, medium floor. Online here
+  # (GH_TOKEN) so the audits that query GitHub run; `task ci:zizmor` is the offline twin.
+  zizmor:
+    name: zizmor workflow audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Audit workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pipx run zizmor==1.30.1 --min-severity medium --config zizmor.yml .github/workflows
+
+  # A change must not turn a check green by weakening it (a reasonless shellcheck
+  # disable, a severity floor, a true-fallback, set +e). It compares the pull
+  # request with its base, so it has no meaning on a push to main. A finding
+  # passes only when a commit body carries a Weaken-Ok line with its reason.
+  core-weaken:
+    name: no weakened checks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Print every added line that weakens a check
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git add -N .
+          sh scripts/core-weaken-ack.sh "origin/$BASE_REF"
 
   pwsh:
     name: PSScriptAnalyzer
@@ -58,61 +115,77 @@ jobs:
     if: needs.changes.outputs.ps1 == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
         with:
           groups: default,linux
       - run: task pwsh:verify
+      - run: task test:pester:lint
 
   nu:
-    name: nu --ide-check
+    name: nu-gate (locked nu, floor and ceiling)
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.nu == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
         with:
-          groups: default
+          groups: default,nurange
       - run: task nu:verify
 
   fish:
-    name: fish -n
+    name: fish -n + scan + fish_indent
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.fish == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
         with:
           groups: default,unix
       - run: task fish:verify
 
   elvish:
-    name: elvish -compileonly
+    name: elvish-gate
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.elvish == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
         with:
           groups: default
       - run: task elvish:verify
 
+  # actionlint runs from ocx.toml beside ShellCheck so the workflow shell is linted
+  # with the repo profile; without ShellCheck on PATH actionlint skips shell silently.
   actionlint:
     name: actionlint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8 # v2.1.2
         with:
-          version: 1.7.12
+          persist-credentials: false
+      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+        with:
+          groups: default
+      - run: task meta:actionlint
 
   markdownlint:
     name: markdownlint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
         with:
           globs: |
@@ -127,11 +200,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0
         with:
           # CHANGELOG.md is git-cliff-generated at release time; it does not
           # exist pre-release, so it is not scanned yet.
-          args: --cache --no-progress README.md .claude/rules/
+          args: --cache --no-progress --exclude-path .claude/rules/code-docs/ --exclude-path .claude/rules/docs-quality/ --exclude-path .claude/rules/powershell-quality/ --exclude-path .claude/rules/shell-quality/ README.md .claude/rules/
           fail: true
 
   license-headers:
@@ -139,7 +214,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: korandoru/hawkeye@v6
+        with:
+          persist-credentials: false
+      - uses: korandoru/hawkeye@7ffde2c5fd29f3c486e4a6510436dca54f386e2a # v6.5.0
         with:
           config: .licenserc.toml
 
@@ -151,7 +228,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: cocogitto/cocogitto-action@v4.2.0
+          persist-credentials: false
+      - uses: cocogitto/cocogitto-action@52d0023b4396897f1815648e553db2ab8d782f3a # v4.2.0
         with:
           command: check
 
@@ -160,6 +238,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # The pull zone's edge rules ARE the routing contract — the friendly
       # per-shell URLs are not stored objects. `plan` renders the full rule set
       # offline (no credentials, no network), so a change to the routing shows

@@ -2,8 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
+# Kind: CI (POSIX sh: runs on dash and busybox ash, no bash needed)
+# Exit: 0 ok, 3 download, 4 checksum, 5 extract, 7 arch, 129/130/143 HUP/INT/TERM
+
 # Bootstrap the OCX package manager itself inside a clean distro container, so
-# downstream steps can provision the project toolchain (nu/fish/elvish/pwsh, …)
+# downstream steps can provision the project toolchain (nu/fish/elvish/pwsh, ...)
 # straight from ocx.toml via `ocx run` / `ocx pull`.
 #
 # This is the container analogue of the `ocx-sh/setup-ocx` GitHub Action: the
@@ -37,7 +40,7 @@ esac
 
 LIBC="gnu"
 if [ -r /etc/os-release ]; then
-    # shellcheck disable=SC1091
+    # shellcheck disable=SC1091 # /etc/os-release exists only on the target distro
     _id=$(. /etc/os-release 2>/dev/null && printf '%s' "${ID:-}")
     [ "$_id" = "alpine" ] && LIBC="musl"
 fi
@@ -61,15 +64,28 @@ fetch() {
     fi
 }
 
+# Temp state goes on every exit path; HUP/INT/TERM end the run with 128+N. A
+# returning cleanup trap on EXIT INT TERM would let a cancelled run carry on.
+TMP=
+cleanup() { [ -z "$TMP" ] || rm -rf "$TMP"; }
+on_exit() {
+    rc=$?
+    trap - EXIT
+    cleanup
+    exit "$rc"
+}
+trap on_exit EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 TMP=$(mktemp -d)
-# shellcheck disable=SC2064
-trap "rm -rf '$TMP'" EXIT INT TERM
 
 log "fetching ocx ${OCX_VERSION} (${TARGET})"
 # Archive format: 0.4.3+ ship .tar.gz; <= 0.4.2 shipped .tar.xz. Try gz, fall back to xz.
 EXT=""
 for _ext in tar.gz tar.xz; do
     _name="ocx-${TARGET}.${_ext}"
+    # shellcheck disable=SC2310 # fetch is a single curl or wget, its status is the test
     if fetch "${BASE}/${_name}" "${TMP}/${_name}"; then
         NAME="$_name"
         EXT="$_ext"
@@ -77,6 +93,7 @@ for _ext in tar.gz tar.xz; do
     fi
 done
 [ -n "$EXT" ] || die "download failed: ${BASE}/ocx-${TARGET}.tar.{gz,xz}" 3
+# shellcheck disable=SC2310 # fetch is a single curl or wget, its status is the test
 fetch "${BASE}/${NAME}.sha256" "${TMP}/${NAME}.sha256" || die "checksum download failed" 3
 
 # --- Verify against the published per-file sha256 ---

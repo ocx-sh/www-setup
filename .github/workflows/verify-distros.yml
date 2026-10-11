@@ -21,6 +21,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: verify-distros-${{ github.ref }}
   cancel-in-progress: true
@@ -44,15 +48,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
+          persist-credentials: false
 
+      # bats-ci.sh asserts the pinned bats and runs the census. The container is a root-owned
+      # bind mount, so git needs the directory marked safe before the census can list files.
+      # None of these distro images carries GNU wget, and Alpine has no GNU timeout either.
       - name: Bootstrap ocx.toml + run bats in ${{ matrix.distro }}
+        env:
+          DISTRO: ${{ matrix.distro }}
+          IMAGE: ${{ matrix.image }}
         run: |
           docker run --rm \
             --volume "$PWD:/work" \
             --workdir /work \
-            "${{ matrix.image }}" \
+            --env DISTRO \
+            --env OCX_TEST_REQUIRE_SHELLS=1 \
+            --env 'CENSUS_SKIP_OK=GNU wget not installed|timeout[(]1[)] not available' \
+            "$IMAGE" \
             sh -euc '
-              sh tests/ci/setup-distro.sh "${{ matrix.distro }}"
+              sh tests/ci/setup-distro.sh "$DISTRO"
               sh tests/ci/install-ocx.sh >/dev/null
-              ocx run -g all nushell fish elvish -- external/bats-core/bin/bats -r tests/install/
+              git config --global --add safe.directory /work
+              ocx run -g all nushell fish elvish -- bash scripts/bats-ci.sh
             '

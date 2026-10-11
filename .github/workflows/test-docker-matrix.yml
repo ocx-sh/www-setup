@@ -16,6 +16,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: docker-matrix-${{ github.ref }}
   cancel-in-progress: true
@@ -27,7 +31,7 @@ jobs:
   # installer detects the platform, takes the test hatch, places the binary at the
   # canonical bin dir, and honors print-path — across alpine/fedora/ubuntu ×
   # amd64/arm64 (linux arm64 via QEMU). pwsh is provisioned per-distro by
-  # install-shells.sh (Alpine via the gcompat glibc shim; both x64/arm64).
+  # install-shells.sh (Alpine: the musl build, amd64 only; see the exclude below).
   matrix:
     name: ${{ matrix.installer }} / ${{ matrix.distro }} / ${{ matrix.platform }}
     if: github.actor != 'dependabot[bot]'
@@ -50,6 +54,8 @@ jobs:
             platform: linux/arm64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
@@ -65,6 +71,28 @@ jobs:
           OCX_TEST_BINARY: ${{ runner.temp }}/ocx-stub
         run: |
           tests/docker/run.sh "${{ matrix.distro }}" "${{ matrix.platform }}" latest "" "${{ matrix.installer }}"
+
+  # curl-less Alpine: install.sh must fall back to BusyBox wget, whose option set is a
+  # fraction of GNU wget's. smoke.sh deletes curl in the container and the installer
+  # downloads the real release (the injected stub would skip the download and prove
+  # nothing), so this leg needs the network and rides the nightly tick.
+  busybox-wget:
+    name: sh / alpine / curl absent (BusyBox wget, real release)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Run smoke with curl removed
+        env:
+          OCX_TEST_NO_CURL: '1'
+        run: tests/docker/run.sh alpine linux/amd64 latest "" sh
 
   # ---------------------------------------------------------------------------
   # SHELL-axis activation matrix (REAL binary required).
@@ -94,6 +122,8 @@ jobs:
         platform: [linux/amd64, linux/arm64]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
