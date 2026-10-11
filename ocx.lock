@@ -1,9 +1,9 @@
 [metadata]
 lock_version = 3
 declaration_hash_version = 1
-declaration_hash = "sha256:4e06c99fb61d96bb1250bca721274ab0e6648547b9e129c0d459aaf4e0ab4e2f"
-generated_by = "ocx 0.5.0"
-generated_at = "2026-08-05T19:12:41Z"
+declaration_hash = "sha256:006be8fd04809a42f33d32a22d4a6ca90f8c2496656094c87f055a6cb5bbbfa3"
+generated_by = "ocx 0.6.5"
+generated_at = "2026-10-11T17:38:55Z"
 
 [[tool]]
 name = "actionlint"
@@ -36,12 +36,12 @@ group = "default"
 repository = "ocx.sh/git-cliff/git-cliff"
 
 [tool.platforms]
-"darwin/amd64" = "sha256:895c57b54ef4fa802287dfdf03194f4b4c21c4436c8387481beade38804962e4"
-"darwin/arm64" = "sha256:8cd8c0991f764ca3ef6ffae87e2108af9ce93b6e05a8fcca92c5f05e0be660ab"
-"linux/amd64" = "sha256:01c961c1bbaefdfb3aea7b3951e1350240ba6a6d2dd508bc3a822f8a00eaf9ef"
-"linux/arm64" = "sha256:b2e8bb993af7988798760e2a4d8d19a7004285440cab4b42cea9bf5b8abb0479"
-"windows/amd64" = "sha256:201c71efad91d1f0f1de48f50f5baafca7c46c15d20395dfb0de37c1e45fac2a"
-"windows/arm64" = "sha256:0f6e2d81d4f812991293b5b1e645eedbf7e3b0a7086b10a18d51d7f6dd055389"
+"darwin/amd64" = "sha256:a00b3362112420302cc991973b09f3bea506f774ebf56395c63701540b0e1ad7"
+"darwin/arm64" = "sha256:0d1c7c08e229abd1291a10f4f12ac0a89a4de384252911280d2666b3fb25aa11"
+"linux/amd64" = "sha256:361c6e4b9f04a141283b54c7ff6bd9e78c7e2b84fa886b1d7e90ef0c1e5b6006"
+"linux/arm64" = "sha256:0ef5b24785e0c82e9e71b6695908c74c0d80b3273080ba10efdd8c416f23cbe4"
+"windows/amd64" = "sha256:a60055c818e4dc5856f76d5e3419bbbf4cba33f25ba9b70a6f3f81bacb5f5b43"
+"windows/arm64" = "sha256:2a6cd5be4e38a61f1295871321487f1e2e2fd4d9f3dea2368898625f7a5b1f9a"
 
 [[tool]]
 name = "hawkeye"
@@ -73,12 +73,12 @@ group = "default"
 repository = "ocx.sh/nushell/nushell"
 
 [tool.platforms]
-"darwin/amd64" = "sha256:1c6ef621f4ff6d3101e7f4d0ba2ee74785709b314a77f5ee96a7fce25a4dba97"
-"darwin/arm64" = "sha256:b1dda699bd01a332c5c7a7301f1a35e7afa11146d154a24faf161b29259f51f2"
-"linux/amd64" = "sha256:76cdf95ea1f1e3f964494f20c5e0c7a2833c8489f7498cedb037acc14e9c2cfc"
-"linux/arm64" = "sha256:655700fdbce0776be266455bdacec58af5d6c861416455655f2c32d7301d4d0b"
-"windows/amd64" = "sha256:9c3c6e8f7d1f6131a07274db8f56a698d666f8407846438995afdbcc79b01b59"
-"windows/arm64" = "sha256:e17b030a25ccc2205a4bebd7628edaee8c1dcbef28ce5dc080b325281a732716"
+"darwin/amd64" = "sha256:8223dff798942622a3e4fcdbf77210ae111801352aa1f64f3f5e311d9c4794d8"
+"darwin/arm64" = "sha256:cc31f6bf514db6f35d41f29267e01f7244c99644fd971a5214c723d62917af5f"
+"linux/amd64" = "sha256:3aef31e26d9401c2b97b6c91499ead3fde88710ef377a99f4d401615439b9f83"
+"linux/arm64" = "sha256:0ae206cfac0d68e8ccf4f26c4620cbe2f0125601db20a6d9b1c237a1cd2e0203"
+"windows/amd64" = "sha256:87bd5c497cba6c744c88673ecf6581066874e3496c8060247396c2873a815164"
+"windows/arm64" = "sha256:a81c6b17fb2b7dd5fbfe9d6d90784eff80abad66a15c798697500235f80b97e3"
 
 [[tool]]
 name = "shellcheck"
@@ -110,12 +110,12 @@ group = "default"
 repository = "ocx.sh/go-task/task"
 
 [tool.platforms]
-"darwin/amd64" = "sha256:ca9eadfd812b047330bb6b0bb5335350c9d247322fbf6585b6e48b21800b8993"
-"darwin/arm64" = "sha256:5ed31fcedb9c419f547ff16c14dddd594778e57ee9deaba3445ccdb37d79b906"
-"linux/amd64" = "sha256:e47cb22869b6af06ec405a553c4258c2f3d122b1b15c510ea78c9a7edee758aa"
-"linux/arm64" = "sha256:0a2165fdaae5f0a9ecb7513115db95d8982a19a945345d1bec59192884d38a02"
-"windows/amd64" = "sha256:0e8ec12f2485964e32265998cca011a9815be1418e411e68b46fe605fc988e59"
-"windows/arm64" = "sha256:685070855f52a4cc145f9e89ac43204bf830f7f1ec2a0f72f0229d40c5cd2dcf"
+"darwin/amd64" = "sha256:958d2f88bec42ed62b3ab8e0435bffe5cecdfdad43055c3a8e7ec376564c4886"
+"darwin/arm64" = "sha256:5e4da091444fa604c41b9fb44b956fcdcc37a5f94b8a52c8240a8c3b0c1d7597"
+"linux/amd64" = "sha256:df420d1c99d7e80ce6366104af4e6b57135e95940763e235c907525c438effee"
+"linux/arm64" = "sha256:f5440402699c1f53b2941aa6e26049747c56a10ba730ba9692ffeaea6f429454"
+"windows/amd64" = "sha256:ac4b71cb82926c9e282074ab218e75989efe243836c761a2f4974dd31d34d94c"
+"windows/arm64" = "sha256:4a29127f29db746ab7c1d3991e4b35caa61c0f6687cc4aa2914c6fbb63a7f527"
 
 [[tool]]
 name = "pwsh"
@@ -123,8 +123,38 @@ group = "linux"
 repository = "ocx.sh/powershell/powershell"
 
 [tool.platforms]
-"linux/amd64+libc.glibc" = "sha256:cb3af5c8af8376b9b55d68187335de8f972f52ea99dc12d45ebff087c2b1f2ec"
-"linux/arm64+libc.glibc" = "sha256:592b8c9fed666af736e1b9be0d308a6fbbd28e8f1ab5b747405373b14a357cae"
+"darwin/amd64" = "sha256:d85e8a85785267573a741b458b3db741a5fa76a612fef0cda0c16f53de08539c"
+"darwin/arm64" = "sha256:77f609a3cde2c353e508505fa619ad43b37a299b285b07c314601f5e48c05b9b"
+"linux/amd64+libc.glibc" = "sha256:9fb72b24f5f1dcb173aca4d682478b15320b1fb2c0276cfaf66f1e2ee934652d"
+"linux/arm64+libc.glibc" = "sha256:57da2cbc1ae239e04177c5dc7415ba697278ff6b2b1a21b8a8d56d8ae9dd9356"
+"windows/amd64" = "sha256:fb4de8898980346fd352c4895ad0b91e4d7cf023d46e23cf84e1d59266751b5f"
+"windows/arm64" = "sha256:48cc26430d8a2ab4045486ffd5919eb057b2d2007d094a1fab1bfc57a1f7ae85"
+
+[[tool]]
+name = "nushell-ceiling"
+group = "nurange"
+repository = "ocx.sh/nushell/nushell"
+
+[tool.platforms]
+"darwin/amd64" = "sha256:d72682558ab0fbe95566e321ab672d02cc97bce45b8bd451bb1ae3a0248fd474"
+"darwin/arm64" = "sha256:faf61c7834ba6501a4d06719aaedaa52d21cbf2de2c9f796a4ac09e1dca67f0d"
+"linux/amd64" = "sha256:1e75372182680dd8091697eec84df0c42c23c04aca89b463516ea187ae07b762"
+"linux/arm64" = "sha256:bc40ea35bc031cf7db9b93fc333e1e483ad10426cfdfe5f9a6e023344483c592"
+"windows/amd64" = "sha256:3db9258cd883ab53dc3b85ac2465ea5aab34acc085451f0d05696193485d6468"
+"windows/arm64" = "sha256:1a83449e5ab5283d38db4646d255a9a9fafd951f76a7696f6560d021bc1b1c18"
+
+[[tool]]
+name = "nushell-floor"
+group = "nurange"
+repository = "ocx.sh/nushell/nushell"
+
+[tool.platforms]
+"darwin/amd64" = "sha256:e80edbec29865e95acaf45e59b0e28be27cbc205464f426a6ddaf553f3b629b9"
+"darwin/arm64" = "sha256:ec8efd352101df34b4472cadd3f372477cb5dc3e69766fe5d04e4c40d9862548"
+"linux/amd64" = "sha256:0fbbf6d319df2911edcce5ef5d767b8ef1c91d59d9ca56e163c3f0af80cb212a"
+"linux/arm64" = "sha256:3742f4db6e6e6eb606e6a792da99f390149b826e68e0bef090862655589edd5b"
+"windows/amd64" = "sha256:ac02b7e83a246f1cb4f6294a401d1df3b9b03bb606ac8e83fdcee541527c7c3d"
+"windows/arm64" = "sha256:e682665902f7e59cac3b950f5a563b4a4b029df9d11848488cb870035606efd5"
 
 [[tool]]
 name = "fish"
@@ -132,7 +162,7 @@ group = "unix"
 repository = "ocx.sh/fish-shell/fish"
 
 [tool.platforms]
-"darwin/amd64" = "sha256:a9e4a65e6e941fea93484861f79c2dd91c7e29f68b3c12d6213e3cb7134634c5"
-"darwin/arm64" = "sha256:a9e4a65e6e941fea93484861f79c2dd91c7e29f68b3c12d6213e3cb7134634c5"
-"linux/amd64" = "sha256:a7e1d93e967acf9f9cc8572ed9171cc5c4e0cf74cda27defbb8d00c7208473b3"
-"linux/arm64" = "sha256:24bc1d4725447f7888023cc6cd1da3a6aa0328face6d9f3061ba85e3c33f07d9"
+"darwin/amd64" = "sha256:0647d9c5e3389db6141e148618dc01032956ead778ad518ed4b221882ec6d53b"
+"darwin/arm64" = "sha256:0647d9c5e3389db6141e148618dc01032956ead778ad518ed4b221882ec6d53b"
+"linux/amd64" = "sha256:905751e4f2ad2d249dfe6f1c101414dbd99c61f201d94d2b085522bc5214ba20"
+"linux/arm64" = "sha256:3a0fa53b4968da4c4294f3ab505ae6943aff3550f40a68dabeb1dfadff741d04"
