@@ -14,3 +14,10 @@ target/
 .serena/
 .claude/artifacts/
 .claude/state/subagents.jsonl
+
+# site/ build output
+site/dist/
+site/.astro/
+site/.docs-check/
+site/public/casts/
+__pycache__/

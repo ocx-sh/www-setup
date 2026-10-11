@@ -36,3 +36,15 @@ pwsh = "ocx.sh/powershell/powershell:latest"
 [group.nurange.tools]
 nushell-floor = "ocx.sh/nushell/nushell:0.105.1"
 nushell-ceiling = "ocx.sh/nushell/nushell:0.116.1"
+
+# The Starlight site under site/ (the /install/ section of ocx.sh): node and pnpm build it, uv runs
+# the docs-quality checks' python. A separate group keeps the installer CI pulls (default[,unix|linux|
+# nurange]) from fetching them; only the site workflow and `task site:*` ask for it.
+[group.site.tools]
+node = "ocx.sh/nodejs/node:24"
+pnpm = "ocx.sh/pnpm/pnpm:11"
+uv = "ocx.sh/astral-sh/uv:0"
+
+# Records the site's docs casts (task site:casts); no Windows build, so it stays out of the default group.
+[group.casts.tools]
+asciinema = "ocx.sh/asciinema/asciinema:3.2"

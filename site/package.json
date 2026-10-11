@@ -1,0 +1,20 @@
+{
+  "name": "setup-ocx-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev --host",
+    "build": "astro build",
+    "test": "node --test \"scripts/*.test.mjs\"",
+    "check": "node scripts/check-anchors.mjs && node scripts/check-fences.mjs && node scripts/docs-gate.mjs && ocx-site check --dist dist"
+  },
+  "dependencies": {
+    "@astrojs/markdown-satteri": "0.4.3",
+    "@astrojs/starlight": "0.42.4",
+    "@ocx-sh/theme": "github:ocx-sh/website#f3814ad4c5a3f95c886b8f9657e14889001b79d9&path:/packages/theme",
+    "astro": "7.3.5"
+  },
+  "devDependencies": {
+    "markdownlint-cli2": "0.18.1"
+  }
+}
