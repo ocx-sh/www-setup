@@ -12,6 +12,7 @@ includes:
   fish: ./taskfiles/fish.taskfile.yml
   elvish: ./taskfiles/elvish.taskfile.yml
   test: ./taskfiles/test.taskfile.yml
+  site: ./taskfiles/site.taskfile.yml
   docker: ./taskfiles/docker.taskfile.yml
   release: ./taskfiles/release.taskfile.yml
   meta: ./taskfiles/meta.taskfile.yml
@@ -57,7 +58,7 @@ tasks:
     summary: |
       Phase 1 (parallel): shell:verify, pwsh:verify, nu/fish/elvish:verify, meta:verify,
         ci:verify, ci:zizmor, test:pester:lint
-      Phase 2 (sequential): test:bats, test:pester
+      Phase 2 (sequential): test:bats, test:pester, site:test
     cmds:
       - task: .verify:lint
       - task: .verify:tests
@@ -90,6 +91,7 @@ tasks:
     cmds:
       - task: test:bats
       - task: test:pester
+      - task: site:test
 
   publish:dry-run:
     desc: Validate publish-installers.sh STABLE archive/+latest/+next Bunny keys, offline (no upload, no credentials; run 'task dist' for the manifest).

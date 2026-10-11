@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: '3'
+
+# The /install/ section of ocx.sh. Node, pnpm and uv come from ocx.toml [group.site.tools].
+vars:
+  SITE: 'ocx exec -g site --'
+
+tasks:
+  install:
+    desc: Install the site dependencies from the lockfile.
+    dir: site
+    cmd: '{{.SITE}} pnpm install --frozen-lockfile'
+
+  dev:
+    desc: Run the Astro dev server for the /install/ section.
+    dir: site
+    deps: [install]
+    cmd: '{{.SITE}} pnpm dev'
+
+  build:
+    desc: Build the site into site/dist.
+    dir: site
+    deps: [install]
+    cmd: '{{.SITE}} pnpm build'
+
+  test:
+    desc: Run the site unit tests and the installer-contract drift guard (no build needed).
+    dir: site
+    deps: [install]
+    cmd: '{{.SITE}} pnpm test'
+
+  check:
+    desc: Build, run the tests, then the anchor, fence, docs-quality and ocx-site checks.
+    dir: site
+    deps: [build]
+    cmds:
+      - '{{.SITE}} pnpm test'
+      - '{{.SITE}} pnpm check'
+
+  casts:
+    desc: Record the terminal casts (pending, no recorder is wired yet; casts/README.md lists the keys).
+    cmds:
+      - echo "site:casts is a stub; see site/casts/README.md" >&2
