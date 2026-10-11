@@ -1,0 +1,18 @@
+---
+// One recorded terminal cast, `/casts/<name>.cast`, or nothing while that file does not exist. `task site:casts`
+// writes the casts (gitignored, regenerated, DOC-EX-13); until a cast is recorded the slot renders no player
+// rather than a broken one, and never a hand-typed stand-in (DOC-EX-12).
+import { existsSync } from 'node:fs';
+import Terminal from '@ocx-sh/theme/components/Terminal.astro';
+
+interface Props {
+  /** Cast key, `<group>/<slug>`: the script `casts/<group>__<slug>.sh` records `public/casts/<group>/<slug>.cast`. */
+  name: string;
+  title: string;
+}
+
+const { name, title } = Astro.props;
+const recorded = existsSync(new URL(`../../public/casts/${name}.cast`, import.meta.url));
+---
+
+{recorded && <Terminal src={`/casts/${name}.cast`} title={title} />}
