@@ -6,7 +6,7 @@
 # title: Install OCX without ocx self setup
 # description: Place the ocx binary with OCX_INSTALL_NO_SETUP and print its directory; the installer comes from the archive, as it would be copied to a host.
 
-# Environment: see site/scripts/run-cast-script.sh; the script runs in a fresh container as the user runner.
+# Environment: see site/scripts/run-cast-script.sh; the script runs in a fresh container as the user runner, with the tree's installers behind setup.ocx.sh (site/casts/shim/curl).
 # The cast region is what the page shows; setup and verification run silently.
 set -euo pipefail
 

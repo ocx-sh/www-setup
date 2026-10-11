@@ -32,15 +32,15 @@ export const scriptName = (doc) => `${doc.replace(/\//g, '__')}.sh`;
  * Driver: the script text before the cast region runs silently, the region is typed and run block by block
  * (blank lines split it into commands), the text after it runs silently. Silent output goes to
  * $CAST_TMP/silent.log, which the recorder prints when the recording fails. Brace groups, not fd copies, so
- * a background process started by setup cannot hold the terminal open. `# eval: nu -c` runs each block through
- * that command (a Nushell one-liner is not bash); the default is `eval` in the driver's own bash.
+ * a background process started by setup cannot hold the terminal open. `# eval: pwsh -Command` runs each block through
+ * that command (a PowerShell one-liner is not bash; an eval holding `$b` places the block itself); the default is `eval` in the driver's own bash.
  */
 export function driver({ text, cast, meta = {} }) {
   const blocks = cast.body.trimEnd().split(/\n\s*\n/);
   const typed = blocks
     .map((b, i) => `__block <<'__CAST_EOF_${i}__'\n${b}\n__CAST_EOF_${i}__`)
     .join('\n');
-  const run = meta.eval ? `${meta.eval} "$b"` : 'eval "$b"';
+  const run = !meta.eval ? 'eval "$b"' : meta.eval.includes('$b') ? meta.eval : `${meta.eval} "$b"`;
   return `#!/usr/bin/env bash
 set -euo pipefail
 __block() {

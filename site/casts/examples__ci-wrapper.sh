@@ -6,7 +6,7 @@
 # title: Capture the OCX bin directory in a CI job
 # description: Capture the bin directory printed by the pinned POSIX installer, check the binary and put it on the path.
 
-# Environment: see site/scripts/run-cast-script.sh; the script runs in a fresh container as the user runner.
+# Environment: see site/scripts/run-cast-script.sh; the script runs in a fresh container as the user runner, with the tree's installers behind setup.ocx.sh (site/casts/shim/curl).
 # The cast region is what the page shows; setup and verification run silently.
 set -euo pipefail
 

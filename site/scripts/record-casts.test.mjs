@@ -33,6 +33,7 @@ test('driver types every block and runs the text around the region silently, int
   assert.match(plain, /\{\ntest 1\n\n\} >>"\$CAST_TMP\/silent.log" 2>&1\n$/);
   assert.match(plain, /^ {2}eval "\$b"; sleep 1$/m);
   assert.match(driver(parseScript(script)), /^ {2}pwsh -c "\$b"; sleep 1$/m);
+  assert.match(driver({ ...parseScript(script), meta: { eval: 'pwsh -c "f; $b"' } }), /^ {2}pwsh -c "f; \$b"; sleep 1$/m);
 });
 
 test('sanitize merges bursts, rewrites paths, shortens temp names and timings, keeps typing events', () => {

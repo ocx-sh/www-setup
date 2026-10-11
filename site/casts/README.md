@@ -19,7 +19,14 @@ then run `task site:test`, whose `session-casts.test.mjs` fails when a page sess
 
 ## How a cast is recorded
 
-Every cast is a real run against the published `setup.ocx.sh`, so recording needs network and docker.
+Every cast is a real run, so recording needs network and docker. The installer it runs is the one in this tree, not the
+last release: the site deploys on the same `v*` tag that publishes the installers, so the casts must show what that tag ships.
+The container mounts the repository read-only at `/cast/tree`, and `casts/shim/curl` (first on `PATH`) serves
+`src/install.<ext>` for the installer URLs (`https://setup.ocx.sh/<shell>`, a pinned `/<shell>/<VERSION>` and
+`archive/<VERSION>/install.<ext>`); PowerShell gets the same through an `irm` function in the `# eval` line.
+The typed command line stays the documented `curl ... https://setup.ocx.sh/<shell> | ...`. `dist.json`, the archive and
+the `ocx` binary still come live from `setup.ocx.sh` and GitHub. A pinned URL is served from the tree too, so bump the
+pinned version on the pages and re-record when a release changes it. The Dockerfile cast builds from the live pinned URL.
 The recorder builds `casts/Dockerfile` (Ubuntu with every installer's shell, from `tests/docker/install-shells.sh`, and a
 user `runner`), then runs each script's driver in a fresh container under `asciinema rec` (`scripts/run-cast-script.sh`).
 Only the typed command line is simulated. `examples/dockerfile` is the exception: it drives docker itself, so
@@ -29,7 +36,7 @@ Only the typed command line is simulated. `examples/dockerfile` is the exception
 - Headers (`# cast`, `# doc`, `# title`, `# description`, optional `# runner` and `# eval`) come first, then a blank line.
   `# eval: pwsh -NoProfile -Command` runs each typed block through that command instead of bash.
 - The recorder sanitises the cast (random temp names, timings, the recording machine's home) and fails when a host path is left.
-- The air-gapped run uses `setup.ocx.sh` itself, not a corporate mirror; the page's mirror variables are prose.
+- The air-gapped run uses the default `setup.ocx.sh` endpoints, not a corporate mirror; the page's mirror variables are prose.
 
 Run one script by hand: `docker build -f site/casts/Dockerfile -t ocx-casts . && docker run --rm -it -v "$PWD/site/casts:/c:ro" ocx-casts bash /c/examples__dev-box-sh.sh`
 (the headers and region markers are comments, so a script also runs as plain bash).

@@ -6,7 +6,7 @@
 # title: Install OCX in fish
 # description: Run the fish installer from setup.ocx.sh by piping it to fish.
 
-# Environment: see site/scripts/run-cast-script.sh; the script runs in a fresh container as the user runner.
+# Environment: see site/scripts/run-cast-script.sh; the script runs in a fresh container as the user runner, with the tree's installers behind setup.ocx.sh (site/casts/shim/curl).
 # The cast region is what the page shows; setup and verification run silently.
 set -euo pipefail
 

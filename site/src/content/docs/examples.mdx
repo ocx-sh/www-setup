@@ -83,9 +83,9 @@ Run the installer again with a new version to update it.
 ## Install in a generic CI job {#ci-wrapper}
 
 For a CI system with no maintained integration, call the installer in the job and put the bin directory on the path.
-With `OCX_INSTALL_PRINT_PATH` set, the last line of stdout is the bin directory, so `tail -n1` captures it.
-`ocx self setup` prints its result table on stdout before that line, and its progress on stderr.
-The recording shows the progress. The session below leaves it out.
+Stdout carries only the bin directory when `OCX_INSTALL_PRINT_PATH` is set, so `tail -n1` captures it.
+The progress of `ocx self setup` goes to stderr.
+The recording shows it. The session below leaves it out.
 
 A pipeline in a POSIX shell reports the status of its last command, so check that the binary exists.
 Without the check, a failed download leaves `BIN_DIR` empty and the job continues.
