@@ -84,7 +84,8 @@ jobs:
     name: Deploy
     needs: [build, lighthouse]
     # Off until the ocx.sh environment and the BUNNY_DEPLOY variable exist on this repo.
-    if: vars.BUNNY_DEPLOY == 'true' && github.event_name != 'pull_request'
+    # A tag only: a dispatch from a branch builds and checks but never deploys.
+    if: vars.BUNNY_DEPLOY == 'true' && github.event_name != 'pull_request' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     runs-on: ubuntu-latest
     # The ocx.sh environment holds a BUNNY_STORAGE_KEY scoped to the ocx.sh storage zone. The
     # setup.ocx.sh environment holds a secret of the same name for another zone; the two never meet.
