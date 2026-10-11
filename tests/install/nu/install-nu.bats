@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # Per-shell suite for src/install.nu against the shared HTTPS fixture.
-# Skips when nu is not installed (CI runs it in docker; nushell 0.101.0 pinned).
-# Nushell is env-driven (no positional args over `curl | nu`): version pinning
+# Needs nu on PATH (server_require_shell skips locally, fails when CI sets
+# OCX_TEST_REQUIRE_SHELLS). Declared range: nu 0.105.1..0.116.1.
+# Nushell is env-driven (no positional args over a pipe): version pinning
 # uses OCX_INSTALL_VERSION.
 
 bats_require_minimum_version 1.5.0
@@ -27,7 +28,10 @@ teardown_file() {
 }
 
 setup() {
-    command -v nu >/dev/null 2>&1 || skip "nu not installed"
+    server_require_shell nu
+    # A private TMPDIR makes "the installer left nothing behind" assertable.
+    export TMPDIR="${BATS_TEST_TMPDIR}/tmp"
+    mkdir -p "$TMPDIR"
     export OCX_HOME="${BATS_TEST_TMPDIR}/.ocx"
     export OCX_NO_MODIFY_PATH=1
     export CURL_CA_BUNDLE
@@ -64,7 +68,7 @@ setup() {
     OCX_INSTALL_VERSION=0.0.0 OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 \
         run --separate-stderr nu "$INSTALL_NU"
     [ "$status" -eq 0 ]
-    [ "${lines[${#lines[@]}-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+    [ "${lines[${#lines[@]} - 1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
 }
 
 @test "nu: stdout silent on success without PRINT_PATH" {
@@ -181,7 +185,6 @@ setup() {
 # --- Embedded configuration block (corporate mirrors) -----------------------
 
 @test "nu: a sed-ed dist URL is used when the env is unset" {
-    command -v nu >/dev/null 2>&1 || skip "nu not installed"
     local _copy="${BATS_TEST_TMPDIR}/install-embedded.nu"
     server_embed_config "$INSTALL_NU" "$_copy" \
         "OCX_INSTALL_DIST_URL=${FIXTURE_URL}/dist.json" \
@@ -193,7 +196,6 @@ setup() {
 }
 
 @test "nu: the environment wins over the embedded value" {
-    command -v nu >/dev/null 2>&1 || skip "nu not installed"
     local _copy="${BATS_TEST_TMPDIR}/install-embedded.nu"
     # The embedded manifest URL is dead; setup() still exports the fixture one.
     server_embed_config "$INSTALL_NU" "$_copy" \
@@ -204,7 +206,6 @@ setup() {
 }
 
 @test "nu: an embedded managed-config ref is forwarded to 'ocx self setup'" {
-    command -v nu >/dev/null 2>&1 || skip "nu not installed"
     local _copy="${BATS_TEST_TMPDIR}/install-managed.nu"
     server_embed_config "$INSTALL_NU" "$_copy" \
         "OCX_MANAGED_CONFIG=registry.corp.example/ocx/managed-config:v1"
@@ -214,7 +215,6 @@ setup() {
 }
 
 @test "nu: OCX_INSTALL_CA_BUNDLE as an inline PEM block is materialized" {
-    command -v nu >/dev/null 2>&1 || skip "nu not installed"
     local _copy="${BATS_TEST_TMPDIR}/install-ca.nu"
     server_embed_config "$INSTALL_NU" "$_copy" \
         "OCX_INSTALL_CA_BUNDLE=$(server_ca_bundle_inline)"
@@ -232,23 +232,20 @@ setup() {
 }
 
 @test "nu: OCX_INSTALL_CA_BUNDLE neither a file nor inline PEM → exit 2" {
-    command -v nu >/dev/null 2>&1 || skip "nu not installed"
     OCX_INSTALL_CA_BUNDLE="${BATS_TEST_TMPDIR}/no-such-ca.pem" \
         OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
     [ "$status" -eq 2 ]
 }
 
 @test "nu: no CA bundle - the fixture cert is rejected (negative control)" {
-    command -v nu >/dev/null 2>&1 || skip "nu not installed"
     # Without CURL_CA_BUNDLE nothing trusts the fixture's self-signed cert. This
     # is what makes the OCX_INSTALL_CA_BUNDLE success above meaningful.
     unset CURL_CA_BUNDLE
     OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
-    [ "$status" -ne 0 ]
+    [ "$status" -eq 3 ]
 }
 
 @test "nu: OCX_INSTALL_CA_BUNDLE is handed to 'ocx self setup' as OCX_EXTRA_CA_CERTS + SSL_CERT_FILE" {
-    command -v nu >/dev/null 2>&1 || skip "nu not installed"
     unset CURL_CA_BUNDLE
     OCX_INSTALL_CA_BUNDLE="$(server_ca_bundle)" OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
     [ "$status" -eq 0 ]
@@ -260,7 +257,6 @@ setup() {
 }
 
 @test "nu: a large manifest over the ^curl CA path does not deadlock" {
-    command -v nu >/dev/null 2>&1 || skip "nu not installed"
     # Regression guard. An external command left in TAIL POSITION inside `try`
     # hangs forever in nushell: `try` holds a stream nobody drains, and the
     # deadlock only bites once the body outgrows the 64 KiB pipe buffer. The
@@ -280,4 +276,460 @@ setup() {
         run timeout 60 nu "$INSTALL_NU"
     [ "$status" -eq 0 ]
     grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
+# --- Helpers for the tests below ---------------------------------------------
+
+# Start a throwaway fixture server on ROOT; sets SRV_PID, SRV_PORT, SRV_URL.
+_serve() {
+    local _info
+    _info=$(server_start "$1" "${BATS_TEST_TMPDIR}/$2.log")
+    SRV_PID="${_info% *}"
+    SRV_PORT="${_info#* }"
+    SRV_URL="https://127.0.0.1:${SRV_PORT}"
+}
+
+# Serve ROOT, run the installer pinned to 0.0.0 against it, stop the server.
+_install_from() {
+    _serve "$1" srv
+    OCX_INSTALL_DIST_URL="${SRV_URL}/dist.json" \
+        OCX_INSTALL_MIRROR_URL="${SRV_URL}/releases/download" \
+        OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
+    server_stop "$SRV_PID"
+}
+
+# Pack BUNDLE_DIR (a directory under PARENT) as ROOT's v0.0.0 archive and write
+# a manifest whose inline sha256 matches it, so only the archive CONTENT is bad.
+_publish_bundle() {
+    local _root="$1" _parent="$2" _dir="$3"
+    local _file="ocx-${FIXTURE_TARGET}.tar.gz" _sum
+    mkdir -p "$_root/releases/download/v0.0.0"
+    (cd "$_parent" && tar czf "$_root/releases/download/v0.0.0/${_file}" "$_dir")
+    _sum=$(server_sha256 "$_root/releases/download/v0.0.0/${_file}")
+    server_write_dist "$_root" "$FIXTURE_TARGET" "$_sum" "$_file"
+}
+
+# The installer must leave nothing in TMPDIR, success or failure.
+_temp_clean() {
+    if [ -n "$(ls -A "$TMPDIR")" ]; then
+        ls -A "$TMPDIR" >&2
+        return 1
+    fi
+}
+
+# --- Fail-closed integrity ---------------------------------------------------
+
+@test "nu: a manifest row without a valid sha256 fails closed -> exit 3, before any download" {
+    local _t="${BATS_TEST_TMPDIR}/badsha" _bad
+    server_build_fixture "$_t" >/dev/null
+    local _file="ocx-${FIXTURE_TARGET}.tar.gz"
+    # blank, too short, and 64 characters that are not all hex.
+    for _bad in "" "abc123" "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"; do
+        server_write_dist "$_t" "$FIXTURE_TARGET" "$_bad" "$_file"
+        _install_from "$_t"
+        [ "$status" -eq 3 ]
+        [[ "$output" == *"no valid sha256"* ]] || false
+    done
+    [ "$(server_request_count "${BATS_TEST_TMPDIR}/srv.log" "releases/download")" -eq 0 ]
+    _temp_clean
+}
+
+@test "nu: a manifest row with no sha256 field fails closed -> exit 3" {
+    local _t="${BATS_TEST_TMPDIR}/nosha"
+    server_build_fixture "$_t" >/dev/null
+    sed 's/"sha256":"[^"]*",//' "$_t/dist.json" >"$_t/dist.tmp"
+    mv "$_t/dist.tmp" "$_t/dist.json"
+    run ! grep -q sha256 "$_t/dist.json"
+    _install_from "$_t"
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"no valid sha256"* ]]
+}
+
+@test "nu: an uppercase inline sha256 still verifies" {
+    local _t="${BATS_TEST_TMPDIR}/upper" _sum
+    server_build_fixture "$_t" >/dev/null
+    _sum=$(server_sha256 "$_t/releases/download/v0.0.0/ocx-${FIXTURE_TARGET}.tar.gz")
+    _sum=$(printf '%s' "$_sum" | tr '[:lower:]' '[:upper:]')
+    server_write_dist "$_t" "$FIXTURE_TARGET" "$_sum" "ocx-${FIXTURE_TARGET}.tar.gz"
+    _install_from "$_t"
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
+# --- Plain-http is refused at script level -----------------------------------
+
+@test "nu: a non-https manifest URL is refused -> exit 3" {
+    OCX_INSTALL_DIST_URL="http://127.0.0.1:${FIXTURE_PORT}/dist.json" \
+        OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"refusing insecure"* ]]
+}
+
+@test "nu: a non-https mirror URL is refused -> exit 3" {
+    OCX_INSTALL_MIRROR_URL="http://127.0.0.1:${FIXTURE_PORT}/releases/download" \
+        OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"refusing insecure"* ]]
+}
+
+# --- Version pin vs latest ---------------------------------------------------
+
+@test "nu: OCX_INSTALL_VERSION wins over a newer 'latest' in the manifest" {
+    server_write_decoy_dist "$FIXTURE_DIR"
+    OCX_INSTALL_DIST_URL="${FIXTURE_URL}/dist-decoy.json" \
+        OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
+@test "nu: with no pin the decoy manifest resolves 9.9.9 -> exit 3 (control for the pin test)" {
+    server_write_decoy_dist "$FIXTURE_DIR"
+    OCX_INSTALL_DIST_URL="${FIXTURE_URL}/dist-decoy.json" run nu "$INSTALL_NU"
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"9.9.9"* ]]
+}
+
+# --- CI PATH export ----------------------------------------------------------
+
+@test "nu: GITHUB_PATH receives the bin dir" {
+    GITHUB_PATH="${BATS_TEST_TMPDIR}/github-path" OCX_INSTALL_NO_SETUP=1 \
+        OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
+    [ "$status" -eq 0 ]
+    grep -qxF -- "${OCX_HOME}/${BIN_SUBPATH}" "${BATS_TEST_TMPDIR}/github-path"
+}
+
+# --- Exit 5 / 6 ---------------------------------------------------------------
+
+@test "nu: exit 5 - a corrupt archive fails to extract" {
+    local _t="${BATS_TEST_TMPDIR}/corrupt" _file="ocx-${FIXTURE_TARGET}.tar.gz"
+    server_build_fixture "$_t" >/dev/null
+    printf 'not a real gzip archive\n' >"$_t/releases/download/v0.0.0/${_file}"
+    server_write_dist "$_t" "$FIXTURE_TARGET" \
+        "$(server_sha256 "$_t/releases/download/v0.0.0/${_file}")" "$_file"
+    _install_from "$_t"
+    [ "$status" -eq 5 ]
+    _temp_clean
+}
+
+@test "nu: exit 5 - an archive without the ocx binary" {
+    local _t="${BATS_TEST_TMPDIR}/nobin" _b="${BATS_TEST_TMPDIR}/nobin-bundle"
+    mkdir -p "$_b/ocx-${FIXTURE_TARGET}"
+    printf 'README\n' >"$_b/ocx-${FIXTURE_TARGET}/README.txt"
+    _publish_bundle "$_t" "$_b" "ocx-${FIXTURE_TARGET}"
+    _install_from "$_t"
+    [ "$status" -eq 5 ]
+    [[ "$output" == *"could not find ocx binary"* ]] || false
+    _temp_clean
+}
+
+@test "nu: exit 6 - 'ocx self setup' failure, with the hand-off argv, and no temp left" {
+    local _t="${BATS_TEST_TMPDIR}/bsfail" _b="${BATS_TEST_TMPDIR}/bsfail-bundle"
+    mkdir -p "$_b/ocx-${FIXTURE_TARGET}"
+    cat >"$_b/ocx-${FIXTURE_TARGET}/ocx" <<'STUB'
+#!/bin/sh
+if [ -n "${OCX_STUB_ARGV:-}" ]; then
+    printf '%s\n' "$*" >>"$OCX_STUB_ARGV"
+fi
+case "$1" in
+    version) echo "0.0.0" ;;
+    self) echo "stub self setup failure" >&2; exit 9 ;;
+    *) echo "stub ocx" ;;
+esac
+STUB
+    chmod +x "$_b/ocx-${FIXTURE_TARGET}/ocx"
+    _publish_bundle "$_t" "$_b" "ocx-${FIXTURE_TARGET}"
+    _install_from "$_t"
+    [ "$status" -eq 6 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+    _temp_clean
+}
+
+@test "nu: a long archive listing (over 64 KiB) does not hang the unsafe-path scan" {
+    # `tar --list | lines` in tail position of `try` blocks forever on nu >= 0.112
+    # once the listing outgrows the pipe buffer.
+    command -v timeout >/dev/null 2>&1 || skip "timeout(1) not available"
+    local _t="${BATS_TEST_TMPDIR}/biglist" _b="${BATS_TEST_TMPDIR}/biglist-bundle" _i=0
+    mkdir -p "$_b/ocx-${FIXTURE_TARGET}/pad"
+    server_stub_body >"$_b/ocx-${FIXTURE_TARGET}/ocx"
+    chmod +x "$_b/ocx-${FIXTURE_TARGET}/ocx"
+    while [ "$_i" -lt 2500 ]; do
+        : >"$_b/ocx-${FIXTURE_TARGET}/pad/padding-file-with-a-deliberately-long-name-${_i}.txt"
+        _i=$((_i + 1))
+    done
+    _publish_bundle "$_t" "$_b" "ocx-${FIXTURE_TARGET}"
+    [ "$(tar tzf "$_t/releases/download/v0.0.0/ocx-${FIXTURE_TARGET}.tar.gz" | wc -c)" -gt 131072 ]
+    _serve "$_t" srv
+    OCX_INSTALL_DIST_URL="${SRV_URL}/dist.json" \
+        OCX_INSTALL_MIRROR_URL="${SRV_URL}/releases/download" \
+        OCX_INSTALL_VERSION=0.0.0 run timeout 60 nu "$INSTALL_NU"
+    server_stop "$SRV_PID"
+    [ "$status" -eq 0 ]
+    grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
+# --- Temp files are removed on every exit ------------------------------------
+
+@test "nu: no temp files remain after a default install" {
+    OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
+    [ "$status" -eq 0 ]
+    _temp_clean
+}
+
+@test "nu: no temp files remain after a checksum mismatch (exit 4)" {
+    local _t="${BATS_TEST_TMPDIR}/cksum-temp"
+    server_build_fixture "$_t" >/dev/null
+    server_write_dist "$_t" "$FIXTURE_TARGET" \
+        "0000000000000000000000000000000000000000000000000000000000000000" \
+        "ocx-${FIXTURE_TARGET}.tar.gz"
+    _install_from "$_t"
+    [ "$status" -eq 4 ]
+    _temp_clean
+}
+
+@test "nu: no temp files remain after a pinned-manifest install" {
+    local _t="${BATS_TEST_TMPDIR}/pin-temp" _sha
+    server_build_fixture "$_t" >/dev/null
+    _sha=$(server_publish_dist_snapshot "$_t")
+    _serve "$_t" srv
+    OCX_INSTALL_DIST_URL="${SRV_URL}/dist/${_sha}.json" \
+        OCX_INSTALL_MIRROR_URL="${SRV_URL}/releases/download" \
+        OCX_INSTALL_NO_SETUP=1 run nu "$INSTALL_NU"
+    server_stop "$SRV_PID"
+    [ "$status" -eq 0 ]
+    _temp_clean
+}
+
+@test "nu: no temp files remain after an altered pinned manifest (exit 4)" {
+    local _t="${BATS_TEST_TMPDIR}/pinbad-temp" _sha
+    server_build_fixture "$_t" >/dev/null
+    _sha=$(server_publish_dist_snapshot "$_t")
+    printf '\n' >>"$_t/dist/${_sha}.json"
+    _serve "$_t" srv
+    OCX_INSTALL_DIST_URL="${SRV_URL}/dist/${_sha}.json" \
+        OCX_INSTALL_MIRROR_URL="${SRV_URL}/releases/download" run nu "$INSTALL_NU"
+    server_stop "$SRV_PID"
+    [ "$status" -eq 4 ]
+    _temp_clean
+}
+
+@test "nu: no temp files remain after an inline-PEM install" {
+    unset CURL_CA_BUNDLE
+    OCX_INSTALL_CA_BUNDLE="$(server_ca_bundle_inline)" OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
+    [ "$status" -eq 0 ]
+    _temp_clean
+}
+
+@test "nu: no temp files remain on the idempotent fast path" {
+    OCX_INSTALL_NO_SETUP=1 OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
+    [ "$status" -eq 0 ]
+    OCX_INSTALL_NO_SETUP=1 OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"already installed"* ]] || false
+    _temp_clean
+}
+
+# --- The documented entry points ---------------------------------------------
+
+# The one-liners from the installer header, with the download swapped for a local
+# fetch (args: the `curl` replacement, then the `http get` replacement), so the
+# test runs exactly the text users are told to paste. One command per line.
+_header_oneliners() {
+    local _line _cmd
+    while IFS= read -r _line; do
+        _cmd="${_line#\#   }"
+        _cmd="${_cmd%%   \#*}"
+        _cmd="${_cmd/curl -fsSL https:\/\/setup.ocx.sh\/nu/$1}"
+        printf '%s\n' "${_cmd/http get https:\/\/setup.ocx.sh\/nu/$2}"
+    done < <(grep -E '^#   (curl|nu) .*setup\.ocx\.sh/nu' "$INSTALL_NU")
+}
+
+# The POSIX-shell form runs under sh, the in-nu form under nu.
+_run_oneliner() {
+    case "$1" in
+        "nu -c (http get "* | "nu -c (open "*) run nu -c "$1" ;;
+        *) run sh -c "$1" ;;
+    esac
+}
+
+@test "nu: every one-liner the header documents installs" {
+    local _cmd _n=0
+    while IFS= read -r _cmd; do
+        rm -f "$OCX_STUB_ARGV"
+        OCX_INSTALL_VERSION=0.0.0 _run_oneliner "$_cmd"
+        [ "$status" -eq 0 ]
+        grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+        _n=$((_n + 1))
+    done < <(_header_oneliners "cat $INSTALL_NU" "open --raw $INSTALL_NU")
+    [ "$_n" -eq 2 ]
+    _temp_clean
+}
+
+@test "nu: every documented one-liner passes the installer's exit code through" {
+    local _cmd _n=0
+    while IFS= read -r _cmd; do
+        __OCX_TESTING_INSTALL_BINARY="${BATS_TEST_TMPDIR}/nope" _run_oneliner "$_cmd"
+        [ "$status" -eq 2 ]
+        [[ "$output" == *"__OCX_TESTING_INSTALL_BINARY"* ]] || false
+        _n=$((_n + 1))
+    done < <(_header_oneliners "cat $INSTALL_NU" "open --raw $INSTALL_NU")
+    [ "$_n" -eq 2 ]
+    _temp_clean
+}
+
+@test "nu: every documented one-liner fails and installs nothing when the download fails" {
+    local _cmd _n=0
+    while IFS= read -r _cmd; do
+        rm -f "$OCX_STUB_ARGV"
+        OCX_INSTALL_VERSION=0.0.0 _run_oneliner "$_cmd"
+        case "$_cmd" in
+            "nu -c (open "*) [ "$status" -eq 1 ] ;;
+            *) [ "$status" -eq 3 ] ;;
+        esac
+        [ ! -f "$OCX_STUB_ARGV" ]
+        _n=$((_n + 1))
+    done < <(_header_oneliners "false" "open --raw ${BATS_TEST_TMPDIR}/nope")
+    [ "$_n" -eq 2 ]
+}
+
+@test "nu: a cut-off script installs nothing at any cut point" {
+    # A cut inside a def is a parse error (1); a cut on a def boundary parses,
+    # defines functions and never reaches the entry call (0). Neither installs.
+    local _cmd _size _n=0 _cut="${BATS_TEST_TMPDIR}/cut.nu"
+    for _size in 4000 12000 20000; do
+        head -c "$_size" "$INSTALL_NU" >"$_cut"
+        while IFS= read -r _cmd; do
+            rm -f "$OCX_STUB_ARGV"
+            OCX_INSTALL_VERSION=0.0.0 _run_oneliner "$_cmd"
+            case "$status" in 0 | 1) ;; *) false ;; esac
+            [ ! -f "$OCX_STUB_ARGV" ]
+            [ ! -e "$OCX_HOME/symlinks" ]
+            _n=$((_n + 1))
+        done < <(_header_oneliners "cat $_cut" "open --raw $_cut")
+    done
+    [ "$_n" -eq 6 ]
+}
+
+@test "nu: a bare 'curl | nu' installs nothing (nu refuses a non-tty stdin)" {
+    # Why the header documents `nu -c ...` and not the bare pipe.
+    export NU_SRC="$INSTALL_NU"
+    OCX_INSTALL_VERSION=0.0.0 run bash -c 'cat "$NU_SRC" | nu'
+    [ "$status" -eq 1 ]
+    [ ! -f "$OCX_STUB_ARGV" ]
+}
+
+# --- libc detection (mirrors install.sh detect_libc) -------------------------
+#
+# __ocx-detect-libc decides in order: the ldd banner, musl loader files, glibc
+# evidence, then exit 7. Its probed paths take a root prefix (a function default,
+# not a knob) so a fake tree stands in for the host. The whole-installer exit-7
+# path needs a host with no loader at all, which only tests/docker/ has, so these
+# tests run the real defs cut out of src/install.nu.
+
+# libc_run ROOT BANNER [CMD]: a PATH ldd prints BANNER on stderr and exits 1, as
+# musl's does (empty BANNER = silent). CMD defaults to __ocx-detect-libc ROOT.
+libc_run() {
+    local _root="$1" _bin="${BATS_TEST_TMPDIR}/libc-bin" _cmd="${3:-}"
+    [ -n "$_cmd" ] || _cmd="__ocx-detect-libc '$_root'"
+    mkdir -p "$_bin"
+    printf '%s' "$2" >"$_bin/ldd.txt"
+    cat >"$_bin/ldd" <<'EOF'
+#!/bin/sh
+cat "$(dirname "$0")/ldd.txt" >&2
+exit 1
+EOF
+    chmod +x "$_bin/ldd"
+    sed -n '/^def __ocx-err /,/^}/p;/^def __ocx-detect-libc /,/^}/p;/^def __ocx-detect-target /,/^}/p' \
+        "$INSTALL_NU" >"${BATS_TEST_TMPDIR}/libc.nu"
+    PATH="$_bin:$PATH" run nu -c "source ${BATS_TEST_TMPDIR}/libc.nu; $_cmd"
+}
+
+@test "libc: a musl ldd banner selects musl" {
+    libc_run "${BATS_TEST_TMPDIR}/nope" 'musl libc (x86_64)'
+    [ "$status" -eq 0 ]
+    [ "$output" = musl ]
+}
+
+@test "libc: glibc ldd banners select gnu even when a musl loader is present" {
+    local _root="${BATS_TEST_TMPDIR}/root" _banner
+    mkdir -p "$_root/lib"
+    : >"$_root/lib/ld-musl-x86_64.so.1"
+    for _banner in "ldd (Debian GLIBC 2.36-9+deb12u7) 2.36" "ldd (GNU libc) 2.39" "ldd (GNU C Library) 2.28"; do
+        libc_run "$_root" "$_banner"
+        [ "$status" -eq 0 ]
+        [ "$output" = gnu ]
+    done
+}
+
+@test "libc: with no banner a musl loader file selects musl" {
+    local _root="${BATS_TEST_TMPDIR}/root"
+    mkdir -p "$_root/lib"
+    : >"$_root/lib/ld-musl-aarch64.so.1"
+    libc_run "$_root" ''
+    [ "$status" -eq 0 ]
+    [ "$output" = musl ]
+}
+
+@test "libc: with no banner /etc/alpine-release selects musl" {
+    local _root="${BATS_TEST_TMPDIR}/root"
+    mkdir -p "$_root/etc"
+    : >"$_root/etc/alpine-release"
+    libc_run "$_root" ''
+    [ "$status" -eq 0 ]
+    [ "$output" = musl ]
+}
+
+@test "libc: with no banner a glibc loader selects gnu" {
+    local _root="${BATS_TEST_TMPDIR}/root"
+    mkdir -p "$_root/lib/x86_64-linux-gnu"
+    : >"$_root/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+    libc_run "$_root" ''
+    [ "$status" -eq 0 ]
+    [ "$output" = gnu ]
+}
+
+@test "libc: no banner and no loader evidence is exit 7, not a guessed glibc" {
+    mkdir -p "${BATS_TEST_TMPDIR}/root"
+    libc_run "${BATS_TEST_TMPDIR}/root" ''
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"ocx-exit:7:cannot tell glibc from musl"* ]] || false
+}
+
+@test "libc: __ocx-detect-target takes its libc from the ldd banner" {
+    libc_run "${BATS_TEST_TMPDIR}/nope" 'musl libc (x86_64)' '__ocx-detect-target'
+    [ "$status" -eq 0 ]
+    case "$(uname -s)" in
+        Linux) [[ "$output" == *-unknown-linux-musl ]] || false ;;
+        *) [[ "$output" == *-apple-darwin ]] || false ;;
+    esac
+}
+
+# --- Source hygiene ----------------------------------------------------------
+
+@test "nu: install.nu is pure ASCII" {
+    LC_ALL=C run grep -n '[^[:print:][:space:]]' "$INSTALL_NU"
+    [ "$status" -eq 1 ]
+}
+
+@test "nu: install.nu header carries Kind, nu-range and Exit lines" {
+    sed -n 2,8p "$INSTALL_NU" | grep -qxF '# Kind: INST'
+    sed -n 2,8p "$INSTALL_NU" | grep -q '^# nu-range: [0-9][0-9.]*\.\.[0-9][0-9.]*$'
+    sed -n 2,8p "$INSTALL_NU" | grep -q '^# Exit: 0 ok, 1 generic, 2 arg/env, 3 network/manifest, 4 checksum, 5 extract, 6 self setup, 7 platform'
+}
+
+# --- curl flags are probed (the ^curl path runs when a CA bundle is set) --------
+
+@test "nu: --tlsv1.2 is sent only when curl --help all lists it" {
+    local _bin="${BATS_TEST_TMPDIR}/fakebin" _log="${BATS_TEST_TMPDIR}/fetch.log"
+    server_fake_curl "$_bin"
+    unset CURL_CA_BUNDLE
+    OCX_INSTALL_CA_BUNDLE="$(server_ca_bundle)" FAKE_CURL_LOG="$_log" PATH="$_bin:$PATH" \
+    OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
+    [ "$status" -eq 0 ]
+    [ "$(grep -c -e "--proto =https" "$_log")" -eq 2 ]
+    [ "$(grep -c -e "--tlsv1.2" "$_log" || true)" -eq 0 ]
+    : >"$_log"
+    OCX_INSTALL_CA_BUNDLE="$(server_ca_bundle)" FAKE_CURL_TLS12=1 FAKE_CURL_LOG="$_log" PATH="$_bin:$PATH" \
+    OCX_INSTALL_VERSION=0.0.0 run nu "$INSTALL_NU"
+    [ "$status" -eq 0 ]
+    [ "$(grep -c -e "--tlsv1.2" "$_log")" -eq 2 ]
 }
