@@ -201,10 +201,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run install.sh against the real release
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           args=""
-          if [ -n "${{ inputs.release_tag }}" ]; then
-            args="--version $(echo '${{ inputs.release_tag }}' | sed 's/^v//')"
+          if [ -n "$RELEASE_TAG" ]; then
+            args="--version ${RELEASE_TAG#v}"
           fi
           # shellcheck disable=SC2086
           OCX_NO_MODIFY_PATH=1 OCX_INSTALL_PRINT_PATH=1 sh src/install.sh $args
@@ -234,11 +236,13 @@ jobs:
       # under test is the nested process, not the harness shell.
       - name: Run install.ps1
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           $a = @()
-          if ("${{ inputs.release_tag }}") {
+          if ($env:RELEASE_TAG) {
             $a += "-Version"
-            $a += "${{ inputs.release_tag }}".TrimStart('v')
+            $a += $env:RELEASE_TAG.TrimStart('v')
           }
           $env:OCX_NO_MODIFY_PATH = "1"
           ${{ matrix.shell }} -NoProfile -File src/install.ps1 @a
@@ -264,11 +268,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run install.ps1
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           $a = @()
-          if ("${{ inputs.release_tag }}") {
+          if ($env:RELEASE_TAG) {
             $a += "-Version"
-            $a += "${{ inputs.release_tag }}".TrimStart('v')
+            $a += $env:RELEASE_TAG.TrimStart('v')
           }
           $env:OCX_NO_MODIFY_PATH = "1"
           pwsh -NoProfile -File src/install.ps1 @a
