@@ -1,0 +1,82 @@
+---
+title: Exit codes and contract
+description: The exit codes, the stdout and stderr contract, the URL layout and the fixed behaviour shared by the five OCX installers.
+editUrl: https://github.com/ocx-sh/www-setup/blob/main/site/src/content/docs/reference.mdx
+---
+{/* doc_type: reference */}
+
+The five installers share one contract.
+A script that wraps an installer can rely on the exit codes, the output streams and the URLs on this page.
+
+## Exit codes {#exit-codes}
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. |
+| 1 | Generic failure. |
+| 2 | Invalid argument or environment. This includes an unsafe `OCX_HOME`, no SHA-256 tool, and `OCX_INSTALL_CA_BUNDLE` set with a `wget` that cannot take it. |
+| 3 | Network, download or manifest failure. This includes a manifest row without a valid `sha256`, a URL that is not `https`, and no stable version in the manifest. |
+| 4 | Checksum mismatch, for the archive or for a pinned manifest. The POSIX and fish installers also use it for a manifest without a digest fetched over a `wget` that does not validate TLS. |
+| 5 | Archive extraction failure. |
+| 6 | `ocx self setup` failure. |
+| 7 | Unsupported platform or architecture. It is also the answer on a Linux host where glibc cannot be told from musl. |
+| 129 | The POSIX and fish installers: stopped by `SIGHUP`. |
+| 130 | The POSIX and fish installers: stopped by `SIGINT`. |
+| 143 | The POSIX and fish installers: stopped by `SIGTERM`. |
+
+A signal code is 128 plus the signal number.
+Nushell, Elvish and PowerShell cannot trap signals.
+A run they lose to a signal exits by that signal and can leave its temporary directory behind.
+fish exits 143 for `SIGTERM` on every supported version.
+It exits 130 and 129 only on the fish versions that allow it.
+
+PowerShell delivers its code in one of two ways.
+Run as a file, with `pwsh -File` or by path, the script exits with the code.
+Run through `irm | iex` or a script block, it prints the error, leaves the code in `$LASTEXITCODE` and throws.
+The throw keeps an interactive session open, and `pwsh -c` still exits non-zero.
+
+PowerShell rejects an unknown parameter before the script runs, with exit code 1 and no code under `irm | iex`.
+The POSIX and fish installers exit with code 2 for an unknown option.
+
+## Output contract {#output}
+
+- All messages go to stderr: progress, warnings and errors.
+- Stdout is silent on success.
+- With `OCX_INSTALL_PRINT_PATH` true, or `-PrintPath` in PowerShell, the final line of stdout is the absolute OCX bin directory.
+
+A wrapper can capture the directory with `BIN_DIR=$(... | tail -n1)`.
+The [generic CI wrapper](/install/examples/#ci-wrapper) shows it in full.
+`OCX_INSTALL_QUIET` silences the informational lines on stderr and leaves stdout alone.
+
+## URL layout {#urls}
+
+All paths are on `https://setup.ocx.sh`.
+Here `<shell>` is one of `sh`, `pwsh`, `nu`, `fish` or `elvish`, and `<ext>` is `sh`, `ps1`, `nu`, `fish` or `elv`.
+
+| Path | Serves |
+|---|---|
+| `/<shell>` | The stable installer script. |
+| `/<shell>/next` | The most recently released installer script, stable or prerelease. `/<shell>/canary` is an alias. |
+| `/<shell>/<VERSION>` | The installer script of that release. Immutable. |
+| `/archive/<VERSION>/install.<ext>` | The same pinned script under its file name. |
+| `/dist` | The distribution manifest, `dist.json`. `/dist.json` and the legacy `/releases` serve it too. |
+| `/dist.json.sha256` | The digest of the current manifest, in `sha256sum` format. |
+| `/dist/<sha256>.json` | An immutable snapshot of a manifest, named by its digest. |
+| `/docs/...` | Forwarded to the OCX documentation on `ocx.sh`. |
+| `/actions/...` | Forwarded to the GitHub Action and GitLab listings. |
+
+`<VERSION>` is a semantic version without a leading `v`.
+Paths under `/archive/` and `/dist/<sha256>.json` are cached for a year.
+Every other path is cached for five minutes.
+A published pinned script is never overwritten.
+
+## Fixed behaviour {#behaviour}
+
+These behaviours are the same in all five installers and have no setting.
+
+- **Retries.** Every download is tried three times, with a pause of one second and then two. Any failure triggers a retry, so a missing file costs two extra requests before exit code 3. A checksum mismatch is not retried.
+- **HTTPS only.** The manifest URL, the mirror URL and every archive URL must be `https`. Anything else exits with code 3 before a request is sent.
+- **Integrity fails closed.** The installer checks the archive against the `sha256` in the manifest before it extracts anything. It never downgrades to a warning. A missing or malformed digest exits with code 3, and a missing hash tool with code 2.
+- **No token.** The install path reads the self-hosted manifest. It does not call the GitHub API and does not read `GITHUB_TOKEN`.
+- **Cleanup.** Temporary files are removed on success and on every error exit.
+- **Manifest order.** The installer picks the first `stable` entry of the manifest, which lists the newest release first.

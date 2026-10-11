@@ -1,0 +1,116 @@
+---
+title: Mirrors and proxies
+description: Point the OCX installers at an internal mirror, ship one patched installer with your defaults, trust a corporate CA, and pin the manifest so the mirror needs no trust.
+editUrl: https://github.com/ocx-sh/www-setup/blob/main/site/src/content/docs/mirrors.mdx
+---
+{/* doc_type: how-to */}
+{/* doc_tier: integration */}
+
+A company that mirrors OCX internally wants developers to run one command with no extra setup.
+This page points the installers at the mirror, bakes your settings into one patched copy, and trusts a TLS-intercepting proxy.
+It ends with the pin that lets you treat the mirror as untrusted transport.
+
+You need a mirror that holds a copy of `dist.json` and the release archives at `<tag>/<filename>`, readable without credentials.
+`ocx-mirror dist sync` produces that layout.
+
+## Point the installers at the mirror {#point}
+
+Set two variables.
+`OCX_INSTALL_DIST_URL` names your copy of the manifest.
+`OCX_INSTALL_MIRROR_URL` replaces the host of every archive URL, keeping the `<tag>/<filename>` tail.
+
+```sh
+export OCX_INSTALL_DIST_URL=https://artifactory.corp.example/ocx/dist.json
+export OCX_INSTALL_MIRROR_URL=https://artifactory.corp.example/ocx/releases
+curl -fsSL https://setup.ocx.sh/sh | sh
+```
+
+Every URL must be `https`, loopback addresses included.
+The installer exits with code 3 before it sends a request to any other scheme.
+The mirror must allow anonymous read: no installer has a credential setting.
+
+## Embed the settings in one patched copy {#embedded-config}
+
+Every installer carries four placeholders near the top of the file.
+Replace them once, host the result on your intranet, and developers run it without exporting anything.
+
+| Placeholder | Sets |
+|---|---|
+| `@OCX_INSTALL_DIST_URL@` | The manifest URL. A `dist/<sha256>.json` snapshot works here too. |
+| `@OCX_INSTALL_MIRROR_URL@` | The archive host. |
+| `@OCX_INSTALL_CA_BUNDLE@` | The CA bundle: a path, or an inline PEM block. |
+| `@OCX_MANAGED_CONFIG@` | The managed-config OCI reference, `host/repo:tag`. The installer forwards it as `ocx self setup --managed-config <REF>`. |
+
+The placeholders are spelled the same in all five dialects, so one `sed` command patches every copy.
+Download the dialects you need and patch them:
+
+```sh
+for pair in sh:sh pwsh:ps1 nu:nu fish:fish elvish:elv; do
+  curl -fsSL "https://setup.ocx.sh/${pair%%:*}" -o "install.${pair##*:}"
+done
+
+sed -i \
+  -e "s|@OCX_INSTALL_DIST_URL@|https://artifactory.corp.example/ocx/dist.json|" \
+  -e "s|@OCX_INSTALL_MIRROR_URL@|https://artifactory.corp.example/ocx/releases|" \
+  -e "s|@OCX_MANAGED_CONFIG@|registry.corp.example/ocx/managed-config:v1|" \
+  install.*
+```
+
+The value sits inside single quotes in every dialect, so it is never interpolated and it may span lines.
+That lets the CA bundle be the certificate itself.
+A multi-line value needs a tool that is not line-oriented, such as Python:
+
+```sh
+python3 - install.sh <<'PY'
+import sys
+p = sys.argv[1]
+pem = open('corp-root-ca.pem').read()
+s = open(p).read().replace('@OCX_INSTALL_CA_BUNDLE@', pem)
+open(p, 'w').write(s)
+PY
+```
+
+Three rules hold for a patched copy:
+
+- The environment beats the embedded value, and the embedded value beats the built-in default. CI and one-off overrides keep working.
+- A placeholder you leave unreplaced is ignored, so an unpatched installer behaves as it always did.
+- A value must not contain a single quote.
+
+## Trust a corporate CA {#ca-bundle}
+
+A TLS-intercepting proxy re-signs HTTPS traffic with a company CA.
+An install makes two HTTPS conversations: the installer fetches the manifest and the archive, then `ocx self setup` pulls the package store from the registry.
+`OCX_INSTALL_CA_BUNDLE` covers both.
+
+The installer passes the bundle to `curl --cacert` or `wget --ca-certificate`.
+It hands it to `ocx self setup` as `OCX_EXTRA_CA_CERTS`, exactly as you supplied it.
+`ocx self setup` stores the certificate text in `$OCX_HOME/config.toml`, so every later `ocx` command trusts it on every operating system.
+
+The installer also exports `SSL_CERT_FILE` with the path of the bundle.
+An `ocx` release without `OCX_EXTRA_CA_CERTS` support reads that variable on Linux instead.
+A variable that is already set in the environment is left alone.
+
+Four details matter:
+
+- **PEM only.** Both variables ignore DER files. Convert one with `openssl x509 -inform der -in corp.crt -out corp.pem`. An inline value counts as PEM when it contains `-----BEGIN`, so a bundle that starts with comment lines works.
+- **`curl` and `wget` replace the system trust store, and `ocx` merges.** If one run must reach an internal host and a public one, the bundle needs the public roots too.
+- **`ocx` caps `OCX_EXTRA_CA_CERTS` at 32 KiB.** A bundle with all public roots exceeds it, and `ocx self setup` refuses it, which is exit code 6. Set `OCX_EXTRA_CA_CERTS` to the corporate root alone next to the long `OCX_INSTALL_CA_BUNDLE`. The environment wins.
+- **PowerShell uses the bundle only for the hand-over.** `Invoke-WebRequest` on Windows PowerShell 5.1 has no CA-bundle option, so `install.ps1` warns and downloads with the system trust store. On Windows, install the CA into the machine certificate store. The bundle still reaches `ocx self setup`, so patching all five copies is safe.
+
+A bundle that is neither a readable file nor a PEM block exits with code 2.
+BusyBox `wget` cannot take a CA bundle and also exits with code 2.
+
+## Pin the manifest so the mirror needs no trust {#pinned-manifest}
+
+An anonymous mirror is a risk only if it can change what you install.
+Point `OCX_INSTALL_DIST_URL` at a `dist/<sha256>.json` snapshot, and it cannot.
+
+Each snapshot is immutable.
+The installer checks the downloaded file against the digest in its name, and every archive row inside it carries its own digest.
+A mirror may relocate files, and it cannot alter them without the installer exiting with code 4.
+The serving host becomes pure transport.
+
+The sidecar `dist.json.sha256` is not a second boundary.
+It comes from the same host over the same anonymous channel, so anything that can rewrite the manifest can rewrite the sidecar.
+The digest authenticates only when it reaches you out of band, which a pinned URL in your own configuration does.
+[Pin a version](/install/versions/#pin-manifest) shows the command.

@@ -1,0 +1,139 @@
+---
+title: Pin a version
+description: Choose the stable or next installer, install a fixed ocx version, and pin the installer and the distribution manifest so an install repeats exactly.
+editUrl: https://github.com/ocx-sh/www-setup/blob/main/site/src/content/docs/versions.mdx
+---
+{/* doc_type: how-to */}
+{/* doc_tier: everyday */}
+
+import Tabs from '@ocx-sh/theme/components/Tabs.astro';
+import TabItem from '@ocx-sh/theme/components/TabItem.astro';
+
+An install with no version pin gives a different result next month.
+This page pins the installer script, the `ocx` version and the manifest the installer reads, so a build repeats exactly.
+Two versions are in play: the installer script has its own version, and so does `ocx`.
+
+## Choose the installer channel {#channels}
+
+Each shell has one URL per channel.
+Here `<shell>` is one of `sh`, `pwsh`, `nu`, `fish` or `elvish`.
+
+| URL | Serves | Changes |
+|---|---|---|
+| `https://setup.ocx.sh/<shell>` | The stable installer script | With each stable installer release |
+| `https://setup.ocx.sh/<shell>/next` | The most recently released installer script, stable or prerelease | With each installer release, prereleases included |
+| `https://setup.ocx.sh/<shell>/<VERSION>` | Exactly that installer release | Never |
+
+`/<shell>/canary` is an alias for `/<shell>/next`.
+`<VERSION>` is the version of the installer script without a leading `v`, for example `0.2.2`.
+It is not the version of `ocx` the script installs.
+The same bytes also sit at `https://setup.ocx.sh/archive/<VERSION>/install.<ext>`, where `<ext>` is `sh`, `ps1`, `nu`, `fish` or `elv`.
+
+The channel decides which installer script runs.
+It does not decide which `ocx` the script installs.
+Every channel installs the highest stable `ocx` release unless you set a version, as the next section shows.
+
+## Install a fixed ocx version {#pin-ocx}
+
+Set `OCX_INSTALL_VERSION` to the `ocx` version you want.
+An empty value means the highest stable release.
+Set it on the shell that runs the installer, not on `curl`.
+In `VAR=x curl ... | sh` the variable reaches `curl`, and the installer never sees it.
+A prerelease version such as `1.0.0-rc.1` is accepted.
+
+<Tabs syncKey="shell">
+  <TabItem label="Shell" icon="shell">
+
+```sh
+curl -fsSL https://setup.ocx.sh/sh | OCX_INSTALL_VERSION=0.6.5 sh
+```
+
+The flag form is `curl -fsSL https://setup.ocx.sh/sh | sh -s -- --version 0.6.5`.
+
+  </TabItem>
+  <TabItem label="PowerShell" icon="powershell">
+
+```powershell
+$env:OCX_INSTALL_VERSION = '0.6.5'; irm https://setup.ocx.sh/pwsh | iex
+```
+
+To pass the `-Version` parameter, compile the script to a script block first.
+
+```powershell
+& ([scriptblock]::Create((irm https://setup.ocx.sh/pwsh))) -Version 0.6.5
+```
+
+  </TabItem>
+  <TabItem label="Nushell" icon="nushell">
+
+From a POSIX shell:
+
+```sh
+OCX_INSTALL_VERSION=0.6.5 nu -c "$(curl -fsSL https://setup.ocx.sh/nu || echo 'exit 3')"
+```
+
+From inside Nushell:
+
+```nu
+$env.OCX_INSTALL_VERSION = '0.6.5'; nu -c (http get https://setup.ocx.sh/nu)
+```
+
+  </TabItem>
+  <TabItem label="fish" icon="fish">
+
+```fish
+set -x OCX_INSTALL_VERSION 0.6.5; curl -fsSL https://setup.ocx.sh/fish | fish
+```
+
+fish reads no flags from a pipe, so use the variable.
+The `--version` flag works only when fish runs a saved copy of the script.
+
+  </TabItem>
+  <TabItem label="Elvish" icon="elvish">
+
+From a POSIX shell:
+
+```sh
+OCX_INSTALL_VERSION=0.6.5 elvish -c "$(curl -fsSL https://setup.ocx.sh/elvish || echo 'exit 3')"
+```
+
+From inside Elvish:
+
+```sh
+set-env OCX_INSTALL_VERSION 0.6.5; elvish -c (e:curl -fsSL https://setup.ocx.sh/elvish | slurp)
+```
+
+  </TabItem>
+</Tabs>
+
+## Pin the installer and ocx together {#pin-both}
+
+For CI, pin both versions.
+A later installer release then cannot change what your job runs, and a later `ocx` release cannot change what it installs.
+
+```sh
+curl -fsSL https://setup.ocx.sh/sh/0.2.2 | OCX_INSTALL_VERSION=0.6.5 sh
+```
+
+## Freeze the whole manifest {#pin-manifest}
+
+The installers read a distribution manifest, `https://setup.ocx.sh/dist.json`, to resolve which version to install, and the download URL and SHA-256 digest of each archive.
+The manifest changes whenever `ocx` releases.
+Every manifest ever published is also kept, unchanged, at `https://setup.ocx.sh/dist/<sha256>.json`, where `<sha256>` is the digest of that file.
+
+Point `OCX_INSTALL_DIST_URL` at one of those snapshots.
+Every archive row in the manifest carries its own digest, so one manifest digest fixes every version, URL and archive digest the installer will use.
+
+```sh
+curl -fsSL https://setup.ocx.sh/sh | OCX_INSTALL_DIST_URL="https://setup.ocx.sh/dist/${OCX_DIST_SHA256}.json" sh
+```
+
+The installer recognises a snapshot URL by its name, a 64-digit hex digest plus `.json`.
+It downloads the file and checks it against the digest in the name before it reads anything from it.
+A mismatch exits with code 4.
+A host with no SHA-256 tool exits with code 2, because the digest is the only thing that vouches for a snapshot.
+
+The current digest is published at `https://setup.ocx.sh/dist.json.sha256`.
+That file comes from the same host as the manifest, so it detects a truncated download and nothing more.
+Record the digest in your repository from a source you trust, instead of fetching it on every run.
+The [mirrors page](/install/mirrors/#pinned-manifest) explains why this makes the serving host pure transport.

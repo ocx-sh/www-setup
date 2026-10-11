@@ -1,0 +1,224 @@
+---
+title: Examples
+description: Install OCX on a developer machine in each shell, in a Dockerfile, on an air-gapped host and in a generic CI job.
+editUrl: https://github.com/ocx-sh/www-setup/blob/main/site/src/content/docs/examples.mdx
+---
+{/* doc_type: how-to */}
+{/* doc_tier: everyday */}
+
+import ShellSession from '@ocx-sh/theme/components/ShellSession.astro';
+import Tabs from '@ocx-sh/theme/components/Tabs.astro';
+import TabItem from '@ocx-sh/theme/components/TabItem.astro';
+import Cast from '../../components/Cast.astro';
+
+Four setups cover most installs: a developer machine, a container image, a host with no registry access and a CI job.
+Each example shows the command and the lines the installer prints to stderr.
+For GitHub Actions and GitLab, use the [maintained integrations](/install/#ci) instead of the generic job below.
+
+## Install on a developer machine {#dev-box}
+
+Run the installer in the shell you use every day.
+The version in the output is the release that was current when this page was written.
+Yours shows the latest release.
+
+<Tabs syncKey="shell">
+  <TabItem label="Shell" icon="shell">
+
+<ShellSession title="Shell on Linux">
+
+```sh
+curl -fsSL https://setup.ocx.sh/sh | sh
+```
+
+```log
+ocx-install: Resolving latest version...
+ocx-install: Installing ocx v0.6.5...
+ocx-install: Downloading ocx-x86_64-unknown-linux-gnu.tar.gz...
+ocx-install: Checksum verified.
+ocx-install: Running ocx self setup...
+```
+
+</ShellSession>
+
+<Cast name="examples/dev-box-sh" title="Install OCX in a POSIX shell" />
+
+  </TabItem>
+  <TabItem label="PowerShell" icon="powershell">
+
+<ShellSession title="PowerShell on Windows">
+
+```powershell
+irm https://setup.ocx.sh/pwsh | iex
+```
+
+```log
+ocx-install: Resolving latest version...
+ocx-install: Installing ocx v0.6.5...
+ocx-install: Downloading ocx-x86_64-pc-windows-msvc.zip...
+ocx-install: Checksum verified.
+ocx-install: Running ocx self setup...
+```
+
+</ShellSession>
+
+<Cast name="examples/dev-box-pwsh" title="Install OCX in PowerShell" />
+
+  </TabItem>
+  <TabItem label="Nushell" icon="nushell">
+
+<ShellSession title="Nushell on Linux">
+
+```nu
+nu -c (http get https://setup.ocx.sh/nu)
+```
+
+```log
+ocx-install: Resolving latest version...
+ocx-install: Installing ocx v0.6.5...
+ocx-install: Checksum verified.
+ocx-install: Running ocx self setup...
+```
+
+</ShellSession>
+
+<Cast name="examples/dev-box-nu" title="Install OCX in Nushell" />
+
+  </TabItem>
+  <TabItem label="fish" icon="fish">
+
+<ShellSession title="fish on Linux">
+
+```fish
+curl -fsSL https://setup.ocx.sh/fish | fish
+```
+
+```log
+ocx-install: Resolving latest version...
+ocx-install: Installing ocx v0.6.5...
+ocx-install: Checksum verified.
+ocx-install: Running ocx self setup...
+```
+
+</ShellSession>
+
+<Cast name="examples/dev-box-fish" title="Install OCX in fish" />
+
+  </TabItem>
+  <TabItem label="Elvish" icon="elvish">
+
+<ShellSession title="Elvish on Linux">
+
+```sh
+elvish -c (e:curl -fsSL https://setup.ocx.sh/elvish | slurp)
+```
+
+```log
+ocx-install: Resolving latest version...
+ocx-install: Installing ocx v0.6.5...
+ocx-install: Checksum verified.
+ocx-install: Running ocx self setup...
+```
+
+</ShellSession>
+
+<Cast name="examples/dev-box-elvish" title="Install OCX in Elvish" />
+
+  </TabItem>
+</Tabs>
+
+`ocx self setup` prints its own progress after the last line shown.
+Open a new terminal and run `ocx about` to confirm the install.
+Run the same command again later, and the installer reports the version it finds and exits 0 unless you set `OCX_INSTALL_FORCE`.
+
+## Install in a Dockerfile {#dockerfile}
+
+Install `ocx` into an image so every container starts with it on the path.
+Pin the installer and the `ocx` version, so a rebuild next month produces the same image.
+Set `OCX_NO_MODIFY_PATH` because a container has no interactive profile to edit.
+
+```dockerfile
+FROM debian:12-slim
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/*
+ENV OCX_HOME=/opt/ocx
+RUN curl -fsSL https://setup.ocx.sh/sh/0.2.2 | OCX_INSTALL_VERSION=0.6.5 OCX_NO_MODIFY_PATH=1 sh
+ENV PATH="${OCX_HOME}/symlinks/ocx.sh/ocx/cli/current/content/bin:${PATH}"
+```
+
+Build the image and ask the installed `ocx` for its version:
+
+<ShellSession title="Build and run the image">
+
+```sh
+docker build --quiet --tag ocx-box . > /dev/null
+docker run --rm ocx-box ocx version
+```
+
+```log
+0.6.5
+```
+
+</ShellSession>
+
+<Cast name="examples/dockerfile" title="Build an image with OCX installed" />
+
+## Install on an air-gapped host {#air-gapped}
+
+A host with no route to the OCX registry cannot run `ocx self setup`, which pulls the package store from the registry.
+Set `OCX_INSTALL_NO_SETUP` to place the `ocx` binary in the bin directory and skip that step.
+Point the installer at your internal [mirror](/install/mirrors/) for the manifest and the archive.
+Copy the installer script to the host first, for example from `https://setup.ocx.sh/archive/0.2.2/install.sh`.
+
+```sh
+export OCX_HOME=/opt/ocx
+export OCX_INSTALL_DIST_URL="https://mirror.corp.example/ocx/dist/${OCX_DIST_SHA256}.json"
+export OCX_INSTALL_MIRROR_URL=https://mirror.corp.example/ocx/releases
+export OCX_INSTALL_VERSION=0.6.5
+```
+
+Add `OCX_INSTALL_PRINT_PATH` to print the bin directory, and `OCX_INSTALL_QUIET` to keep informational messages off stderr:
+
+<ShellSession title="Place the binary and print its directory">
+
+```sh
+OCX_INSTALL_NO_SETUP=1 OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 sh install.sh
+```
+
+```log
+/opt/ocx/symlinks/ocx.sh/ocx/cli/current/content/bin
+```
+
+</ShellSession>
+
+<Cast name="examples/air-gapped" title="Install OCX without ocx self setup" />
+
+`ocx self update` does not manage a binary placed this way.
+Run the installer again with a new version to update it.
+
+## Install in a generic CI job {#ci-wrapper}
+
+For a CI system with no maintained integration, call the installer in the job and put the bin directory on the path.
+Stdout carries only the bin directory when `OCX_INSTALL_PRINT_PATH` is set, so `tail -n1` captures it.
+A pipeline in a POSIX shell reports the status of its last command, so check that the binary exists.
+Without the check, a failed download leaves `BIN_DIR` empty and the job continues.
+
+<ShellSession title="Capture the bin directory in CI">
+
+```sh
+BIN_DIR=$(curl -fsSL https://setup.ocx.sh/sh/0.2.2 | OCX_INSTALL_VERSION=0.6.5 OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 sh | tail -n1)
+test -x "$BIN_DIR/ocx" || { echo "ocx install failed" >&2; exit 1; }
+export PATH="$BIN_DIR:$PATH"
+echo "$BIN_DIR"
+```
+
+```log
+/home/runner/.ocx/symlinks/ocx.sh/ocx/cli/current/content/bin
+```
+
+</ShellSession>
+
+<Cast name="examples/ci-wrapper" title="Capture the OCX bin directory in a CI job" />
+
+The installer exits with a specific code for each failure kind.
+[Exit codes and contract](/install/reference/#exit-codes) lists them for the job's error handling.
