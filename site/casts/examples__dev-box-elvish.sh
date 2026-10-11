@@ -6,7 +6,7 @@
 # title: Install OCX in Elvish
 # description: Run the Elvish installer from setup.ocx.sh from a POSIX shell.
 
-# Environment: see site/scripts/run-cast-script.sh; the script runs in a fresh container as the user runner.
+# Environment: see site/scripts/run-cast-script.sh; the script runs in a fresh container as the user runner, with the tree's installers behind setup.ocx.sh (site/casts/shim/curl).
 # The cast region is what the page shows; setup and verification run silently.
 set -euo pipefail
 

@@ -6,8 +6,9 @@
 # Kind: TOOL (bash). Exit: the driver's status, 2 usage, 69 docker is missing.
 # env: CAST_TMP (required, scratch directory the driver logs into), CAST_RUNNER (container, default, or host),
 # CAST_IMAGE (the image built from site/casts/Dockerfile), CAST_COLUMNS.
-# container: a fresh container of that image, as its user `runner`, with an empty home. host: a clean environment on
-# this machine, for the one cast that drives docker itself.
+# container: a fresh container of that image, as its user `runner`, with an empty home. The repository is mounted
+# read-only at /cast/tree and site/casts/shim/curl comes first on PATH, so a setup.ocx.sh installer URL serves the tree's
+# src/install.*. host: a clean environment on this machine, for the one cast that drives docker itself.
 set -euo pipefail
 
 [[ $# -eq 1 && -n ${CAST_TMP:-} ]] || {
@@ -19,13 +20,15 @@ command -v docker >/dev/null || {
     exit 69
 }
 driver=$(realpath "$1")
+tree=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 chmod 0777 "$CAST_TMP" # the container user is not this user
 
 case ${CAST_RUNNER:-container} in
     container)
         exec docker run --rm --tty --init \
             --volume "$driver:/cast/driver.sh:ro" --volume "$CAST_TMP:/cast/tmp" \
-            --env CAST_TMP=/cast/tmp --env TERM=xterm-256color --env LANG=C.UTF-8 --env "COLUMNS=${CAST_COLUMNS:-100}" \
+            --volume "$tree:/cast/tree:ro" --volume "$tree/site/casts/shim:/cast/shim:ro" \
+            --env PATH=/cast/shim:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin --env CAST_TMP=/cast/tmp --env TERM=xterm-256color --env LANG=C.UTF-8 --env "COLUMNS=${CAST_COLUMNS:-100}" \
             "${CAST_IMAGE:-ocx-casts}" bash /cast/driver.sh
         ;;
     host)
