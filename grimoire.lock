@@ -1,0 +1,180 @@
+agent = []
+
+[metadata]
+lock_version = 1
+declaration_hash_version = 1
+declaration_hash = "sha256:a18d08112aae7825c227e431a77121f10a17c310b0acae7c81b108d8bee159d4"
+generated_by = "grim 0.14.3"
+generated_at = "2026-10-11T16:26:53Z"
+
+[[skill]]
+name = "code-docs-cleanup"
+pinned = "ghcr.io/ocx-sh/lore/code-docs-cleanup@sha256:4b312606567dab8769e98fcf9770072bc425e6f2e9d1b71a3638e9c60bcaed18"
+
+[[skill.bundles]]
+repo = "ghcr.io/ocx-sh/lore/code-docs-essentials"
+tag = "latest"
+
+[[skill.bundles]]
+repo = "ghcr.io/ocx-sh/lore/shell-essentials"
+tag = "latest"
+
+[[skill]]
+name = "docs-instrument"
+pinned = "ghcr.io/ocx-sh/lore/docs-instrument@sha256:fb3e1c487517dfacac9761ad95070479faa77a7a089e8fb61219dd813f92213b"
+bundle = "ghcr.io/ocx-sh/lore/docs-essentials"
+bundle_tag = "latest"
+
+[[skill]]
+name = "docs-plan"
+pinned = "ghcr.io/ocx-sh/lore/docs-plan@sha256:09751a25d1535543ac0cae1a52273ec3e1938b9db577b83509de025508757180"
+bundle = "ghcr.io/ocx-sh/lore/docs-essentials"
+bundle_tag = "latest"
+
+[[skill]]
+name = "docs-review"
+pinned = "ghcr.io/ocx-sh/lore/docs-review@sha256:e3a08c62f16489d01c00d702fc780c485d85f0cf3f22948e3d07ba09c7e0a3f4"
+bundle = "ghcr.io/ocx-sh/lore/docs-essentials"
+bundle_tag = "latest"
+
+[[skill]]
+name = "installer-script"
+pinned = "ghcr.io/ocx-sh/lore/installer-script@sha256:916d113c1d8abfae9c2809b47a2a6c55cf82b2b26a80c4a16757a9ab14589e72"
+bundle = "ghcr.io/ocx-sh/lore/shell-essentials"
+bundle_tag = "latest"
+
+[[skill]]
+name = "shell-diagnose"
+pinned = "ghcr.io/ocx-sh/lore/shell-diagnose@sha256:5c36130dceb8ae2bf8ea331d9b4731a9c4c9da5e0bdf822810945ae84f2d29dd"
+bundle = "ghcr.io/ocx-sh/lore/shell-essentials"
+bundle_tag = "latest"
+
+[[skill]]
+name = "shell-integration"
+pinned = "ghcr.io/ocx-sh/lore/shell-integration@sha256:f6955152349af754cf26ddc73a936d0c0e21cb289525eb21b02dd67f028ef994"
+bundle = "ghcr.io/ocx-sh/lore/shell-essentials"
+bundle_tag = "latest"
+
+[[skill]]
+name = "shell-port"
+pinned = "ghcr.io/ocx-sh/lore/shell-port@sha256:b05c189ec9d8681729a882ccfc68dbcd8a50c72744f11a89a03cb58ef41c8550"
+bundle = "ghcr.io/ocx-sh/lore/shell-essentials"
+bundle_tag = "latest"
+
+[[rule]]
+name = "code-docs"
+pinned = "ghcr.io/ocx-sh/lore/code-docs@sha256:0f0e026af937583e31a597a7d6b98b352ac7fefda15dd2e2c000ec31f857883a"
+
+[[rule.bundles]]
+repo = "ghcr.io/ocx-sh/lore/code-docs-essentials"
+tag = "latest"
+
+[[rule.bundles]]
+repo = "ghcr.io/ocx-sh/lore/shell-essentials"
+tag = "latest"
+
+[[rule]]
+name = "docs-quality"
+pinned = "ghcr.io/ocx-sh/lore/docs-quality@sha256:065355e0be2ce30d340c71b57bb10c5360a954a166023199535cedee56cee96c"
+bundle = "ghcr.io/ocx-sh/lore/docs-essentials"
+bundle_tag = "latest"
+
+[[rule]]
+name = "powershell-quality"
+pinned = "ghcr.io/ocx-sh/lore/powershell-quality@sha256:d2b1e694db41e39d56d6f1ccd4b87c9046fac5c026e374f594bde494b2aab917"
+bundle = "ghcr.io/ocx-sh/lore/shell-essentials"
+bundle_tag = "latest"
+
+[[rule]]
+name = "shell-quality"
+pinned = "ghcr.io/ocx-sh/lore/shell-quality@sha256:737adb8dfab155b1569aec93c709fea413c07af612ec0976e1e1d3aada95cef7"
+bundle = "ghcr.io/ocx-sh/lore/shell-essentials"
+bundle_tag = "latest"
+
+[[bundle]]
+name = "code-docs-essentials"
+repo = "ghcr.io/ocx-sh/lore/code-docs-essentials"
+tag = "latest"
+pinned = "ghcr.io/ocx-sh/lore/code-docs-essentials@sha256:183da12123e068eb066bd211bd837e4a8fcd5f2de1f1db222b3c34e0b740039a"
+
+[[bundle.member]]
+kind = "skill"
+name = "code-docs-cleanup"
+id = "ghcr.io/ocx-sh/lore/code-docs-cleanup:latest"
+
+[[bundle.member]]
+kind = "rule"
+name = "code-docs"
+id = "ghcr.io/ocx-sh/lore/code-docs:latest"
+
+[[bundle]]
+name = "docs-essentials"
+repo = "ghcr.io/ocx-sh/lore/docs-essentials"
+tag = "latest"
+pinned = "ghcr.io/ocx-sh/lore/docs-essentials@sha256:21469c134d44ace8bc6f0d2468aadb972394c29aaf0deb0d52b33636832abb6d"
+
+[[bundle.member]]
+kind = "skill"
+name = "docs-instrument"
+id = "ghcr.io/ocx-sh/lore/docs-instrument:latest"
+
+[[bundle.member]]
+kind = "skill"
+name = "docs-plan"
+id = "ghcr.io/ocx-sh/lore/docs-plan:latest"
+
+[[bundle.member]]
+kind = "skill"
+name = "docs-review"
+id = "ghcr.io/ocx-sh/lore/docs-review:latest"
+
+[[bundle.member]]
+kind = "rule"
+name = "docs-quality"
+id = "ghcr.io/ocx-sh/lore/docs-quality:latest"
+
+[[bundle]]
+name = "shell-essentials"
+repo = "ghcr.io/ocx-sh/lore/shell-essentials"
+tag = "latest"
+pinned = "ghcr.io/ocx-sh/lore/shell-essentials@sha256:2883d0c80e1ce01c98bf9bd63cb89bca226b4ba0c8de97c9774f9af728154079"
+
+[[bundle.member]]
+kind = "skill"
+name = "code-docs-cleanup"
+id = "ghcr.io/ocx-sh/lore/code-docs-cleanup:latest"
+
+[[bundle.member]]
+kind = "skill"
+name = "installer-script"
+id = "ghcr.io/ocx-sh/lore/installer-script:latest"
+
+[[bundle.member]]
+kind = "skill"
+name = "shell-diagnose"
+id = "ghcr.io/ocx-sh/lore/shell-diagnose:latest"
+
+[[bundle.member]]
+kind = "skill"
+name = "shell-integration"
+id = "ghcr.io/ocx-sh/lore/shell-integration:latest"
+
+[[bundle.member]]
+kind = "skill"
+name = "shell-port"
+id = "ghcr.io/ocx-sh/lore/shell-port:latest"
+
+[[bundle.member]]
+kind = "rule"
+name = "code-docs"
+id = "ghcr.io/ocx-sh/lore/code-docs:latest"
+
+[[bundle.member]]
+kind = "rule"
+name = "powershell-quality"
+id = "ghcr.io/ocx-sh/lore/powershell-quality:latest"
+
+[[bundle.member]]
+kind = "rule"
+name = "shell-quality"
+id = "ghcr.io/ocx-sh/lore/shell-quality:latest"

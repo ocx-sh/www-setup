@@ -12,3 +12,18 @@ config:
   MD040: false # fenced-code-language — bare fences list URLs / paths
   MD041: false # first-line-heading — README opens with the HTML logo block
   MD060: false # table-column-style — compact pipe tables
+
+# Installed by grim, not authored here: edits are overwritten on the next
+# install, so findings there are fixed upstream (same set shell-gate.sh skips).
+ignores:
+  - ".agents/**"
+  - ".opencode/**"
+  - ".claude/skills/**"
+  - ".claude/rules/shell-quality.md"
+  - ".claude/rules/shell-quality/**"
+  - ".claude/rules/powershell-quality.md"
+  - ".claude/rules/powershell-quality/**"
+  - ".claude/rules/code-docs.md"
+  - ".claude/rules/code-docs/**"
+  - ".claude/rules/docs-quality.md"
+  - ".claude/rules/docs-quality/**"
