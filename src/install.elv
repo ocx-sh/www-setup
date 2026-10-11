@@ -1,31 +1,38 @@
 #!/usr/bin/env elvish
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
+# Kind: INST
+# Exit: 0 ok, 1 generic, 2 arg/env, 3 network/manifest, 4 checksum, 5 extract, 6 self setup, 7 platform
+# elvish-floor: 0.20.1 (os: module); newest tested 0.21.0. No 129/130/143: elvish has no trap.
 #
-# install.elv — OCX installer for the Elvish shell (Linux, macOS, Windows).
+# install.elv - OCX installer for the Elvish shell (Linux, macOS, Windows).
 # https://ocx.sh
 #
 # This is a THIN BOOTSTRAP. It detects the platform, resolves the release from
 # the self-hosted distribution manifest (dist.json), downloads + verifies the
 # archive against the manifest's inline sha256, then hands off to the downloaded
 # binary's `ocx self setup`. `ocx self setup` owns everything that touches the
-# machine — the package-store self-install, the per-shell env shims under
+# machine - the package-store self-install, the per-shell env shims under
 # $OCX_HOME, and the managed shell-profile activation blocks.
 #
-# Usage:
-#   curl -fsSL https://setup.ocx.sh/elvish | elvish
-#   E:OCX_INSTALL_VERSION=0.5.0 curl -fsSL https://setup.ocx.sh/elvish | elvish
+# Usage: a bare `curl ... | elvish` installs nothing (elvish reads stdin as a
+# line-by-line REPL, fails to parse the multi-line fns and still exits 0), so
+# hand elvish the script text:
 #
-# Pin a version with OCX_INSTALL_VERSION (env); the full OCX_INSTALL_* taxonomy
-# applies, identical to install.sh.
+#   elvish -c "$(curl -fsSL https://setup.ocx.sh/elvish || echo 'exit 3')"   # from a POSIX shell
+#   elvish -c (e:curl -fsSL https://setup.ocx.sh/elvish | slurp)   # from inside elvish
+#
+# A cut-off script fails to parse and runs nothing; the first form exits 3 when
+# the download itself fails, the second exits 2 (elvish wraps the failure). Pin a
+# version (or set any other OCX_* knob) in the environment of the receiving
+# elvish: export OCX_INSTALL_VERSION as 0.5.0 before the first form, or run
+# `set-env OCX_INSTALL_VERSION 0.5.0` before the second. The OCX_INSTALL_*
+# taxonomy is identical to install.sh.
 #
 # Stdout/stderr contract (load-bearing):
 #   - All informational/warning/error messages go to STDERR.
 #   - STDOUT is silent on success unless OCX_INSTALL_PRINT_PATH is truthy, in
 #     which case the FINAL stdout line is the absolute path to the OCX bin dir.
-#
-# Exit codes: 0 ok · 1 generic · 2 arg/env · 3 network/download/manifest ·
-#             4 checksum · 5 extract · 6 'ocx self setup' · 7 unsupported platform
 
 use str
 use platform
@@ -42,7 +49,7 @@ use re
 # Each <TOKEN> is named for the environment variable it backs and is spelled
 # identically in all five installers (install.sh ps1 nu fish elv), so ONE
 # command patches every dialect. Values are single-quoted, which in every
-# dialect means no interpolation and newlines allowed — an entire PEM block can
+# dialect means no interpolation and newlines allowed - an entire PEM block can
 # be substituted for the CA bundle. Values must not contain a single quote.
 #
 # Precedence: environment > embedded > built-in default. A placeholder left
@@ -56,7 +63,7 @@ var cfg-managed-config = '@OCX_MANAGED_CONFIG@'
 
 # --- Helpers ----------------------------------------------------------------
 
-# ocx-cfg <embedded> <fallback> — the embedded value unless it is still an
+# ocx-cfg <embedded> <fallback> - the embedded value unless it is still an
 # unreplaced placeholder. The guard carries no complete token, so no sed of a
 # token above can ever rewrite it.
 fn ocx-cfg {|embedded fallback|
@@ -72,7 +79,7 @@ fn ocx-env {|name fallback|
     if (has-env $name) { put (get-env $name) } else { put $fallback }
 }
 
-# CA bundle (PEM file) for every download — TLS-intercepting corporate proxies.
+# CA bundle (PEM file) for every download - TLS-intercepting corporate proxies.
 # Trust only; the inline sha256 from dist.json stays the integrity boundary.
 fn ocx-ca-bundle {
     ocx-env OCX_INSTALL_CA_BUNDLE (ocx-cfg $cfg-ca-bundle '')
@@ -94,18 +101,81 @@ fn ocx-warn {|msg|
     echo "ocx-install: warning: "$msg >&2
 }
 
+# Temp paths created by this run. Elvish has no trap and `exit` skips `finally`,
+# so ocx-err removes them itself: a failing install must not leave the archive.
+var tmp-paths = []
+
+fn ocx-track {|path|
+    set tmp-paths = [$@tmp-paths $path]
+}
+
+fn ocx-cleanup {
+    for p $tmp-paths { e:rm -rf $p }
+    set tmp-paths = []
+}
+
 fn ocx-err {|msg code|
     echo "ocx-install: error: "$msg >&2
+    ocx-cleanup
     exit $code
+}
+
+# os:mkdir-all is newer than the 0.20.1 floor and `resolve` cannot probe a module
+# member, so fall back at run time rather than die on the older build.
+fn ocx-mkdir-p {|dir|
+    try { os:mkdir-all $dir } catch _ {
+        if (not ?(e:mkdir -p $dir)) { ocx-err "cannot create directory: "$dir 2 }
+    }
 }
 
 var bin-subpath = symlinks/ocx.sh/ocx/cli/current/content/bin
 
-# Attempts per network fetch. Deliberately not an OCX_INSTALL_* knob — three is
+# Attempts per network fetch. Deliberately not an OCX_INSTALL_* knob - three is
 # right for a transient edge failure.
 var download-attempts = 3
 
 # --- Platform detection -----------------------------------------------------
+
+# True when DIR holds a musl dynamic loader. `[nomatch-ok]` makes an empty glob
+# an empty list; without it a no-musl host would throw on every gnu install.
+fn ocx-has-musl-loader {|dir|
+    > (count [$dir/ld-musl-*[nomatch-ok].so.1]) 0
+}
+
+# True when ROOT holds a glibc dynamic loader in any of the usual places.
+fn ocx-has-gnu-loader {|root|
+    > (count [$root/lib64/ld-linux*[nomatch-ok] $root/lib/ld-linux*[nomatch-ok] $root/lib/*/ld-linux*[nomatch-ok] $root/usr/lib/ld-linux*[nomatch-ok] $root/usr/lib64/ld-linux*[nomatch-ok]]) 0
+}
+
+# `ldd --version` text, stdout and stderr together (musl prints it on stderr and
+# exits 1), or '' when there is no ldd. Collected line by line because a failing
+# pipeline discards a `(...)` capture.
+fn ocx-ldd-output {
+    var out = ''
+    try {
+        e:ldd --version 2>&1 | from-lines | each {|l| set out = $out$l"\n" }
+    } catch _ { }
+    put $out
+}
+
+# gnu or musl from evidence under ROOT ('' on a real host), in install.sh's
+# order: ldd output, then a musl loader or alpine-release, then a glibc loader.
+# Exit 7 when nothing decides: guessing glibc hands a static or musl-only host a
+# binary it cannot load.
+fn ocx-detect-libc {|root|
+    var ldd = (ocx-ldd-output)
+    if (str:contains $ldd musl) {
+        put musl
+    } elif (or (str:contains $ldd GLIBC) (str:contains $ldd 'GNU libc') (str:contains $ldd 'GNU C Library')) {
+        put gnu
+    } elif (or (ocx-has-musl-loader $root/lib) (os:exists $root/etc/alpine-release)) {
+        put musl
+    } elif (ocx-has-gnu-loader $root) {
+        put gnu
+    } else {
+        ocx-err "cannot tell glibc from musl on this host (no ldd output, loader file or alpine-release)" 7
+    }
+}
 
 fn ocx-detect-target {
     var os = $platform:os
@@ -119,13 +189,7 @@ fn ocx-detect-target {
         ocx-err "unsupported architecture: "$raw" (expected x86_64 or aarch64)" 7
     }
     if (eq $os linux) {
-        var libc = gnu
-        if (os:exists /etc/alpine-release) {
-            set libc = musl
-        } elif ?(test -e (glob /lib/ld-musl-*.so.1)) {
-            set libc = musl
-        }
-        put $arch"-unknown-linux-"$libc
+        put $arch"-unknown-linux-"(ocx-detect-libc '')
     } elif (eq $os darwin) {
         put $arch"-apple-darwin"
     } elif (eq $os windows) {
@@ -150,21 +214,35 @@ fn ocx-ca-args {
     if (eq $ca '') { put [] } else { put [--cacert $ca] }
 }
 
+# curl before 7.34 rejects --tlsv1.2, so the flag is sent only when `curl --help all` lists it.
+fn ocx-tls-args {
+    var help = ''
+    if ?(set help = (e:curl --help all 2>&1 | slurp)) {
+        if (str:contains $help --tlsv1.2) {
+            put [--tlsv1.2]
+            return
+        }
+    }
+    put []
+}
+
 # Bounded retry around every network hop. A single transient failure must not
 # abort an install: an edge PoP can serve a 5xx while every other one is
 # healthy, and both fetches (manifest, archive) are idempotent GETs.
 #
-# ponytail: retries on ANY failure instead of inspecting the status code —
+# ponytail: retries on ANY failure instead of inspecting the status code -
 # doing that would mean parsing curl errors in five dialects. The ceiling is
 # that a genuine 404 costs two extra requests before it still exits 3.
 # Fetch a URL as text (the manifest) -> stdout. Uses external curl.
 fn ocx-fetch-text {|url|
+    ocx-assert-https $url
     var ca = (ocx-ca-args)
+    var tls = (ocx-tls-args)
     var out = ''
     var attempt = 1
     var delay = 1
     while $true {
-        if ?(set out = (e:curl --proto '=https' --tlsv1.2 $@ca -fsSL $url 2>/dev/null | slurp)) {
+        if ?(set out = (e:curl --proto '=https' $@tls $@ca -fsSL $url 2>/dev/null | slurp)) {
             put $out
             return
         }
@@ -180,11 +258,13 @@ fn ocx-fetch-text {|url|
 
 # Download a URL to a file (the archive). Returns via exit status of curl.
 fn ocx-download-file {|url dest|
+    ocx-assert-https $url
     var ca = (ocx-ca-args)
+    var tls = (ocx-tls-args)
     var attempt = 1
     var delay = 1
     while $true {
-        if ?(e:curl --proto '=https' --tlsv1.2 $@ca -fsSL -o $dest $url 2>/dev/null) {
+        if ?(e:curl --proto '=https' $@tls $@ca -fsSL -o $dest $url 2>/dev/null) {
             put $true
             return
         }
@@ -201,26 +281,34 @@ fn ocx-download-file {|url dest|
 
 # --- Checksum verification --------------------------------------------------
 
-# `&required` makes a missing sha256 tool FATAL instead of a warning. On the
-# content-addressed manifest path the digest is the only thing authenticating
-# the pin, so degrading to "unverified" there would hand back whatever the
-# mirror served while the URL still claimed to be a pin.
-fn ocx-verify-checksum {|file expected &required=$false|
+# certutil prints the digest on its own line between two status lines, with CRLF
+# endings and (older builds) spaces between byte pairs. Match per line: one
+# re:find over the whole stream yields a match map, which str:to-lower rejects.
+fn ocx-certutil-digest {|file|
+    e:certutil -hashfile $file SHA256 | from-lines | each {|ln|
+        var c = (str:replace ' ' '' (str:trim-space $ln))
+        if (re:match '^[0-9a-fA-F]{64}$' $c) { put $c }
+    } | take 1
+}
+
+# Fails closed: with no hash tool the download is NOT trusted. The digest is the
+# only thing authenticating the archive and the pinned manifest.
+fn ocx-verify-checksum {|file expected|
     var actual = ''
     if (eq $platform:os windows) {
-        # certutil prints a hash line between two status lines.
-        set actual = (e:certutil -hashfile $file SHA256 | re:find '[0-9a-fA-F]{64}' (all) | take 1)
-    } else {
-        if (has-external sha256sum) {
-            set actual = (str:split ' ' (e:sha256sum $file) | take 1)
-        } elif (has-external shasum) {
-            set actual = (str:split ' ' (e:shasum -a 256 $file) | take 1)
-        } elif $required {
-            ocx-err "neither sha256sum nor shasum found — cannot verify the pinned manifest; install coreutils, or point OCX_INSTALL_DIST_URL at the rolling manifest" 2
-        } else {
-            ocx-warn "neither sha256sum nor shasum found — SKIPPING CHECKSUM VERIFICATION"
-            return
+        if (not (has-external certutil)) {
+            ocx-err "certutil not found - cannot verify the download" 2
         }
+        set actual = (ocx-certutil-digest $file)
+    } elif (has-external sha256sum) {
+        set actual = (str:split ' ' (e:sha256sum $file) | take 1)
+    } elif (has-external shasum) {
+        set actual = (str:split ' ' (e:shasum -a 256 $file) | take 1)
+    } elif (has-external openssl) {
+        # "SHA2-256(path)= HEX" (openssl 3) or "SHA256(path)= HEX" (1.x)
+        set actual = (re:replace '^.*= ' '' (e:openssl dgst -sha256 $file))
+    } else {
+        ocx-err "no SHA-256 tool found (sha256sum, shasum or openssl) - cannot verify the download" 2
     }
     if (not-eq (str:to-lower $expected) (str:to-lower $actual)) {
         ocx-err "checksum mismatch for "$file": expected "$expected" got "$actual 4
@@ -234,8 +322,8 @@ fn ocx-verify-checksum {|file expected &required=$false|
 #
 # `ocx-mirror dist sync` keeps every manifest it has ever published at
 # dist/<sha256>.json beside the rolling dist.json, and so does setup.ocx.sh.
-# Pointing OCX_INSTALL_DIST_URL at one of those pins the WHOLE closure — every
-# release row carries an inline sha256 — so checking the body against the digest
+# Pointing OCX_INSTALL_DIST_URL at one of those pins the WHOLE closure - every
+# release row carries an inline sha256 - so checking the body against the digest
 # in its own name makes the pin self-authenticating and leaves the mirror as
 # pure transport. Unverified, a content-addressed URL is just a URL.
 fn ocx-dist-pin-digest {|url|
@@ -258,10 +346,11 @@ fn ocx-fetch-dist {|url|
     # Staged to a file: the digest covers the bytes as served, and `slurp` of a
     # curl pipeline would not survive the trailing newline intact everywhere.
     var tmp = (str:trim-space (e:mktemp))
+    ocx-track $tmp
     if (not (ocx-download-file $url $tmp)) {
         ocx-err "failed to fetch "$url 3
     }
-    ocx-verify-checksum $tmp $pin &required=$true
+    ocx-verify-checksum $tmp $pin
     var body = (slurp < $tmp)
     e:rm -f $tmp
     put $body
@@ -286,7 +375,7 @@ fn ocx-safe-extract {|archive dest|
     }
     # Only flags accepted by BOTH GNU tar and macOS bsdtar (--no-overwrite-dir is GNU-only).
     if (not ?(e:tar xf $archive -C $dest --no-same-owner --no-same-permissions 2>/dev/null)) {
-        ocx-err "failed to extract "$archive" — ensure tar is available" 5
+        ocx-err "failed to extract "$archive" - ensure tar is available" 5
     }
 }
 
@@ -326,7 +415,7 @@ fn ocx-field {|row key|
 fn ocx-run-self-setup {|bin pre post|
     ocx-say "Running ocx self setup..."
     if (not ?((external $bin) $@pre self setup $@post)) {
-        ocx-err "'ocx self setup' failed — see the output above for details" 6
+        ocx-err "'ocx self setup' failed - see the output above for details" 6
     }
 }
 
@@ -383,29 +472,29 @@ fn ocx-main {|@args|
     # The CA bundle is either a path or the PEM text itself. The embedded
     # placeholder is single-quoted in every dialect and single quotes span
     # newlines, so a whole PEM block can be substituted straight into the
-    # script — no second file to ship alongside the mirrored installer. Inline
+    # script - no second file to ship alongside the mirrored installer. Inline
     # PEM is materialized to a temp file, which is what curl needs; it is a
-    # public certificate, so it is left for TMPDIR to reap rather than threaded
-    # through every error path.
+    # public certificate, removed with the other temp paths when the run ends.
     var ca_bundle = (ocx-ca-bundle)
     # A real bundle may open with comment lines or a certificate label
     # (Fedora/RHEL ship exactly that), so detect PEM by CONTENT, not by a
     # leading marker: a filesystem path can never contain "-----BEGIN".
     if (str:contains $ca_bundle '-----BEGIN') {
         var ca_tmp = (str:trim-space (e:mktemp | slurp))
+        ocx-track $ca_tmp
         print $ca_bundle"\n" > $ca_tmp
         set-env OCX_INSTALL_CA_BUNDLE $ca_tmp
     } elif (and (not-eq $ca_bundle '') (not (os:exists $ca_bundle))) {
         ocx-err "OCX_INSTALL_CA_BUNDLE is neither a readable file nor an inline PEM block: "$ca_bundle 2
     }
     # `ocx self setup` does its own HTTPS work (it pulls the package store from
-    # the registry), so the same bundle is handed down — that is what makes ONE
+    # the registry), so the same bundle is handed down - that is what makes ONE
     # corporate CA cover BOTH hops. Two variables, because two ocx generations:
-    #   * OCX_EXTRA_CA_CERTS — the value AS SUPPLIED (path or PEM text; ocx does
+    #   * OCX_EXTRA_CA_CERTS - the value AS SUPPLIED (path or PEM text; ocx does
     #     the same content sniff). `ocx self setup` persists the certificate
     #     text into $OCX_HOME/config.toml, so every later ocx invocation trusts
     #     the CA, on every OS. An older ocx ignores the unknown variable.
-    #   * SSL_CERT_FILE — the materialized PATH, which is how an older ocx
+    #   * SSL_CERT_FILE - the materialized PATH, which is how an older ocx
     #     discovers a host trust store (Linux only; a no-op elsewhere).
     # A value already in the environment wins, as everywhere.
     if (and (not-eq (ocx-ca-bundle) '') (eq (ocx-env SSL_CERT_FILE '') '')) {
@@ -447,7 +536,7 @@ fn ocx-main {|@args|
         }
         var exe = (if (eq $platform:os windows) { put ocx.exe } else { put ocx })
         ocx-say "Test mode: installing local binary as the candidate (no download)."
-        os:mkdir-all $bin_dir
+        ocx-mkdir-p $bin_dir
         e:cp -f $test_bin $bin_dir"/"$exe
         if (not-eq $platform:os windows) { e:chmod +x $bin_dir"/"$exe }
         if $no_setup {
@@ -492,7 +581,7 @@ fn ocx-main {|@args|
         var old = ''
         try { set old = (str:trim-space ((external $existing) version)) } catch _ { }
         if (and (eq $old $version) (not $force)) {
-            ocx-say "ocx v"$version" already installed at "$existing" (set OCX_INSTALL_FORCE=1 to reinstall)"
+            ocx-say "ocx v"$version" already installed at "$existing" (set OCX_INSTALL_FORCE to 1 to reinstall)"
             ocx-export-github-path $ocx_home
             if $print_path { echo $bin_dir }
             return
@@ -510,23 +599,22 @@ fn ocx-main {|@args|
     if (or (eq $url '') (eq $filename '')) {
         ocx-err "manifest row for v"$version"/"$target" is missing url/filename" 3
     }
+    if (not (re:match '^[0-9a-fA-F]{64}$' $sha)) {
+        ocx-err "manifest row for v"$version"/"$target" has no valid sha256" 3
+    }
     if (not-eq $mirror_url '') {
         set url = (str:trim-right $mirror_url /)"/"$tag"/"$filename
     }
 
     ocx-say "Installing ocx v"$version"..."
     var tmpdir = (str:trim-space (e:mktemp -d))
+    ocx-track $tmpdir
     var archive = $tmpdir"/"$filename
     if (not (ocx-download-file $url $archive)) {
-        e:rm -rf $tmpdir
-        ocx-err "failed to download "$url" — ensure v"$version" is a valid release for "$target 3
+        ocx-err "failed to download "$url" - ensure v"$version" is a valid release for "$target 3
     }
 
-    if (not-eq $sha '') {
-        ocx-verify-checksum $archive $sha
-    } else {
-        ocx-warn "no inline checksum for "$filename" in the manifest — skipping verification"
-    }
+    ocx-verify-checksum $archive $sha
 
     ocx-safe-extract $archive $tmpdir
 
@@ -538,19 +626,18 @@ fn ocx-main {|@args|
     } elif (os:exists $flat) {
         set bin = $flat
     } else {
-        e:rm -rf $tmpdir
         ocx-err "could not find ocx binary in archive" 5
     }
     if (not-eq $platform:os windows) { e:chmod +x $bin }
 
     if (not $no_smoketest) {
         if (not ?((external $bin) version >/dev/null 2>&1)) {
-            ocx-warn "binary failed to execute in temp directory — your /tmp may be mounted with noexec"
+            ocx-warn "binary failed to execute in temp directory - your /tmp may be mounted with noexec"
         }
     }
 
     if $no_setup {
-        os:mkdir-all $bin_dir
+        ocx-mkdir-p $bin_dir
         e:cp -f $bin $bin_dir"/"$exe
         if (not-eq $platform:os windows) { e:chmod +x $bin_dir"/"$exe }
         ocx-say "Installed to "$bin_dir"/"$exe
@@ -558,9 +645,9 @@ fn ocx-main {|@args|
         ocx-run-self-setup $bin [] [$version $@managed_post]
     }
 
-    e:rm -rf $tmpdir
     ocx-export-github-path $ocx_home
     if $print_path { echo $bin_dir }
 }
 
-ocx-main $@args
+# finally covers an uncaught exception (a failed external); ocx-err covers exit.
+try { ocx-main $@args } finally { ocx-cleanup }
