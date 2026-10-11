@@ -2,4 +2,4 @@ allowBuilds:
   esbuild: true
   sharp: true
   # The theme pinned to a website commit builds its type declarations on install (prepack).
-  '@ocx-sh/theme@https://codeload.github.com/ocx-sh/website/tar.gz/f3814ad4c5a3f95c886b8f9657e14889001b79d9#path:/packages/theme': true
+  '@ocx-sh/theme@https://codeload.github.com/ocx-sh/website/tar.gz/708b79240ed9dbb39bd7b66b2c91b0ad0c6c596a#path:/packages/theme': true

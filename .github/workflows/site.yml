@@ -103,7 +103,7 @@ jobs:
           path: dist
       - name: Deploy
         id: deploy
-        uses: ocx-sh/website/.github/actions/deploy@f3814ad4c5a3f95c886b8f9657e14889001b79d9 # theme pin, replace with the deploy action release SHA
+        uses: ocx-sh/website/.github/actions/deploy@708b79240ed9dbb39bd7b66b2c91b0ad0c6c596a # ocx-sh/website PR 21, same commit as the theme pin
         with:
           dist: dist
           storage-key: ${{ secrets.BUNNY_STORAGE_KEY }}
