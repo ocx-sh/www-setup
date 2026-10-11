@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# Kind: TEST. Dialect: bash 3.2 under bats; runs src/install.sh on the sh of the CI leg.
 # Stdout/stderr discipline. Documents the load-bearing contract that lets
 # downstream wrappers do `BIN_DIR=$(./install.sh | tail -n1)`.
 
@@ -54,20 +55,24 @@ setup() {
 @test "OCX_INSTALL_PRINT_PATH=1 prints the bin dir as the final stdout line" {
     OCX_INSTALL_PRINT_PATH=1 run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
-    [ "${lines[${#lines[@]}-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+    [ "${lines[${#lines[@]} - 1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
 }
 
 @test "stderr carries the informational banner even with PRINT_PATH set" {
     OCX_INSTALL_PRINT_PATH=1 run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
     echo "$stderr" | grep -q 'Installing\|Detected\|Downloading\|Verified\|self setup\|installed'
-    ! echo "$stdout" | grep -q 'Installing\|Detected\|Downloading\|Verified'
+    if echo "$stdout" | grep -q 'Installing\|Detected\|Downloading\|Verified'; then
+        false
+    fi
 }
 
 @test "OCX_INSTALL_QUIET=1 silences stderr informational lines" {
     OCX_INSTALL_QUIET=1 run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
-    ! echo "$stderr" | grep -q 'Installing\|Downloading\|Detected platform' || false
+    if echo "$stderr" | grep -q 'Installing\|Downloading\|Detected platform'; then
+        false
+    fi
 }
 
 @test "error messages always go to stderr (exit 2 path)" {
@@ -84,7 +89,7 @@ setup() {
     __OCX_TESTING_INSTALL_BINARY="$_localbin" OCX_INSTALL_PRINT_PATH=1 \
         run --separate-stderr sh "$INSTALL_SH"
     [ "$status" -eq 0 ]
-    [ "${lines[${#lines[@]}-1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+    [ "${lines[${#lines[@]} - 1]}" = "${OCX_HOME}/${BIN_SUBPATH}" ]
 }
 
 @test "__OCX_TESTING_INSTALL_BINARY mode keeps stdout silent without PRINT_PATH" {

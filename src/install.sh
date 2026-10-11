@@ -2,41 +2,35 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
+# Kind: INST. Dialect: POSIX sh plus probed `local`. Floor: POSIX.1-2017.
+# Exit: 0 ok, 1 generic, 2 usage/env/missing tool, 3 network, 4 checksum, 5 extract, 6 setup, 7 platform, 129 130 143 HUP INT TERM
+# Integrity: sha256 from the manifest at OCX_INSTALL_DIST_URL (another origin than the archive); a dist/<sha256>.json URL pins it.
 # shellcheck disable=SC3043  # `local` verified at runtime by has_local()
-# install.sh — OCX installer for Unix and macOS (bash/zsh/ash/ksh/dash)
+# install.sh - OCX installer for Unix and macOS (bash/zsh/ash/ksh/dash)
 # https://ocx.sh
 #
 # This is a THIN BOOTSTRAP. It detects the platform, resolves the release from
 # the self-hosted distribution manifest (dist.json), downloads + verifies the
 # archive against the manifest's inline sha256, then hands off to the downloaded
 # binary's `ocx self setup`. `ocx self setup` owns everything that touches the
-# machine — the package-store self-install, the per-shell env shims under
+# machine: the package-store self-install, the per-shell env shims under
 # $OCX_HOME, and the managed shell-profile activation blocks. Run
 # `ocx self setup --help` for the full setup contract.
 #
 # Usage:
 #   curl -fsSL https://setup.ocx.sh/sh | sh
 #   curl -fsSL https://setup.ocx.sh/sh | sh -s -- --no-modify-path
-#   OCX_INSTALL_VERSION=0.5.0 curl -fsSL https://setup.ocx.sh/sh | sh
+#   curl -fsSL https://setup.ocx.sh/sh | OCX_INSTALL_VERSION=0.5.0 sh
 #
 # Stdout/stderr contract (load-bearing):
 #   - All informational/warning/error messages go to STDERR.
 #   - STDOUT is silent on success unless OCX_INSTALL_PRINT_PATH is truthy, in
 #     which case the FINAL stdout line is the absolute path to the OCX bin dir.
-#
-# Exit codes:
-#   0  success
-#   1  generic / legacy
-#   2  argument or environment validation
-#   3  network / download / manifest failure
-#   4  checksum mismatch
-#   5  archive extraction failure
-#   6  'ocx self setup' failure
-#   7  unsupported platform / architecture
 
 set -eu
 
 has_local() { local _ 2>/dev/null; }
+# shellcheck disable=SC2310  # one-line probe, its status is the answer
 has_local || alias local=typeset
 
 # --- Embedded configuration (sed-able) --------------------------------------
@@ -49,7 +43,7 @@ has_local || alias local=typeset
 # Each <TOKEN> is named for the environment variable it backs and is spelled
 # identically in all five installers (install.sh ps1 nu fish elv), so ONE
 # command patches every dialect. Values are single-quoted, which in every
-# dialect means no interpolation and newlines allowed — an entire PEM block can
+# dialect means no interpolation and newlines allowed -- an entire PEM block can
 # be substituted for the CA bundle. Values must not contain a single quote.
 #
 # Precedence: environment > embedded > built-in default. A placeholder left
@@ -61,7 +55,7 @@ __ocx_cfg_mirror_url='@OCX_INSTALL_MIRROR_URL@'
 __ocx_cfg_ca_bundle='@OCX_INSTALL_CA_BUNDLE@'
 __ocx_cfg_managed_config='@OCX_MANAGED_CONFIG@'
 
-# ocx_cfg <embedded> <fallback> — echo the embedded value unless it is still an
+# ocx_cfg <embedded> <fallback> -- echo the embedded value unless it is still an
 # unreplaced placeholder. The guard carries no complete token, so no sed of a
 # token above can ever rewrite it.
 # printf, not echo: dash's echo eats backslash escapes, which would mangle a
@@ -75,10 +69,10 @@ ocx_cfg() {
 
 # --- Configuration (env-driven) ---------------------------------------------
 #
-# Tier 1 — shared OCX env (read by the binary too): OCX_HOME, OCX_NO_MODIFY_PATH,
+# Tier 1 -- shared OCX env (read by the binary too): OCX_HOME, OCX_NO_MODIFY_PATH,
 # OCX_MANAGED_CONFIG. Plus standard externals NO_COLOR, TMPDIR.
 #
-# Tier 2 — installer-only knobs, all OCX_INSTALL_* with a strict grammar:
+# Tier 2 -- installer-only knobs, all OCX_INSTALL_* with a strict grammar:
 #   values (bare nouns):  OCX_INSTALL_VERSION (empty = latest), OCX_INSTALL_REPO,
 #                         OCX_INSTALL_CA_BUNDLE
 #   endpoints (_URL):     OCX_INSTALL_DIST_URL, OCX_INSTALL_MIRROR_URL
@@ -89,9 +83,9 @@ ocx_cfg() {
 OCX_INSTALL_REPO="${OCX_INSTALL_REPO:-ocx-sh/ocx}"
 # Self-hosted distribution manifest (Node-dist-style; newest-first releases with
 # inline per-target sha256 + download URL). Resolved over the HTTPS-enforced
-# downloader — no GitHub API, no token. See get_latest_version / dist_row.
+# downloader -- no GitHub API, no token. See get_latest_version / dist_row.
 # A content-addressed snapshot URL (.../dist/<sha256>.json) pins the manifest and
-# is verified against the digest in its own name — see fetch_dist.
+# is verified against the digest in its own name -- see fetch_dist.
 OCX_INSTALL_DIST_URL="${OCX_INSTALL_DIST_URL:-$(ocx_cfg "$__ocx_cfg_dist_url" "https://setup.ocx.sh/dist.json")}"
 # Artifact host override: when set, the per-target download URL from dist.json is
 # rewritten to ${OCX_INSTALL_MIRROR_URL%/}/<tag>/<filename>. Empty = use the
@@ -102,15 +96,22 @@ OCX_INSTALL_MIRROR_URL="${OCX_INSTALL_MIRROR_URL:-$(ocx_cfg "$__ocx_cfg_mirror_u
 # quirks; --version is sugar where the dialect parses it cleanly.
 OCX_INSTALL_VERSION="${OCX_INSTALL_VERSION:-}"
 
-# Behavioral knobs (truthy: 1 true yes TRUE YES True Yes)
-OCX_INSTALL_NO_SETUP="${OCX_INSTALL_NO_SETUP:-0}"
-OCX_INSTALL_NO_SMOKETEST="${OCX_INSTALL_NO_SMOKETEST:-0}"
-OCX_INSTALL_PRINT_PATH="${OCX_INSTALL_PRINT_PATH:-0}"
-OCX_INSTALL_FORCE="${OCX_INSTALL_FORCE:-0}"
-OCX_INSTALL_QUIET="${OCX_INSTALL_QUIET:-0}"
+# Behavioral knobs (truthy: 1 true yes TRUE YES True Yes), normalised to 1/0 so
+# every use is a plain test.
+truthy01() {
+    case "$1" in
+        1 | true | yes | TRUE | YES | True | Yes) printf '1' ;;
+        *) printf '0' ;;
+    esac
+}
+OCX_INSTALL_NO_SETUP=$(truthy01 "${OCX_INSTALL_NO_SETUP:-0}")
+OCX_INSTALL_NO_SMOKETEST=$(truthy01 "${OCX_INSTALL_NO_SMOKETEST:-0}")
+OCX_INSTALL_PRINT_PATH=$(truthy01 "${OCX_INSTALL_PRINT_PATH:-0}")
+OCX_INSTALL_FORCE=$(truthy01 "${OCX_INSTALL_FORCE:-0}")
+OCX_INSTALL_QUIET=$(truthy01 "${OCX_INSTALL_QUIET:-0}")
 OCX_INSTALL_DOWNLOADER="${OCX_INSTALL_DOWNLOADER:-}"
 
-# CA bundle (PEM file) for every download — TLS-intercepting corporate proxies.
+# CA bundle (PEM file) for every download -- TLS-intercepting corporate proxies.
 # Trust only; the inline sha256 from dist.json stays the integrity boundary.
 OCX_INSTALL_CA_BUNDLE="${OCX_INSTALL_CA_BUNDLE:-$(ocx_cfg "$__ocx_cfg_ca_bundle" "")}"
 
@@ -123,19 +124,12 @@ if [ -z "${OCX_MANAGED_CONFIG:-}" ]; then
     _managed_config=$(ocx_cfg "$__ocx_cfg_managed_config" "")
 fi
 
-# --- Truthy helper ----------------------------------------------------------
-
-is_truthy() {
-    case "$1" in
-        1 | true | yes | TRUE | YES | True | Yes) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
 # --- Output helpers (all go to STDERR) --------------------------------------
 
 say() {
-    is_truthy "$OCX_INSTALL_QUIET" && return 0
+    if [ "$OCX_INSTALL_QUIET" = 1 ]; then
+        return 0
+    fi
     printf 'ocx-install: %s\n' "$1" >&2
 }
 
@@ -149,19 +143,20 @@ err() {
     exit "${2:-1}"
 }
 
-# Replace $HOME prefix with ~ for user-facing display.
+# Replace $HOME prefix with ~ for user-facing display. A case, not sed: a HOME
+# holding sed metacharacters would corrupt the pattern.
 tildify() {
-    echo "$1" | sed "s|^${HOME}|~|"
+    case "$1" in
+        "$HOME") printf '~\n' ;;
+        "$HOME"/*) printf '~%s\n' "${1#"$HOME"}" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
 }
 
 # --- Core utilities ---------------------------------------------------------
 
-check_cmd() {
-    command -v "$1" >/dev/null 2>&1
-}
-
 need_cmd() {
-    if ! check_cmd "$1"; then
+    if ! command -v "$1" >/dev/null 2>&1; then
         err "required command not found: $1" 2
     fi
 }
@@ -172,7 +167,7 @@ ignore() {
 
 get_home() {
     if [ -n "${HOME:-}" ]; then
-        echo "$HOME"
+        printf '%s\n' "$HOME"
     elif [ -n "${USER:-}" ]; then
         getent passwd "$USER" | cut -d: -f6
     else
@@ -182,7 +177,7 @@ get_home() {
 
 HOME="${HOME:-$(get_home)}"
 
-# TTY/color detection — bold-only, respects NO_COLOR (https://no-color.org/).
+# TTY/color detection -- bold-only, respects NO_COLOR (https://no-color.org/).
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
     _bold=$(tput bold 2>/dev/null || echo "")
     _reset=$(tput sgr0 2>/dev/null || echo "")
@@ -195,15 +190,29 @@ fi
 OCX_BIN_SUBPATH="symlinks/ocx.sh/ocx/cli/current/content/bin"
 
 # Attempts per network fetch (see download_to_file). Deliberately not an
-# OCX_INSTALL_* knob — three is right for a transient edge failure and nothing
+# OCX_INSTALL_* knob -- three is right for a transient edge failure and nothing
 # has asked to tune it.
 DOWNLOAD_ATTEMPTS=3
+
+# Run state, set by probes and read by the helpers below. _tmpdir and _ca_tmp
+# live at file level so the EXIT handler still sees them after main returns.
+_downloader=""
+_curl_tls12=0
+_wget_busybox=0
+_wget_https_only=0
+_wget_tls12=0
+_wget_cacert=0
+_tls_unvalidated=0
+_hash_tool=""
+_tmpdir=""
+_ca_tmp=""
+_exit_status=0
 
 # --- Usage ------------------------------------------------------------------
 
 usage() {
     cat >&2 <<'EOF'
-OCX installer — https://ocx.sh
+OCX installer - https://ocx.sh
 
 USAGE:
     curl -fsSL https://setup.ocx.sh/sh | sh
@@ -243,8 +252,39 @@ EOF
 
 # --- Platform detection -----------------------------------------------------
 
+# Set _libc to gnu or musl from evidence on this host, else exit 7: guessing
+# glibc hands a static or musl-only host a binary it cannot load.
+detect_libc() {
+    local _ldd _f
+
+    _ldd=$(ldd --version 2>&1 || true)
+    case "$_ldd" in
+        *musl*)
+            _libc="musl"
+            return 0
+            ;;
+        *GLIBC* | *"GNU libc"* | *"GNU C Library"*)
+            _libc="gnu"
+            return 0
+            ;;
+    esac
+    for _f in /lib/ld-musl-*.so.1 /etc/alpine-release; do
+        if [ -e "$_f" ]; then
+            _libc="musl"
+            return 0
+        fi
+    done
+    for _f in /lib64/ld-linux* /lib/ld-linux* /lib/*/ld-linux* /usr/lib/ld-linux* /usr/lib64/ld-linux*; do
+        if [ -e "$_f" ]; then
+            _libc="gnu"
+            return 0
+        fi
+    done
+    err "cannot tell glibc from musl on this host (no ldd output, loader file or alpine-release)" 7
+}
+
 detect_target() {
-    local _os _arch _libc
+    local _os _arch _libc=""
 
     _os=$(uname -s)
     case "$_os" in
@@ -260,28 +300,19 @@ detect_target() {
     esac
 
     if [ "$_os" = "Darwin" ] && [ "$_arch" = "x86_64" ]; then
-        if sysctl -n hw.optional.arm64 2>/dev/null | grep -q '1'; then
-            say "Detected Apple Silicon running under Rosetta — using native arm64 binary."
+        if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = 1 ]; then
+            say "Detected Apple Silicon running under Rosetta - using native arm64 binary."
             _arch="aarch64"
         fi
     fi
 
     case "$_os" in
         Linux)
-            _libc="gnu"
-            if check_cmd ldd; then
-                case "$(ldd --version 2>&1 || true)" in
-                    *musl*) _libc="musl" ;;
-                esac
-            elif ls /lib/ld-musl-*.so.1 >/dev/null 2>&1; then
-                _libc="musl"
-            elif [ -f /etc/alpine-release ]; then
-                _libc="musl"
-            fi
-            echo "${_arch}-unknown-linux-${_libc}"
+            detect_libc
+            printf '%s-unknown-linux-%s\n' "$_arch" "$_libc"
             ;;
         Darwin)
-            echo "${_arch}-apple-darwin"
+            printf '%s-apple-darwin\n' "$_arch"
             ;;
         *)
             err "unsupported operating system: $_os" 7
@@ -291,8 +322,8 @@ detect_target() {
 
 # --- Download utilities -----------------------------------------------------
 
-# Fail closed on plaintext: wget has no universal "https-only" flag, so we
-# reject non-https URLs ourselves before any request leaves the machine.
+# Fail closed on plaintext before any request leaves the machine: --proto is
+# curl-only, and an overridden URL must not reach a backend that would follow it.
 assert_https_url() {
     case "$1" in
         https://*) return 0 ;;
@@ -304,7 +335,7 @@ detect_downloader() {
     if [ -n "$OCX_INSTALL_DOWNLOADER" ]; then
         case "$OCX_INSTALL_DOWNLOADER" in
             curl | wget)
-                if ! check_cmd "$OCX_INSTALL_DOWNLOADER"; then
+                if ! command -v "$OCX_INSTALL_DOWNLOADER" >/dev/null 2>&1; then
                     err "OCX_INSTALL_DOWNLOADER=$OCX_INSTALL_DOWNLOADER but '$OCX_INSTALL_DOWNLOADER' not on PATH" 2
                 fi
                 _downloader="$OCX_INSTALL_DOWNLOADER"
@@ -316,64 +347,115 @@ detect_downloader() {
         esac
     fi
 
-    if check_cmd curl; then
-        if curl --version 2>&1 | head -1 | grep -qF 'snap'; then
-            warn "detected snap-packaged curl (may have sandbox restrictions)"
-            if check_cmd wget; then
-                _downloader="wget"
-                return
-            fi
-            warn "no wget fallback — continuing with snap curl"
-        fi
+    if command -v curl >/dev/null 2>&1; then
         _downloader="curl"
-    elif check_cmd wget; then
+    elif command -v wget >/dev/null 2>&1; then
         _downloader="wget"
     else
         err "either curl or wget is required to download OCX" 2
     fi
 }
 
-# The CA bundle is passed as its own argv element rather than spliced into an
-# unquoted flag string, so a path containing spaces still works.
-download_once() {
-    local _url="$1" _dest="$2"
+# Send an optional TLS flag only when the tool's own --help lists it: BusyBox
+# wget (stock Alpine) rejects --https-only and --secure-protocol outright, and
+# curl before 7.34 rejects --tlsv1.2, so an unprobed flag fails every download.
+probe_downloader() {
+    local _help
 
     if [ "$_downloader" = "curl" ]; then
-        if [ -n "$OCX_INSTALL_CA_BUNDLE" ]; then
-            curl --proto '=https' --tlsv1.2 --cacert "$OCX_INSTALL_CA_BUNDLE" -fsSL -o "$_dest" "$_url"
-        else
-            curl --proto '=https' --tlsv1.2 -fsSL -o "$_dest" "$_url"
-        fi
-    else
-        assert_https_url "$_url"
-        # --https-only refuses a redirect to http:// (assert_https_url only vets
-        # the INITIAL URL; wget follows up to 20 redirects). TLSv1_2 floor.
-        if [ -n "$OCX_INSTALL_CA_BUNDLE" ]; then
-            wget --secure-protocol=TLSv1_2 --https-only --ca-certificate="$OCX_INSTALL_CA_BUNDLE" -q -O "$_dest" "$_url"
-        else
-            wget --secure-protocol=TLSv1_2 --https-only -q -O "$_dest" "$_url"
-        fi
+        _help=$(curl --help all 2>&1) || true # only the text is read, not the status
+        case "$_help" in
+            *--tlsv1.2*) _curl_tls12=1 ;;
+        esac
+        return 0
     fi
+
+    _help=$(wget --help 2>&1) || true # BusyBox exits 1 after printing its usage
+    case "$_help" in
+        *BusyBox*) _wget_busybox=1 ;;
+    esac
+    case "$_help" in
+        *--https-only*) _wget_https_only=1 ;;
+    esac
+    case "$_help" in
+        *--secure-protocol*) _wget_tls12=1 ;;
+    esac
+    case "$_help" in
+        *--ca-certificate*) _wget_cacert=1 ;;
+    esac
+    if [ "$_wget_busybox" = 1 ]; then
+        warn "BusyBox wget: no TLS floor, redirects are not pinned to https and the server certificate may go unchecked; install curl for a verified download"
+    fi
+    if [ -n "$OCX_INSTALL_CA_BUNDLE" ] && [ "$_wget_cacert" = 0 ]; then
+        err "OCX_INSTALL_CA_BUNDLE is set but this wget cannot take a CA bundle; use curl or GNU wget" 2
+    fi
+}
+
+# One argv per flag set, never an unquoted flag variable: the CA bundle path
+# may contain spaces, and a spliced flag string would split it.
+download_once() {
+    local _url="$1" _dest="$2" _status=0
+
+    if [ "$_downloader" = "curl" ]; then
+        if [ "$_curl_tls12" = 1 ] && [ -n "$OCX_INSTALL_CA_BUNDLE" ]; then
+            curl --proto '=https' --tlsv1.2 --cacert "$OCX_INSTALL_CA_BUNDLE" -fsSL -o "$_dest" "$_url"
+        elif [ "$_curl_tls12" = 1 ]; then
+            curl --proto '=https' --tlsv1.2 -fsSL -o "$_dest" "$_url"
+        elif [ -n "$OCX_INSTALL_CA_BUNDLE" ]; then
+            curl --proto '=https' --cacert "$OCX_INSTALL_CA_BUNDLE" -fsSL -o "$_dest" "$_url"
+        else
+            curl --proto '=https' -fsSL -o "$_dest" "$_url"
+        fi
+        return
+    fi
+
+    # --https-only also refuses a redirect to http://, which assert_https_url
+    # (initial URL only) cannot see; without it that hop is unguarded.
+    set -- -q -O "$_dest"
+    if [ "$_wget_https_only" = 1 ]; then
+        set -- "$@" --https-only
+    fi
+    if [ "$_wget_tls12" = 1 ]; then
+        set -- "$@" --secure-protocol=TLSv1_2
+    fi
+    if [ -n "$OCX_INSTALL_CA_BUNDLE" ]; then
+        set -- "$@" --ca-certificate="$OCX_INSTALL_CA_BUNDLE"
+    fi
+    if [ "$_wget_busybox" != 1 ]; then
+        wget "$@" "$_url"
+        return
+    fi
+    # BusyBox says so on stderr when it skips certificate validation; keep that
+    # note, because it decides whether an unpinned manifest may be trusted.
+    wget "$@" "$_url" 2>"${_dest}.err" || _status=$?
+    cat "${_dest}.err" >&2
+    if grep -q 'certificate validation not implemented' "${_dest}.err"; then
+        _tls_unvalidated=1
+    fi
+    return "$_status"
 }
 
 # Bounded retry around every network hop. A single transient failure must not
 # abort an install: an edge PoP can serve a 5xx while every other one is
 # healthy, and both fetches (manifest, archive) are idempotent GETs.
 #
-# ponytail: retries on ANY failure instead of inspecting the status code —
+# ponytail: retries on ANY failure instead of inspecting the status code --
 # doing that would mean parsing curl/wget/http-client errors in five dialects.
 # The ceiling is that a genuine 404 costs two extra requests before it still
 # exits 3. Raise this to status-aware retry only if that shows up as a real
 # cost.
 download_to_file() {
-    local _url="$1" _dest="$2" _attempt=1 _delay=1
+    local _url="$1" _dest="$2" _msg="$3" _attempt=1 _delay=1
 
+    # <message> is the exit-3 text once every attempt has failed.
+    assert_https_url "$_url"
     while :; do
+        # shellcheck disable=SC2310  # the retry loop reads the status on purpose
         if download_once "$_url" "$_dest"; then
             return 0
         fi
         if [ "$_attempt" -ge "$DOWNLOAD_ATTEMPTS" ]; then
-            return 1
+            err "$_msg" 3
         fi
         say "download failed (attempt ${_attempt}/${DOWNLOAD_ATTEMPTS}), retrying in ${_delay}s"
         sleep "$_delay"
@@ -384,37 +466,42 @@ download_to_file() {
 
 # --- Checksum verification --------------------------------------------------
 
-# verify_checksum <file_path> <expected_sha256> [required]
-# The expected hash comes inline from dist.json — no separate sha256.sum fetch.
-#
-# A non-empty third arg makes a missing sha256 tool FATAL instead of a warning.
-# On the content-addressed manifest path the digest is the only thing
-# authenticating the pin, so degrading to "unverified" there would hand back
-# whatever the mirror served while the URL still claimed to be a pin.
-verify_checksum() {
-    local _file="$1" _expected="$2" _required="${3:-}" _sha_cmd _actual
-
-    if check_cmd sha256sum; then
-        _sha_cmd="sha256sum"
-    elif check_cmd shasum; then
-        _sha_cmd="shasum -a 256"
-    elif [ -n "$_required" ]; then
-        err "neither sha256sum nor shasum found — cannot verify the pinned manifest at ${OCX_INSTALL_DIST_URL}
-  Install coreutils, or point OCX_INSTALL_DIST_URL at the rolling manifest." 2
+# Pick the SHA-256 tool, or exit 2: with none the digest cannot be checked, and
+# installing anyway would run an archive nobody verified.
+probe_hash_tool() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        _hash_tool="sha256sum"
+    elif command -v shasum >/dev/null 2>&1; then
+        _hash_tool="shasum"
+    elif command -v openssl >/dev/null 2>&1; then
+        _hash_tool="openssl"
     else
-        warn "neither sha256sum nor shasum found — SKIPPING CHECKSUM VERIFICATION"
-        warn "install coreutils or set PATH to include sha256sum for verified downloads"
-        return 0
+        err "no SHA-256 tool found (sha256sum, shasum or openssl); cannot verify the download" 2
     fi
+}
 
-    # shellcheck disable=SC2086
-    _actual=$($_sha_cmd "$_file" | awk '{print $1}')
+# Echo the hex SHA-256 of a file with the probed tool.
+file_sha256() {
+    case "$_hash_tool" in
+        sha256sum) sha256sum "$1" | awk '{print $1}' ;;
+        shasum) shasum -a 256 "$1" | awk '{print $1}' ;;
+        openssl) openssl dgst -sha256 "$1" | awk '{print $NF}' ;;
+    esac
+}
+
+# verify_checksum <file_path> <expected_sha256>
+# The expected hash comes inline from dist.json (no separate sha256.sum fetch).
+# A mismatch, an unreadable file or an empty digest all exit 4.
+verify_checksum() {
+    local _file="$1" _expected="$2" _actual
+
+    _actual=$(file_sha256 "$_file")
 
     # Normalize to lowercase for a case-insensitive compare.
     _expected=$(printf '%s' "$_expected" | tr 'A-F' 'a-f')
     _actual=$(printf '%s' "$_actual" | tr 'A-F' 'a-f')
 
-    if [ "$_expected" != "$_actual" ]; then
+    if [ -z "$_actual" ] || [ "$_expected" != "$_actual" ]; then
         err "checksum mismatch for $(basename "$_file")
   expected: $_expected
   got:      $_actual" 4
@@ -430,7 +517,7 @@ verify_checksum() {
 # symlink/hardlink whose target escapes the tree. Then extract with
 # ownership/permission hardening flags. The scans are authoritative; the inline
 # checksum is the primary integrity guard. NB: only flags accepted by BOTH GNU
-# tar and macOS bsdtar are used — --no-overwrite-dir is GNU-only and would abort
+# tar and macOS bsdtar are used -- --no-overwrite-dir is GNU-only and would abort
 # bsdtar, and the fresh mktemp dest has no pre-existing dirs for it to protect.
 safe_extract() {
     local _archive="$1" _dest="$2" _bad_entry _bad_target
@@ -466,7 +553,7 @@ safe_extract() {
 
     tar xf "$_archive" -C "$_dest" \
         --no-same-owner --no-same-permissions 2>/dev/null ||
-        err "failed to extract ${_archive} — ensure tar is installed" 5
+        err "failed to extract ${_archive} -- ensure tar is installed" 5
 }
 
 # --- Distribution manifest (dist.json) --------------------------------------
@@ -476,8 +563,8 @@ safe_extract() {
 #    "latest":{"version":"0.5.0","channel":"stable"},
 #    "latest_next":{"version":"0.6.0-rc.1","channel":"next"},
 #    "releases":[
-#      {"version":"0.5.0","channel":"stable","tag":"v0.5.0","target":"…",
-#       "filename":"ocx-….tar.gz","sha256":"…","url":"https://…"}, …]}
+#      {"version":"0.5.0","channel":"stable","tag":"v0.5.0","target":"...",
+#       "filename":"ocx-....tar.gz","sha256":"...","url":"https://..."}, ...]}
 # We own the format, so a jq-free POSIX parse is safe: `grep -o '{[^{}]*}'`
 # extracts each flat leaf object (it skips the outer container brace because
 # `[^{}]` excludes both braces). No GitHub API, no token.
@@ -490,8 +577,8 @@ safe_extract() {
 #
 # `ocx-mirror dist sync` keeps every manifest it has ever published at
 # dist/<sha256>.json beside the rolling dist.json, and so does setup.ocx.sh.
-# Pointing OCX_INSTALL_DIST_URL at one of those pins the WHOLE closure — every
-# release row carries an inline sha256 — so checking the body against the digest
+# Pointing OCX_INSTALL_DIST_URL at one of those pins the WHOLE closure -- every
+# release row carries an inline sha256 -- so checking the body against the digest
 # in its own name makes the pin self-authenticating and leaves the mirror as
 # pure transport. Unverified, a content-addressed URL is just a URL.
 dist_pin_digest() {
@@ -500,9 +587,8 @@ dist_pin_digest() {
     printf '%s' "${_base##*/}" | sed -n 's/^\([0-9a-f]\{64\}\)\.json$/\1/p'
 }
 
-# fetch_dist <url> <dest_file> — download the manifest, verifying it when the URL
-# pins its own digest. Returns non-zero on a download failure; a digest mismatch
-# is fatal (exit 4) via verify_checksum.
+# fetch_dist <url> <dest_file> -- download the manifest, verifying it when the URL
+# pins its own digest. A download failure exits 3, a digest mismatch exits 4.
 #
 # Staged to a file rather than echoed: the digest covers the bytes as served, and
 # a command substitution would strip the manifest's trailing newline. It also
@@ -512,9 +598,15 @@ fetch_dist() {
     local _url="$1" _dest="$2" _pin
 
     _pin=$(dist_pin_digest "$_url")
-    download_to_file "$_url" "$_dest" || return 1
+    download_to_file "$_url" "$_dest" "failed to fetch the latest version from ${_url}
+  Check your internet connection, or pin a version with OCX_INSTALL_VERSION."
     if [ -n "$_pin" ]; then
-        verify_checksum "$_dest" "$_pin" required
+        verify_checksum "$_dest" "$_pin"
+    elif [ "$_tls_unvalidated" = 1 ]; then
+        # Without certificate validation a rolling manifest is whatever the
+        # network answered, and its inline digests would vouch for a swapped archive.
+        err "this wget did not validate the TLS certificate, so the rolling manifest at ${_url} cannot be trusted
+  Install curl, or point OCX_INSTALL_DIST_URL at a dist/<sha256>.json pin." 4
     fi
 }
 
@@ -552,18 +644,17 @@ json_field() {
 
 # --- Hand off to `ocx self setup` -------------------------------------------
 
-# Run the downloaded binary's `ocx self setup`. Global pre-flags (e.g. --offline)
-# precede the subcommand; subcommand args/flags (the version positional,
-# --no-modify-path) follow it — clap parses them at different levels. _pre and
-# _post are space-separated flag lists; either may be empty.
+# run_self_setup <bin> <arg>... -- run the downloaded binary's `ocx self setup`.
+# The caller passes the whole argv after <bin>: global pre-flags (e.g. --offline)
+# precede `self setup`, its own args follow it (clap parses them at different
+# levels). Passed as separate words so a value with spaces stays one argument.
 run_self_setup() {
-    # shellcheck disable=SC2086  # deliberate word-split of the flag lists
-    local _bin="$1" _pre="$2" _post="$3"
+    local _bin="$1"
+    shift
 
     say "Running ocx self setup..."
-    # shellcheck disable=SC2086
-    if ! "$_bin" $_pre self setup $_post; then
-        err "'ocx self setup' failed — see the output above for details" 6
+    if ! "$_bin" "$@"; then
+        err "'ocx self setup' failed - see the output above for details" 6
     fi
 }
 
@@ -636,12 +727,22 @@ assert_safe_ocx_home() {
 # --- Temp directory cleanup -------------------------------------------------
 
 cleanup() {
-    if [ -n "${_tmpdir:-}" ]; then
+    if [ -n "$_tmpdir" ]; then
         ignore rm -rf "$_tmpdir"
     fi
-    if [ -n "${_ca_tmp:-}" ]; then
+    if [ -n "$_ca_tmp" ]; then
         ignore rm -f "$_ca_tmp"
     fi
+}
+
+# Keep the status through cleanup: on some shells the last command of an EXIT
+# trap would replace it. INT/TERM/HUP exit with 128+N so the handler returns
+# nothing to the interrupted download loop, which would otherwise carry on.
+on_exit() {
+    _exit_status=$?
+    trap - EXIT
+    cleanup
+    exit "$_exit_status"
 }
 
 # --- Success banner ---------------------------------------------------------
@@ -649,7 +750,9 @@ cleanup() {
 print_success() {
     local _version="$1" _ocx_home
 
-    is_truthy "$OCX_INSTALL_QUIET" && return 0
+    if [ "$OCX_INSTALL_QUIET" = 1 ]; then
+        return 0
+    fi
     _ocx_home="${OCX_HOME:-$HOME/.ocx}"
 
     printf '\n  %socx %s installed successfully!%s\n' "$_bold" "$_version" "$_reset" >&2
@@ -669,10 +772,10 @@ EOF
 # --- Main -------------------------------------------------------------------
 
 main() {
-    local _no_modify_path _version _target _tmpdir _bin _ocx_home _bin_dir
-    local _dist _row _sha _url _filename _tag _archive _old_version _post
+    local _no_modify_path _version _target _bin _ocx_home _bin_dir _ca_raw
+    local _dist _row _sha _url _filename _tag _archive _old_version _existing_ocx
 
-    _no_modify_path="${OCX_NO_MODIFY_PATH:-0}"
+    _no_modify_path=$(truthy01 "${OCX_NO_MODIFY_PATH:-0}")
     _version="$OCX_INSTALL_VERSION"
 
     while [ $# -gt 0 ]; do
@@ -695,16 +798,10 @@ main() {
         shift
     done
 
-    if is_truthy "$_no_modify_path"; then
-        _no_modify_path=1
-    else
-        _no_modify_path=0
-    fi
-
     # The CA bundle is either a path or the PEM text itself. The embedded
     # placeholder is single-quoted in every dialect and single quotes span
     # newlines, so a whole PEM block can be substituted straight into the
-    # script — no second file to ship alongside the mirrored installer. Inline
+    # script - no second file to ship alongside the mirrored installer. Inline
     # PEM is materialized to a temp file, which is what curl/wget need.
     # A real bundle may open with comment lines or a certificate label
     # (Fedora/RHEL ship exactly that), so detect PEM by CONTENT, not by a
@@ -715,7 +812,6 @@ main() {
         *"-----BEGIN"*)
             need_cmd mktemp
             _ca_tmp=$(mktemp) # mktemp already creates it 0600
-            trap cleanup EXIT INT TERM HUP
             printf '%s\n' "$OCX_INSTALL_CA_BUNDLE" >"$_ca_tmp"
             OCX_INSTALL_CA_BUNDLE="$_ca_tmp"
             ;;
@@ -726,13 +822,13 @@ main() {
             ;;
     esac
     # `ocx self setup` does its own HTTPS work (it pulls the package store from
-    # the registry), so the same bundle is handed down — that is what makes ONE
+    # the registry), so the same bundle is handed down - that is what makes ONE
     # corporate CA cover BOTH hops. Two variables, because two ocx generations:
-    #   * OCX_EXTRA_CA_CERTS — the value AS SUPPLIED (path or PEM text; ocx does
+    #   * OCX_EXTRA_CA_CERTS - the value AS SUPPLIED (path or PEM text; ocx does
     #     the same content sniff). `ocx self setup` persists the certificate
     #     text into $OCX_HOME/config.toml, so every later ocx invocation trusts
     #     the CA, on every OS. An older ocx ignores the unknown variable.
-    #   * SSL_CERT_FILE — the materialized PATH, which is how an older ocx
+    #   * SSL_CERT_FILE - the materialized PATH, which is how an older ocx
     #     discovers a host trust store (Linux only; a no-op elsewhere).
     # A value already in the environment wins, as everywhere.
     if [ -n "$OCX_INSTALL_CA_BUNDLE" ] && [ -z "${SSL_CERT_FILE:-}" ]; then
@@ -748,35 +844,25 @@ main() {
     assert_safe_ocx_home "$_ocx_home"
     _bin_dir="${_ocx_home}/${OCX_BIN_SUBPATH}"
 
-    # `ocx self setup` post-flags (--no-modify-path keyed off OCX_NO_MODIFY_PATH
-    # truthy OR the --no-modify-path flag). In OCX_INSTALL_NO_SETUP mode setup is
-    # not run, so OCX_NO_MODIFY_PATH is a no-op there (documented).
-    _post=""
-    if [ "$_no_modify_path" = "1" ]; then
-        _post="--no-modify-path"
-    fi
-    # Adopt the corporate managed-config tier. Not forwarded on the --offline
-    # test hatch below, where the OCI fetch could not succeed anyway.
-    _managed_post="$_post"
-    if [ -n "$_managed_config" ]; then
-        _managed_post="$_post --managed-config $_managed_config"
-    fi
-
     # --- Internal test-mode hatch (UNDOCUMENTED) ---------------------------
     # Install a locally-built binary as the candidate; skip download + checksum
     # + extract + the network manifest probe entirely. The version is derived
     # from the binary itself, so this path bypasses the semver validation below.
     if [ -n "${__OCX_TESTING_INSTALL_BINARY:-}" ]; then
         install_local_test_binary "$__OCX_TESTING_INSTALL_BINARY" "$_ocx_home"
-        if is_truthy "$OCX_INSTALL_NO_SETUP"; then
+        if [ "$OCX_INSTALL_NO_SETUP" = 1 ]; then
             say "Skipping 'ocx self setup' (OCX_INSTALL_NO_SETUP)."
         else
             # Candidate present, no registry reachable -> --offline. No version
             # positional (the candidate is 'local', not a published version).
-            run_self_setup "$_bin_dir/ocx" "--offline" "$_post"
+            set -- --offline self setup
+            if [ "$_no_modify_path" = 1 ]; then
+                set -- "$@" --no-modify-path
+            fi
+            run_self_setup "$_bin_dir/ocx" "$@"
         fi
         export_github_path
-        if is_truthy "$OCX_INSTALL_PRINT_PATH"; then
+        if [ "$OCX_INSTALL_PRINT_PATH" = 1 ]; then
             printf '%s\n' "$_bin_dir"
         fi
         return 0
@@ -786,33 +872,34 @@ main() {
     need_cmd mktemp
     need_cmd tar
     detect_downloader
+    probe_downloader
+    probe_hash_tool
 
     _target=$(detect_target)
     say "Detected platform: $_target"
 
     _tmpdir=$(mktemp -d)
-    trap cleanup EXIT INT TERM HUP
 
     # Fetch the manifest once; reuse for latest-resolution AND row-resolution.
     # A content-addressed URL (dist/<sha256>.json) is verified against the
     # digest in its own name before anything is parsed out of it.
-    fetch_dist "$OCX_INSTALL_DIST_URL" "$_tmpdir/dist.json" ||
-        err "failed to fetch the latest version from ${OCX_INSTALL_DIST_URL}
-  Check your internet connection, or pin a version with OCX_INSTALL_VERSION." 3
+    fetch_dist "$OCX_INSTALL_DIST_URL" "$_tmpdir/dist.json"
     _dist=$(cat "$_tmpdir/dist.json")
-    [ -n "$_dist" ] ||
+    if [ -z "$_dist" ]; then
         err "failed to determine the latest version: empty manifest at ${OCX_INSTALL_DIST_URL}" 3
+    fi
 
     if [ -z "$_version" ]; then
         say "Resolving latest version..."
         _version=$(get_latest_version "$_dist")
     fi
 
-    if echo "$_version" | grep -q '[^0-9a-zA-Z.+-]'; then
-        err "invalid version format: $_version (expected semver like 1.2.3 or 1.0.0-rc.1)" 2
-    elif echo "$_version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]'; then
-        : # valid
-    else
+    case "$_version" in
+        *[!0-9A-Za-z.+-]*)
+            err "invalid version format: $_version (expected semver like 1.2.3 or 1.0.0-rc.1)" 2
+            ;;
+    esac
+    if ! printf '%s\n' "$_version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]'; then
         err "invalid version format: $_version (expected semver like 1.2.3)" 2
     fi
 
@@ -822,10 +909,10 @@ main() {
     if [ -x "$_bin_dir/ocx" ]; then
         _old_version=$("$_bin_dir/ocx" version 2>/dev/null || echo "")
     fi
-    if [ -n "$_old_version" ] && [ "$_old_version" = "$_version" ] && ! is_truthy "$OCX_INSTALL_FORCE"; then
+    if [ -n "$_old_version" ] && [ "$_old_version" = "$_version" ] && [ "$OCX_INSTALL_FORCE" != 1 ]; then
         say "ocx v${_version} already installed at $(tildify "$_bin_dir/ocx") (set OCX_INSTALL_FORCE=1 to reinstall)"
         export_github_path
-        if is_truthy "$OCX_INSTALL_PRINT_PATH"; then
+        if [ "$OCX_INSTALL_PRINT_PATH" = 1 ]; then
             printf '%s\n' "$_bin_dir"
         fi
         exit 0
@@ -833,14 +920,24 @@ main() {
 
     # Resolve the (version,target) row -> inline sha256 + download URL.
     _row=$(dist_row "$_dist" "$_version" "$_target")
-    [ -n "$_row" ] ||
+    if [ -z "$_row" ]; then
         err "no published artifact for ocx v${_version} on ${_target} in the manifest at ${OCX_INSTALL_DIST_URL}" 3
+    fi
     _sha=$(json_field "$_row" sha256)
     _url=$(json_field "$_row" url)
     _filename=$(json_field "$_row" filename)
     _tag=$(json_field "$_row" tag)
-    { [ -n "$_url" ] && [ -n "$_filename" ]; } ||
+    if [ -z "$_url" ] || [ -z "$_filename" ]; then
         err "manifest row for v${_version}/${_target} is missing url/filename" 3
+    fi
+    # The inline digest is the only thing vouching for the archive: a blank or
+    # malformed one must stop the install, not skip the check.
+    case "$_sha" in
+        *[!0-9a-fA-F]*) _sha="" ;;
+    esac
+    if [ "${#_sha}" -ne 64 ]; then
+        err "manifest row for v${_version}/${_target} has no valid sha256 (need 64 hex digits)" 3
+    fi
 
     # Artifact host override (mirror): rewrite the host but keep <tag>/<filename>.
     if [ -n "$OCX_INSTALL_MIRROR_URL" ]; then
@@ -850,20 +947,15 @@ main() {
     say "Installing ocx v${_version}..."
     _archive="$_tmpdir/$_filename"
     say "Downloading ${_filename}..."
-    download_to_file "$_url" "$_archive" ||
-        err "failed to download ${_url}
+    download_to_file "$_url" "$_archive" "failed to download ${_url}
   Ensure v${_version} is a valid release with a binary for ${_target}.
-  Available releases: https://github.com/${OCX_INSTALL_REPO}/releases" 3
+  Available releases: https://github.com/${OCX_INSTALL_REPO}/releases"
 
-    if [ -n "$_sha" ]; then
-        verify_checksum "$_archive" "$_sha"
-    else
-        warn "no inline checksum for ${_filename} in the manifest — skipping verification"
-    fi
+    verify_checksum "$_archive" "$_sha"
 
     safe_extract "$_archive" "$_tmpdir"
 
-    # Locate binary: nested (ocx-TARGET/ocx) or flat (ocx at archive root — the
+    # Locate binary: nested (ocx-TARGET/ocx) or flat (ocx at archive root - the
     # real cargo-dist layout).
     if [ -f "$_tmpdir/ocx-${_target}/ocx" ]; then
         _bin="$_tmpdir/ocx-${_target}/ocx"
@@ -874,40 +966,56 @@ main() {
     fi
     chmod +x "$_bin"
 
-    if ! is_truthy "$OCX_INSTALL_NO_SMOKETEST"; then
+    if [ "$OCX_INSTALL_NO_SMOKETEST" != 1 ]; then
         if ! "$_bin" version >/dev/null 2>&1; then
             warn "binary failed to execute in temp directory ($(dirname "$_bin"))"
-            warn "your /tmp may be mounted with noexec — try: TMPDIR=\$HOME/.tmp $0"
+            warn "your /tmp may be mounted with noexec - try: TMPDIR=\$HOME/.tmp $0"
         fi
     fi
 
-    if check_cmd ocx; then
-        local _existing_ocx
+    if command -v ocx >/dev/null 2>&1; then
         _existing_ocx=$(command -v ocx)
         case "$_existing_ocx" in
             "${_ocx_home}"/*) ;;
             *)
                 warn "an existing ocx was found at $_existing_ocx"
-                warn "the new install may be shadowed — check your PATH order"
+                warn "the new install may be shadowed - check your PATH order"
                 ;;
         esac
     fi
 
-    if is_truthy "$OCX_INSTALL_NO_SETUP"; then
+    if [ "$OCX_INSTALL_NO_SETUP" = 1 ]; then
         # Binary-on-PATH only: place the binary, skip `ocx self setup`.
         place_binary "$_bin" "$_ocx_home"
     else
         # Hand off: `ocx self setup <version>` installs that version from the
         # registry into the package store and writes the env shims + profile
-        # blocks. The version is a positional to `self setup`.
-        run_self_setup "$_bin" "" "$_version $_managed_post"
+        # blocks. The version is a positional to `self setup`; --no-modify-path
+        # follows OCX_NO_MODIFY_PATH or the flag (a no-op under NO_SETUP).
+        set -- self setup "$_version"
+        if [ "$_no_modify_path" = 1 ]; then
+            set -- "$@" --no-modify-path
+        fi
+        if [ -n "$_managed_config" ]; then
+            set -- "$@" --managed-config "$_managed_config"
+        fi
+        run_self_setup "$_bin" "$@"
         print_success "$_version"
     fi
 
     export_github_path
-    if is_truthy "$OCX_INSTALL_PRINT_PATH"; then
+    if [ "$OCX_INSTALL_PRINT_PATH" = 1 ]; then
         printf '%s\n' "$_bin_dir"
     fi
 }
 
-main "$@"
+# File level, before the first mktemp, never in a function: native zsh fires an
+# EXIT trap set inside a function when it returns, so the installer would exit 0
+# having done nothing.
+trap on_exit EXIT
+# Clean up here too: zsh under `set -e` exits on the killed download first, and
+# the `exit` below then runs inside that exit, where zsh skips the EXIT trap.
+trap 'cleanup; exit 129' HUP
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+main ${1+"$@"}

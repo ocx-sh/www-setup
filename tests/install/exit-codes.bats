@@ -1,8 +1,11 @@
 #!/usr/bin/env bats
+# Kind: TEST. Dialect: bash 3.2 under bats; runs src/install.sh on the sh of the CI leg.
 # Focused coverage for exit codes 5 (archive extract), 6 ('ocx self setup'),
-# and 3 (manifest fetch). Exit codes 2, 3 (no row), 4 are covered by
-# env-knobs.bats. Exit code 7 (unsupported platform) is exercised by
-# tests/docker/.
+# 3 (manifest fetch) and 7 (unsupported platform). Exit codes 2, 3 (no row), 4 are
+# covered by env-knobs.bats. An undecidable libc (exit 7) needs a host with no
+# loader file at all, so only tests/docker/ can reach it.
+
+bats_require_minimum_version 1.5.0
 
 load helpers/server
 
@@ -112,7 +115,7 @@ STUB
     [ "$status" -eq 6 ]
     # The hand-off must have been the corrected `ocx self setup <version>`.
     grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
-    ! grep -q -- "--remote package install" "$OCX_STUB_ARGV"
+    run ! grep -q -- "--remote package install" "$OCX_STUB_ARGV"
 }
 
 @test "exit 3: latest-version resolution fails when the manifest URL is dead" {
@@ -154,4 +157,18 @@ STUB
         run sh "$INSTALL_SH"
     [ "$status" -eq 0 ]
     grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
+}
+
+@test "exit 7: unsupported architecture" {
+    server_fake_platform "${BATS_TEST_TMPDIR}/plat" Linux riscv64
+    PATH="${BATS_TEST_TMPDIR}/plat:$PATH" run sh "$INSTALL_SH" --version 0.0.0
+    [ "$status" -eq 7 ]
+    [[ "$output" == *"unsupported architecture: riscv64"* ]] || false
+}
+
+@test "exit 7: unsupported operating system" {
+    server_fake_platform "${BATS_TEST_TMPDIR}/plat" FreeBSD x86_64
+    PATH="${BATS_TEST_TMPDIR}/plat:$PATH" run sh "$INSTALL_SH" --version 0.0.0
+    [ "$status" -eq 7 ]
+    [[ "$output" == *"unsupported operating system: FreeBSD"* ]] || false
 }
