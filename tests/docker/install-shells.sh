@@ -2,10 +2,30 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
+# Kind: TOOL (POSIX sh: runs at image build on Alpine, Fedora and Ubuntu)
+# Exit: 0 ok, 2 usage, 3 download, 7 arch, 69 a requested shell is missing,
+# 129/130/143 HUP/INT/TERM
+
 set -eu
 
+# Temp state goes on every exit path; HUP/INT/TERM end the run with 128+N.
+WORK=
+cleanup() { [ -z "$WORK" ] || rm -rf "$WORK"; }
+on_exit() {
+    rc=$?
+    trap - EXIT
+    cleanup
+    exit "$rc"
+}
+trap on_exit EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+WORK=$(mktemp -d)
+
 # --- Pinned tarball versions (GitHub releases) ---
-NU_VERSION="0.101.0"
+# nu sits at the floor of install.nu's supported range (0.105.1).
+NU_VERSION="0.105.1"
 ELVISH_VERSION="0.21.0"
 PWSH_VERSION="7.4.6"
 
@@ -14,7 +34,7 @@ ALL_SHELLS="bash dash zsh ksh fish nu elvish pwsh"
 # --- Distro detection ---
 DISTRO_ID=""
 if [ -r /etc/os-release ]; then
-    # shellcheck disable=SC1091
+    # shellcheck disable=SC1091 # /etc/os-release exists only on the target distro
     DISTRO_ID=$(. /etc/os-release 2>/dev/null && printf '%s' "${ID:-}")
 fi
 case "$DISTRO_ID" in
@@ -76,7 +96,7 @@ pm_refresh() {
     PM_REFRESHED=1
 }
 
-# pm_install <pkg...> — install via the native manager, quietly.
+# pm_install <pkg...> -- install via the native manager, quietly.
 pm_install() {
     pm_refresh
     case "$DISTRO_ID" in
@@ -90,19 +110,22 @@ pm_install() {
     esac
 }
 
-# pm_try <pkg...> — best-effort install; never fails the script.
+# pm_try <pkg...> -- best-effort install; never fails the script.
 pm_try() {
-    pm_install "$@" 2>/dev/null || return 1
+    # shellcheck disable=SC2310 # pm_install is one package-manager call, its status is the answer
+    pm_install "$@" || return 1
 }
 
-# need_base — tools the tarball installers depend on.
+# need_base -- tools the tarball installers depend on.
 ensure_base_tools() {
+    # shellcheck disable=SC2310 # optional package: a miss surfaces in the final provisioning check
     command -v curl >/dev/null 2>&1 || pm_try curl ca-certificates || :
+    # shellcheck disable=SC2310 # optional package: a miss surfaces in the final provisioning check
     command -v tar >/dev/null 2>&1 || pm_try tar || :
 }
 
 fetch() {
-    # fetch <url> <dest>
+    # fetch <url> <dest> -- fatal: a cell without its shell must not stay green.
     if command -v curl >/dev/null 2>&1; then
         curl --proto '=https' --tlsv1.2 -fsSL -o "$2" "$1"
     elif command -v wget >/dev/null 2>&1; then
@@ -112,6 +135,20 @@ fetch() {
         return 3
     fi
 }
+
+die() {
+    echo "install-shells.sh: $1" >&2
+    exit "${2:-1}"
+}
+
+# download <url> <dest> -- fetch or exit 3, so a missing tarball fails the build.
+download() {
+    # shellcheck disable=SC2310 # fetch is a single curl or wget, its status is the test
+    fetch "$1" "$2" || die "download failed: $1" 3
+}
+
+# Shells this run may legitimately leave absent (the one upstream gap, pwsh on Alpine/arm64).
+SKIPPED=""
 
 # --- Per-shell installers ---
 
@@ -144,6 +181,7 @@ install_dash() {
             # ~/.profile. Only fall back to the symlink if the package is
             # genuinely unavailable (then activation for dash is unsupported and
             # the probe will report it).
+            # shellcheck disable=SC2310 # pm_try is one package-manager call, its status is the test
             if pm_try dash && command -v dash >/dev/null 2>&1; then
                 :
             elif [ -x /bin/ash ]; then
@@ -155,7 +193,9 @@ install_dash() {
         fedora)
             # dash is not packaged on Fedora; busybox provides ash. Install
             # busybox and expose its ash as dash (documented fallback).
+            # shellcheck disable=SC2310 # pm_try is one package-manager call, its status is the test
             pm_try dash && return 0
+            # shellcheck disable=SC2310 # optional package: a miss surfaces in the final provisioning check
             pm_try busybox || :
             if command -v busybox >/dev/null 2>&1; then
                 ln -sf "$(command -v busybox)" /usr/local/bin/dash 2>/dev/null || :
@@ -178,22 +218,25 @@ install_ksh() {
             # ksh proper is not in Alpine; loksh/mksh are the substitutes.
             # NOTE: Alpine's loksh package installs its binary as /bin/ksh (there
             # is NO `loksh` command), so a `command -v loksh` guard always fails
-            # (exit 127) — under `set -eu` that 127 aborts the whole script and
+            # (exit 127) -- under `set -eu` that 127 aborts the whole script and
             # breaks the image build. After loksh installs, ksh is already on
             # PATH at /bin/ksh, so the early `command -v ksh` guard at the top of
             # install_ksh catches it on the next invocation. Terminate the branch
             # with `:` so a failed optional symlink never propagates 127.
+            # shellcheck disable=SC2310 # pm_try is one package-manager call, its status is the test
             if pm_try loksh; then
                 if command -v loksh >/dev/null 2>&1; then
                     ln -sf "$(command -v loksh)" /usr/local/bin/ksh
                 fi
                 # loksh already provides /bin/ksh; nothing more required.
                 :
-            elif pm_try mksh; then
-                if command -v mksh >/dev/null 2>&1; then
-                    ln -sf "$(command -v mksh)" /usr/local/bin/ksh
+            else
+                # shellcheck disable=SC2310 # pm_try is one package-manager call, its status is the test
+                if pm_try mksh; then
+                    if command -v mksh >/dev/null 2>&1; then
+                        ln -sf "$(command -v mksh)" /usr/local/bin/ksh
+                    fi
                 fi
-                :
             fi
             ;;
         fedora)
@@ -201,10 +244,14 @@ install_ksh() {
             ;;
         ubuntu | debian)
             # 'ksh' (ksh93) is in universe; fall back to mksh.
+            # shellcheck disable=SC2310 # pm_try is one package-manager call, its status is the test
             if pm_try ksh; then
                 :
-            elif pm_try mksh; then
-                command -v mksh >/dev/null 2>&1 && ln -sf "$(command -v mksh)" /usr/local/bin/ksh
+            else
+                # shellcheck disable=SC2310 # pm_try is one package-manager call, its status is the test
+                if pm_try mksh; then
+                    command -v mksh >/dev/null 2>&1 && ln -sf "$(command -v mksh)" /usr/local/bin/ksh
+                fi
             fi
             ;;
     esac
@@ -212,56 +259,51 @@ install_ksh() {
 
 install_elvish() {
     command -v elvish >/dev/null 2>&1 && return 0
-    # Always install the pinned release tarball — NOT the distro package. Distro
+    # Always install the pinned release tarball -- NOT the distro package. Distro
     # elvish (e.g. Ubuntu 24.04 universe ships 0.19) predates the os: module
     # functions the installer relies on (`os:mkdir-all`, added in 0.21), so a
     # distro build fails the smoke with "variable $os:mkdir-all~ not found". The
     # pin matches the OCX-provisioned elvish (0.21) used locally and in CI.
     ensure_base_tools
     _url="https://dl.elv.sh/linux-${ARCH_GO}/elvish-v${ELVISH_VERSION}.tar.gz"
-    _tmp=$(mktemp -d)
+    _tmp="$WORK/elvish"
     # Extract into a clean subdir and name the download so it does NOT match the
-    # 'elvish*' glob below — otherwise `find` can pick the downloaded archive
+    # 'elvish*' glob below -- otherwise `find` can pick the downloaded archive
     # itself and install the gzip as the binary ("Exec format error").
     mkdir -p "$_tmp/ex"
-    if fetch "$_url" "$_tmp/dl.tgz"; then
-        tar -xzf "$_tmp/dl.tgz" -C "$_tmp/ex"
-        # Archive contains the 'elvish-v<ver>' binary; normalize the name.
-        _bin=$(find "$_tmp/ex" -maxdepth 1 -type f -name 'elvish*' | head -n1)
-        if [ -n "$_bin" ]; then
-            install -m 0755 "$_bin" /usr/local/bin/elvish
-        fi
-    fi
-    rm -rf "$_tmp"
+    download "$_url" "$_tmp/dl.tgz"
+    tar -xzf "$_tmp/dl.tgz" -C "$_tmp/ex"
+    # Archive contains the 'elvish-v<ver>' binary; normalize the name.
+    _bin=$(find "$_tmp/ex" -maxdepth 1 -type f -name 'elvish*' | head -n1)
+    [ -n "$_bin" ] || die "no elvish binary in $_url" 3
+    install -m 0755 "$_bin" /usr/local/bin/elvish
 }
 
 install_nu() {
     command -v nu >/dev/null 2>&1 && return 0
-    # nushell is in NO official distro repo — pinned GitHub release tarball.
+    # nushell is in NO official distro repo -- pinned GitHub release tarball.
     ensure_base_tools
     _target="${ARCH_X}-unknown-linux-${LIBC}"
     _name="nu-${NU_VERSION}-${_target}"
     _url="https://github.com/nushell/nushell/releases/download/${NU_VERSION}/${_name}.tar.gz"
-    _tmp=$(mktemp -d)
-    if fetch "$_url" "$_tmp/nu.tar.gz"; then
-        tar -xzf "$_tmp/nu.tar.gz" -C "$_tmp"
-        _bin=$(find "$_tmp" -type f -name 'nu' | head -n1)
-        if [ -n "$_bin" ]; then
-            install -m 0755 "$_bin" /usr/local/bin/nu
-            # nushell ships plugins alongside; copy any nu_plugin_* too.
-            find "$_tmp" -type f -name 'nu_plugin_*' -exec \
-                install -m 0755 {} /usr/local/bin/ \; 2>/dev/null || :
-        fi
-    fi
-    rm -rf "$_tmp"
+    _tmp="$WORK/nu"
+    mkdir -p "$_tmp"
+    download "$_url" "$_tmp/nu.tar.gz"
+    tar -xzf "$_tmp/nu.tar.gz" -C "$_tmp"
+    _bin=$(find "$_tmp" -type f -name 'nu' | head -n1)
+    [ -n "$_bin" ] || die "no nu binary in $_url" 3
+    install -m 0755 "$_bin" /usr/local/bin/nu
+    # nushell ships plugins alongside; copy any nu_plugin_* too.
+    find "$_tmp" -type f -name 'nu_plugin_*' -exec \
+        install -m 0755 {} /usr/local/bin/ \;
 }
 
 install_pwsh() {
     command -v pwsh >/dev/null 2>&1 && return 0
-    # PowerShell is NOT in default Linux repos — pinned GitHub release tarball.
+    # PowerShell is NOT in default Linux repos -- pinned GitHub release tarball.
     ensure_base_tools
     # Pick the right build per distro/arch. Alpine (musl) needs PowerShell's
-    # dedicated linux-musl-* build — the GLIBC tarball under a `gcompat` shim
+    # dedicated linux-musl-* build -- the GLIBC tarball under a `gcompat` shim
     # cannot even initialise a runspace (NullReferenceException in AstSearcher).
     # Upstream ships linux-musl-x64 but NOT linux-musl-arm64, so pwsh on Alpine is
     # amd64-only; on Alpine/arm64 we skip provisioning (the smoke + activation
@@ -271,32 +313,34 @@ install_pwsh() {
         alpine)
             if [ "$ARCH_PWSH" != "x64" ]; then
                 echo "install-shells.sh: PowerShell has no linux-musl-${ARCH_PWSH} build; skipping pwsh on Alpine/${ARCH_PWSH}" >&2
+                SKIPPED=" pwsh "
                 return 0
             fi
             _build="linux-musl-x64"
-            # Runtime deps for the musl build (no gcompat — it is a native musl binary).
+            # Runtime deps for the musl build (no gcompat -- it is a native musl binary).
+            # shellcheck disable=SC2310 # optional package: a miss surfaces in the final provisioning check
             pm_try icu-libs libgcc libstdc++ || :
             ;;
         fedora)
             _build="linux-${ARCH_PWSH}"
+            # shellcheck disable=SC2310 # optional package: a miss surfaces in the final provisioning check
             pm_try libicu || :
             ;;
         ubuntu | debian)
             _build="linux-${ARCH_PWSH}"
+            # shellcheck disable=SC2310 # optional package: a miss surfaces in the final provisioning check
             pm_try libicu74 || pm_try libicu72 || pm_try libicu70 || :
             ;;
     esac
     _name="powershell-${PWSH_VERSION}-${_build}.tar.gz"
     _url="https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VERSION}/${_name}"
     _dest="/opt/microsoft/powershell/7"
-    _tmp=$(mktemp -d)
-    if fetch "$_url" "$_tmp/pwsh.tar.gz"; then
-        mkdir -p "$_dest"
-        tar -xzf "$_tmp/pwsh.tar.gz" -C "$_dest"
-        chmod +x "$_dest/pwsh" 2>/dev/null || :
-        ln -sf "$_dest/pwsh" /usr/local/bin/pwsh
-    fi
-    rm -rf "$_tmp"
+    _tmp="$WORK/pwsh"
+    mkdir -p "$_tmp" "$_dest"
+    download "$_url" "$_tmp/pwsh.tar.gz"
+    tar -xzf "$_tmp/pwsh.tar.gz" -C "$_dest"
+    chmod +x "$_dest/pwsh"
+    ln -sf "$_dest/pwsh" /usr/local/bin/pwsh
 }
 
 # --- Driver ---
@@ -323,18 +367,28 @@ done
 # --- Summary: one line per resolved shell + a header line ---
 resolve() {
     # resolve <name> -> prints path or 'MISSING'
-    _p=$(command -v "$1" 2>/dev/null || true)
-    [ -n "$_p" ] && printf '%s' "$_p" || printf 'MISSING'
+    _p=$(command -v "$1") || _p=""
+    if [ -n "$_p" ]; then printf '%s' "$_p"; else printf 'MISSING'; fi
 }
 
 _summary=""
+_missing=""
 for _shell in $REQUESTED; do
     case "$_shell" in
         nu | nushell) _name="nu" ;;
         pwsh | powershell) _name="pwsh" ;;
         *) _name="$_shell" ;;
     esac
-    _summary="${_summary} ${_name}=$(resolve "$_name")"
+    _path=$(resolve "$_name")
+    _summary="${_summary} ${_name}=${_path}"
+    if [ "$_path" = "MISSING" ]; then
+        case "$SKIPPED" in
+            *" $_name "*) ;;
+            *) _missing="${_missing} ${_name}" ;;
+        esac
+    fi
 done
 
 echo "install-shells: distro=${DISTRO_ID} arch=${RAW_ARCH} libc=${LIBC} installed:${_summary}"
+# A requested shell that is absent would leave its matrix cell green and untested.
+[ -z "$_missing" ] || die "requested shells not provisioned:${_missing}" 69
