@@ -15,8 +15,8 @@ importers:
         specifier: 0.42.4
         version: 0.42.4(astro@7.3.5(@types/node@24.19.2)(yaml@2.9.1))(supports-color@5.5.0)
       '@ocx-sh/theme':
-        specifier: github:ocx-sh/website#708b79240ed9dbb39bd7b66b2c91b0ad0c6c596a&path:/packages/theme
-        version: https://codeload.github.com/ocx-sh/website/tar.gz/708b79240ed9dbb39bd7b66b2c91b0ad0c6c596a#path:/packages/theme(@astrojs/starlight@0.42.4(astro@7.3.5(@types/node@24.19.2)(yaml@2.9.1))(supports-color@5.5.0))(astro@7.3.5(@types/node@24.19.2)(yaml@2.9.1))
+        specifier: github:ocx-sh/website#7e161d490af1d9cbfa61a4dbc293a08fe3d73af6&path:/packages/theme
+        version: https://codeload.github.com/ocx-sh/website/tar.gz/7e161d490af1d9cbfa61a4dbc293a08fe3d73af6#path:/packages/theme(@astrojs/starlight@0.42.4(astro@7.3.5(@types/node@24.19.2)(yaml@2.9.1))(supports-color@5.5.0))(astro@7.3.5(@types/node@24.19.2)(yaml@2.9.1))
       astro:
         specifier: 7.3.5
         version: 7.3.5(@types/node@24.19.2)(yaml@2.9.1)
@@ -646,8 +646,8 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@ocx-sh/theme@https://codeload.github.com/ocx-sh/website/tar.gz/708b79240ed9dbb39bd7b66b2c91b0ad0c6c596a#path:/packages/theme':
-    resolution: {gitHosted: true, integrity: sha512-Js7tN7qXVu32FdVVIDW+0DNiVnY1R1uv4M2dodbMCZkaSiGlMi8UMy/6NRLZNd29D2fW727G/lxPAxukkGg46A==, path: /packages/theme, tarball: https://codeload.github.com/ocx-sh/website/tar.gz/708b79240ed9dbb39bd7b66b2c91b0ad0c6c596a}
+  '@ocx-sh/theme@https://codeload.github.com/ocx-sh/website/tar.gz/7e161d490af1d9cbfa61a4dbc293a08fe3d73af6#path:/packages/theme':
+    resolution: {gitHosted: true, integrity: sha512-PXMrTHDxYWf2Bn38ewZSZbAVZh/3hW+p+NkoKci1I7J3kwsQiXcmNrReq34/B4JvBUCHrODdYUgu84qpRWx9PA==, path: /packages/theme, tarball: https://codeload.github.com/ocx-sh/website/tar.gz/7e161d490af1d9cbfa61a4dbc293a08fe3d73af6}
     version: 0.1.1
     engines: {node: '>=22'}
     hasBin: true
@@ -3777,7 +3777,7 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.3
 
-  '@ocx-sh/theme@https://codeload.github.com/ocx-sh/website/tar.gz/708b79240ed9dbb39bd7b66b2c91b0ad0c6c596a#path:/packages/theme(@astrojs/starlight@0.42.4(astro@7.3.5(@types/node@24.19.2)(yaml@2.9.1))(supports-color@5.5.0))(astro@7.3.5(@types/node@24.19.2)(yaml@2.9.1))':
+  '@ocx-sh/theme@https://codeload.github.com/ocx-sh/website/tar.gz/7e161d490af1d9cbfa61a4dbc293a08fe3d73af6#path:/packages/theme(@astrojs/starlight@0.42.4(astro@7.3.5(@types/node@24.19.2)(yaml@2.9.1))(supports-color@5.5.0))(astro@7.3.5(@types/node@24.19.2)(yaml@2.9.1))':
     dependencies:
       '@fontsource/ibm-plex-mono': 5.3.0
       '@fontsource/ibm-plex-sans': 5.3.0
