@@ -2,16 +2,24 @@
 
 Keep `README.md` and `CONTRIBUTING.md` in sync when the project shape changes.
 
+## site/ (canonical user docs)
+
+The knob matrix, exit-code table, URL layout, pinning, mirror and CA-bundle docs live on the `/install/` site (`site/src/content/docs/`, published at `https://ocx.sh/install/`). The README carries the quick start and links to the pages. Update the site when:
+
+- an `OCX_INSTALL_*` knob, a flag, or an embedded-config placeholder is added, removed or renamed (`configuration.mdx`, `mirrors.mdx`)
+- an exit code is added or its meaning changes (`reference.mdx`)
+- the URL layout, channels or manifest pinning change (`versions.mdx`, `reference.mdx`)
+- a one-liner changes (`index.mdx`, `examples.mdx`, `versions.mdx`)
+
+`site/scripts/contract.test.mjs` (run by `task site:test`, part of `task verify`) enforces the first two: every `OCX_INSTALL_*` name in `src/install.*` must appear on `configuration.mdx` and the reverse, and every code in an installer's `# Exit:` header must be a table row on `reference.mdx` and the reverse. It does not check meanings. Pages follow `.claude/rules/docs-quality.md`.
+
 ## README.md
 
-The README is the front door for `curl | <shell>` users. Update when:
+The README is the front door for `curl | <shell>` users: the quick start and a table linking to the site. Update when:
 
-- **Curl one-liners** — any of the five installer URLs (bare `/sh`, `/pwsh`, `/nu`, `/fish`, `/elvish`, pinned `<VERSION>`, dev `/next`), or env-var overrides, change
-- **Env-var matrix** — an `OCX_INSTALL_*` knob added, removed, or renamed in any `src/install.*` (the matrix omits internal/test-only hatches like `__OCX_TESTING_INSTALL_BINARY`)
-- **Exit-code table** — code added, removed, or its meaning changes
-- **Distribution manifest / channels** — `OCX_INSTALL_DIST_URL`, the `/dist` manifest, or the stable/`next` channel layout changes
+- **Curl one-liners** — any of the five installer URLs (bare `/sh`, `/pwsh`, `/nu`, `/fish`, `/elvish`, pinned `<VERSION>`, dev `/next`) changes
 - **URL layout** — the version-major key prefixes (`archive/<VERSION>/`, `latest/`, `next/`) or the per-shell rewrite layer change (keep `deploy/bunny/edge-rules.py` and `.claude/rules/publish.md` in sync)
-- **Stdout/stderr contract** — discipline changes (which would be a major version bump)
+- **Site pages** — a page under `site/src/content/docs/` is added, renamed or removed
 
 ## CONTRIBUTING.md
 

@@ -46,7 +46,9 @@ Each installer is a **thin bootstrap**: detect platform → resolve the release 
 | `tests/install/{nu,fish,elvish}/*.bats` | Per-shell installer suites (`server_require_shell`: skip locally when the shell is absent, fail when `OCX_TEST_REQUIRE_SHELLS` is set) |
 | `tests/install/ps1/*.Tests.ps1` | Pester equivalents (ps1); `Fixture.psm1` serves the fixture over TLS, `Run-Installer.ps1` + `Trust-Fixture.ps1` launch the installer trusting the localhost cert |
 | `tests/docker/` | Distro × arch × installer integration matrix harness |
-| `.github/workflows/` | verify, test-installers, test-docker-matrix, verify-distros, release, update-dist (`dist.json` rebuild on dispatch + hourly cron + manual), `_changes.yml` (reusable path-filter: verify + test-installers skip a shell's lint/tests when neither its `src/install.*` nor a shared path changed; the shared set includes `tests/scripts/**`, `.gitmodules` and `zizmor.yml`). `verify.yml` also runs a `zizmor` job (workflow security audit, `zizmor.yml` config) and, on PRs, `cog check` |
+| `site/` | The `/install/` section of ocx.sh (Astro Starlight, deployed to the `ocx.sh` storage zone, not this one). Pages `index/versions/configuration/mirrors/reference/examples` (MDX), `scripts/` (`check-anchors`, `check-fences`, `docs-gate`, and `contract.test.mjs`, the drift guard that compares every `OCX_INSTALL_*` knob and `# Exit:` code in `src/install.*` with `configuration.mdx` / `reference.mdx`), `casts/README.md` (cast key table; recorder not wired). Canonical home of the knob, exit-code, pinning and mirror docs; the README links to it |
+| `taskfiles/site.taskfile.yml`, `ocx.toml` `[group.site.tools]` / `[group.casts.tools]` | `site:install`, `site:dev`, `site:build`, `site:test` (part of `task verify`), `site:check`, `site:casts` (stub). Node, pnpm and uv come from the `site` ocx group (`ocx exec -g site --`) |
+| `.github/workflows/` | verify, test-installers, test-docker-matrix, verify-distros, release, update-dist (`dist.json` rebuild on dispatch + hourly cron + manual), `site` (build + check the `/install/` site on PRs; deploy to ocx.sh from main behind `vars.BUNNY_DEPLOY`, environment `ocx.sh`), `_changes.yml` (reusable path-filter: verify + test-installers skip a shell's lint/tests when neither its `src/install.*` nor a shared path changed; the shared set includes `tests/scripts/**`, `.gitmodules` and `zizmor.yml`). `verify.yml` also runs a `zizmor` job (workflow security audit, `zizmor.yml` config) and, on PRs, `cog check` |
 
 ## Commands
 
@@ -63,6 +65,9 @@ task pwsh:verify                           # PSScriptAnalyzer 1.25.0 via Invoke-
 task nu:verify                             # nu-gate.nu --strict
 task fish:verify                           # fish --no-execute + fish-scan.sh + fish_indent --check
 task elvish:verify                         # elv-gate.sh
+task site:test                             # /install/ site unit tests + installer-contract drift guard
+task site:check                            # build the site + anchors, fences, docs-quality gate, ocx-site check
+task site:dev                              # Astro dev server for /install/
 task test:bootstrap                        # git submodule init (vendored bats)
 task test:bats                             # bats 1.14.0 through scripts/bats-ci.sh (census, zero skip budget)
 task test:bats:lint                        # bats-lint.sh + bats-runner-list.sh

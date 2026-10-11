@@ -168,7 +168,7 @@ assertion.
 ## `__OCX_TESTING_INSTALL_BINARY` — internal test-only download-skip hatch
 
 `__OCX_TESTING_INSTALL_BINARY` is the installer's internal, **undocumented**,
-test-only hatch (double-underscore; never in `usage()`/README env matrix). Set it
+test-only hatch (double-underscore; never in `usage()`/site configuration page). Set it
 to a path and the installer skips download + checksum + extract + the network
 manifest probe, copies that file to the canonical bin dir + `chmod +x`, then
 either runs `<bin> --offline self setup [--no-modify-path]` (default) or, under
