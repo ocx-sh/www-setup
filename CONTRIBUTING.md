@@ -14,6 +14,7 @@ Thanks for helping land changes to the canonical OCX installer scripts.
 - `pwsh` — PowerShell 7+. Needed for Pester tests and PSScriptAnalyzer. `src/install.ps1` is **cross-platform** (Windows + Linux + macOS) but still targets a **Windows PowerShell 5.1 Desktop floor** on Windows (no ternary, `??`, `&&`/`||` chains, `$IsWindows` auto-var, `-SkipCertificateCheck`, `-SslProtocol`); on Unix it needs `tar` for extraction (xz-utils only for releases older than the .tar.gz switch). Pester is pinned to 6.2.0 and PSScriptAnalyzer to 1.25.0 (installed by `scripts/Install-PinnedModule.ps1`). CI runs the Pester suite on windows-latest + ubuntu-latest + macos-26 (pwsh 7); the 5.1 floor is held by a parse gate and a fixture-free `powershell.exe` smoke install on Windows.
 - **Exotic shells** — `nu` (Nushell), `fish`, `elvish` are provisioned via the OCX toolchain (`ocx.toml`: `ocx.sh/nushell/nushell`, `ocx.sh/fish-shell/fish`, `ocx.sh/elvish/elvish`). Declared floors: nu 0.105.1 (tested up to 0.116.1), fish 3.6.0, elvish 0.20.1. Their lint gates are `scripts/nu-gate.nu`, `scripts/fish-scan.sh` plus `fish -n` and `fish_indent --check`, and `scripts/elv-gate.sh`. The nu, fish and elvish suites run locally and in CI; where an interpreter is missing the suite skips locally and fails when `OCX_TEST_REQUIRE_SHELLS` is set, as in CI. On Linux, `pwsh` itself is also OCX-provisioned (`ocx.sh/powershell/powershell` in `[group.linux]` — Linux has glibc leaves only, no musl; macOS/Windows still use a system pwsh).
 - `python3` — used by the Bats fixture HTTPS server.
+- **Site toolchain** — the `/install/` docs site (`site/`) needs Node, pnpm and uv, which `ocx.toml` provisions in `[group.site.tools]`; the `site:*` tasks run them through `ocx exec -g site --`. The terminal casts (not wired yet) will need asciinema from `[group.casts.tools]`.
 - `docker` with `buildx` and (for non-native arches) QEMU binfmt handlers — required for `tests/docker/`. Run `task docker:qemu:register` to install handlers on Linux hosts.
 
 ## Layout
@@ -32,6 +33,7 @@ scripts/*-gate.* scripts/ci-*   Per-dialect quality gates and workflow/Taskfile 
 scripts/bats-ci.sh              Bats pipeline: version pin, canary, census (bats-census.sh); the lint is separate (task test:bats:lint)
 scripts/Invoke-PesterGate.ps1   Pester census gate (pinned 6.2.0)
 external/                    Vendored Bats submodules (bats-core, bats-support, bats-assert)
+site/                        The /install/ section of ocx.sh (Astro Starlight): pages, drift guard, docs gates
 deploy/bunny/                Live routing + zone settings (edge-rules.py: plan/apply/verify, zone-apply)
 deploy/nginx/                SUPERSEDED reference nginx block, kept as the rollback target
 tests/install/*.bats         Bats env-knob / exit-code / print-path / dist suites (sh)
@@ -43,7 +45,7 @@ tests/ci/                    CI smoke-install helper(s)
 tests/docker/                Distro × arch × installer integration matrix (alpine, fedora, ubuntu)
 taskfile.yml + taskfiles/    Task automation (lint × 5 shells, test, release, publish)
 .claude/                     AI rules + permissions (Claude Code)
-.github/workflows/           CI: verify, test-installers, test-docker-matrix, release, update-dist
+.github/workflows/           CI: verify, test-installers, test-docker-matrix, release, update-dist, site
 ```
 
 ## Running tests
@@ -57,6 +59,8 @@ task test:pester                                              # Pester only, cen
 task shell:verify pwsh:verify nu:verify fish:verify elvish:verify   # per-dialect quality gates
 task ci:verify meta:verify                                    # workflow/Taskfile checks, license headers, links
 task ci:zizmor                                                # workflow security audit (zizmor)
+task site:test                                                # site unit tests + the installer-contract drift guard
+task site:check                                               # build the /install/ site and run its gates
 task docker:integration DISTRO=alpine PLATFORM=linux/amd64    # one distro × arch
 task docker:integration:all                                   # full matrix
 ```
@@ -89,6 +93,10 @@ Scopes are optional: `feat(install): add OCX_INSTALL_MIRROR_URL`.
 The PR workflow runs `cog check` (`cog.toml`, merge commits ignored); commits that aren't conventional will fail the gate.
 
 **Do not** add `Co-Authored-By:` trailers, attribution lines, or any similar metadata to commits or PRs.
+
+## Documentation site
+
+User documentation lives in `site/` and is published at [ocx.sh/install/](https://ocx.sh/install/). The README keeps only the quick start. `site/scripts/contract.test.mjs` fails when an `OCX_INSTALL_*` knob or an exit code in `src/install.*` is missing from `configuration.mdx` or `reference.mdx`, or the reverse, so a knob change needs a page change in the same PR. Pages follow `.claude/rules/docs-quality.md`; `task site:check` runs those gates.
 
 ## Cross-installer parity
 

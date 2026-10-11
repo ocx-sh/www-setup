@@ -50,7 +50,7 @@ A non-zero `self setup` exit → `err`/`Err` exit **6**. The recorded argv is as
 
 **Rename map (history)** — old → new: `OCX_INSTALL_INDEX_URL`→`OCX_INSTALL_DIST_URL`; `OCX_INSTALL_BASE_URL`→`OCX_INSTALL_MIRROR_URL`; `OCX_INSTALL_SKIP_SELF_INIT`→`OCX_INSTALL_NO_SETUP`; `OCX_INSTALL_NO_BIN_SMOKETEST`→`OCX_INSTALL_NO_SMOKETEST`. **Dropped:** `OCX_INSTALL_FORMAT_URL`, `OCX_INSTALL_CHECKSUM_FORMAT_URL` (URLs now come inline from `dist.json`). **Added:** `OCX_INSTALL_VERSION`, `OCX_INSTALL_CA_BUNDLE`.
 
-When introducing a new knob: pick the most boring possible name fitting the grammar above; default to empty/`0`; document it in `README.md` (env matrix) and the test suites; mirror it in **all five** installers (env name identical; pwsh adds a `[switch]`/`[string]` param that the env overrides).
+When introducing a new knob: pick the most boring possible name fitting the grammar above; default to empty/`0`; document it on the site (`site/src/content/docs/configuration.mdx`; the drift guard fails without it) and the test suites; mirror it in **all five** installers (env name identical; pwsh adds a `[switch]`/`[string]` param that the env overrides).
 
 ### The embedded configuration block (corporate mirrors)
 
@@ -221,7 +221,7 @@ already in the environment — env wins, as everywhere):
   older ocx ignores the unknown variable; an env var, not a flag, is what keeps
   the installers compatible with every released ocx. ocx caps the value at
   32 KiB (a concatenated public-roots bundle exceeds it → `self setup` refuses →
-  exit 6; the README tells users to pre-set the corporate root alone).
+  exit 6; the site (mirrors page) tells users to pre-set the corporate root alone).
 - **`SSL_CERT_FILE=<resolved path>`** — how an older ocx discovers a host CA
   (merged into its compiled-in Mozilla roots, PEM only). reqwest's platform
   verifier reads it on **Linux/BSD only**; on Windows and macOS it is a no-op.
@@ -266,7 +266,7 @@ Truthy values (case-sensitive): `1`, `true`, `yes`, `TRUE`, `YES`, `True`, `Yes`
 
 ### Internal test-only hatch: `__OCX_TESTING_INSTALL_BINARY`
 
-`__OCX_TESTING_INSTALL_BINARY` (double-underscore prefix, **TEST-ONLY, UNDOCUMENTED**) is an internal download-skip hatch. It must never appear in `usage()`/help, the README env matrix, or the user-facing tables. When set to a path, the installer (`install_local_test_binary` in sh, `Install-LocalTestBinary` in ps1, and the nu/fish/elvish equivalents):
+`__OCX_TESTING_INSTALL_BINARY` (double-underscore prefix, **TEST-ONLY, UNDOCUMENTED**) is an internal download-skip hatch. It must never appear in `usage()`/help, the site configuration page, or the user-facing tables. When set to a path, the installer (`install_local_test_binary` in sh, `Install-LocalTestBinary` in ps1, and the nu/fish/elvish equivalents):
 
 - validates the path is a file (exit **2** on miss; message contains `__OCX_TESTING_INSTALL_BINARY`), copies it to the canonical bin dir (`$OCX_HOME/$OCX_BIN_SUBPATH/ocx`), and `chmod +x` (unix);
 - **skips** download + checksum + extract + the network manifest probe (the version is `local`, so the semver validation is bypassed);
