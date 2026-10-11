@@ -140,6 +140,10 @@ neither of which offers a hard cap.
 | `BUNNY_STORAGE_ZONE` | `sh-ocx-setup` | GitHub env `setup.ocx.sh` |
 | `BUNNY_API_KEY` | **account-wide** — edge rules, purges, zone config | local only, deliberately NOT in CI |
 
+`scripts/lib/bunny.sh` hands the storage key to curl on stdin as a header file
+(`-H @-`), so it never appears on a command line. `BUNNY_STORAGE_KEY_FILE`
+(a file holding the key) only keeps the key out of shell history.
+
 Publishing content never touches routing; applying routing never touches
 content. That separation is why the account-wide key stays out of the release
 pipeline.
