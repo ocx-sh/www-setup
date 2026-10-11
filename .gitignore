@@ -19,5 +19,6 @@ target/
 site/dist/
 site/.astro/
 site/.docs-check/
+site/.lighthouseci/
 site/public/casts/
 __pycache__/

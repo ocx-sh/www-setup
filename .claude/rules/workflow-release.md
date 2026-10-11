@@ -27,6 +27,8 @@ The tag push triggers `.github/workflows/release.yml`.
 | `release` | Generates GitHub release notes from git-cliff `--latest`, creates the release. Marks it `prerelease: true` when the tag contains `-`, and SKIPS the "update major version tag" step for prerelease tags. |
 | `publish-installers` | Table-driven upload of all five `src/install.*` to the channel-appropriate Bunny Edge Storage keys via `publish-installers.sh` (`BUNNY_STORAGE_KEY` + `BUNNY_STORAGE_ZONE`), then refreshes + uploads `dist.json` via `publish-dist.sh` (which regenerates it from the `ocx-sh/ocx` Releases API via `gen-dist.sh`) |
 
+The `site` workflow (`site.yml`) deploys the `/install/` docs to the `ocx.sh` storage zone on the same `v*` tag, so the docs never run ahead of the published installers. It is gated by `vars.BUNNY_DEPLOY` and the `ocx.sh` environment, which needs a deployment rule admitting `v*` tags.
+
 Both jobs run on every `v*` tag (prereleases included). There is no mirror-to-GitLab step — the GLF lives in a separate repo now.
 
 The **routing** layer is separate and is not deployed by CI: `deploy/bunny/edge-rules.py apply` writes the pull zone's edge rules out-of-band (it needs `BUNNY_API_KEY`, an account-wide credential that deliberately does not live in CI). Publishing content never touches routing, and applying routing never touches content. See [`deploy/bunny/README.md`](../../deploy/bunny/README.md).

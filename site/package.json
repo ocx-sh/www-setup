@@ -6,7 +6,8 @@
     "dev": "astro dev --host",
     "build": "astro build",
     "test": "node --test \"scripts/*.test.mjs\"",
-    "check": "node scripts/check-anchors.mjs && node scripts/check-fences.mjs && node scripts/docs-gate.mjs && ocx-site check --dist dist"
+    "check": "node scripts/check-anchors.mjs && node scripts/check-fences.mjs && node scripts/docs-gate.mjs && ocx-site check --dist dist",
+    "lighthouse": "node scripts/lighthouse.mjs"
   },
   "dependencies": {
     "@astrojs/markdown-satteri": "0.4.3",
@@ -15,6 +16,10 @@
     "astro": "7.3.5"
   },
   "devDependencies": {
-    "markdownlint-cli2": "0.18.1"
+    "@lhci/cli": "0.15.1",
+    "chrome-launcher": "1.2.1",
+    "lighthouse": "12.6.1",
+    "markdownlint-cli2": "0.18.1",
+    "playwright-core": "^1.63.0"
   }
 }

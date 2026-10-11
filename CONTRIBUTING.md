@@ -61,6 +61,7 @@ task ci:verify meta:verify                                    # workflow/Taskfil
 task ci:zizmor                                                # workflow security audit (zizmor)
 task site:test                                                # site unit tests + the installer-contract drift guard
 task site:check                                               # build the /install/ site and run its gates
+task site:lighthouse                                          # Lighthouse over the built pages (mobile, 100 in every category)
 task docker:integration DISTRO=alpine PLATFORM=linux/amd64    # one distro × arch
 task docker:integration:all                                   # full matrix
 ```

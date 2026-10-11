@@ -1,10 +1,12 @@
 name: site
 
 # The /install/ section of ocx.sh (site/). Built and checked on every PR that touches it; deployed
-# to ocx.sh from main. src/install.* is a trigger because the drift guard (site/scripts/contract.test.mjs)
+# to ocx.sh on a v* tag. src/install.* is a trigger because the drift guard (site/scripts/contract.test.mjs)
 # compares the installers' knobs and exit codes with the pages.
 on:
   pull_request:
+    # ready_for_review: a draft skips Lighthouse (below), so marking it ready runs it.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'site/**'
       - 'src/install.*'
@@ -14,14 +16,10 @@ on:
       - 'taskfile.yml'
       - 'taskfiles/site.taskfile.yml'
       - '.github/workflows/site.yml'
+  # The docs go live with the installers they describe: a v* tag (release.yml publishes the same tag),
+  # never a push to main. The `ocx.sh` environment needs a deployment rule that admits v* tags (owner setting).
   push:
-    branches: [main]
-    paths:
-      - 'site/**'
-      - 'src/install.*'
-      - 'ocx.toml'
-      - 'ocx.lock'
-      - '.github/workflows/site.yml'
+    tags: ['v*']
   workflow_dispatch:
 
 permissions: {}
@@ -54,9 +52,37 @@ jobs:
           name: site
           path: site/dist
 
+  lighthouse:
+    name: Lighthouse
+    # The slowest job; drafts skip it.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+        with:
+          groups: default,site
+      # Lighthouse drives Playwright's Chromium; install its system libraries first (the task fetches only the browser).
+      - name: Install Chromium system libraries
+        run: ocx exec -g site -- pnpm --dir site exec playwright-core install-deps chromium
+      - run: task site:lighthouse
+      - name: Upload failure reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lighthouse-reports
+          path: site/.lighthouseci/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
   deploy:
     name: Deploy
-    needs: build
+    needs: [build, lighthouse]
     # Off until the ocx.sh environment and the BUNNY_DEPLOY variable exist on this repo.
     if: vars.BUNNY_DEPLOY == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
