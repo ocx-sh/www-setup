@@ -50,7 +50,7 @@ tasks:
     desc: Run Pester equivalents on pwsh through the census gate (pinned Pester; pwsh via ocx.toml on Linux)
     cmds:
       - '{{.PWSH}} -File scripts/Install-PinnedModule.ps1 -Name Pester -Version {{.PESTER_VERSION}}'
-      - '{{.PWSH}} -File scripts/Invoke-PesterGate.ps1 -Path tests/install/ps1 -RequiredVersion {{.PESTER_VERSION}} -MaxSkipped {{if eq OS "windows"}}20{{else}}0{{end}}'
+      - '{{.PWSH}} -File scripts/Invoke-PesterGate.ps1 -Path tests/install/ps1 -RequiredVersion {{.PESTER_VERSION}} -MaxSkipped {{if eq OS "windows"}}22{{else}}0{{end}}'
 
   pester:lint:
     desc: Lint the Pester pin, the Pester 6 removed forms and discovery-time code

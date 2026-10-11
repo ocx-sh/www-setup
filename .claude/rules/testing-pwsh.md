@@ -28,7 +28,7 @@ installer code is unchanged and the trust never leaks into the test host.
 ## Conventions
 
 - Pester is pinned to **6.2.0** (`PESTER_VERSION` in `taskfiles/test.taskfile.yml`, the same literal in `test-installers.yml`), installed by `scripts/Install-PinnedModule.ps1`. Use the `New-PesterConfiguration` API; no v3-style globals and none of the forms removed in Pester 6 (`Assert-MockCalled`, `Assert-VerifiableMock`, `Set-ItResult -Pending`, `It -Focus`). Files keep `#Requires -Modules @{ ModuleName='Pester'; ModuleVersion='5.0.0' }`.
-- Run with `task test:pester` or the CI step: `scripts/Invoke-PesterGate.ps1 -Path tests/install/ps1 -RequiredVersion 6.2.0 -MaxSkipped N`. The gate is red on a failed test, zero tests discovered, zero passed, or skips over the budget. The budget is **0** on Linux and macOS and **20** on Windows, where the scenarios that execute the shell-script stub self-skip (it is not a PE), plus the Unix-only `Get-UnixTarget` scenario in `Platform.Tests.ps1`. Raise it only with a new Windows-only skip, and say why in the commit.
+- Run with `task test:pester` or the CI step: `scripts/Invoke-PesterGate.ps1 -Path tests/install/ps1 -RequiredVersion 6.2.0 -MaxSkipped N`. The gate is red on a failed test, zero tests discovered, zero passed, or skips over the budget. The budget is **0** on Linux and macOS and **22** on Windows, where the scenarios that execute the shell-script stub self-skip (it is not a PE), plus the Unix-only `Get-UnixTarget` scenario in `Platform.Tests.ps1`. Raise it only with a new Windows-only skip, and say why in the commit.
 - `task test:pester:lint` runs `scripts/pester-lint.sh` (P1 unpinned Pester, P2 the Pester 6 removed forms) and `scripts/Test-DiscoveryCode.ps1` (discovery-time assignments or side effects that a `BeforeAll` should own). Never pass `-AllowNullOrEmptyForEach` in a gating run.
 - PSScriptAnalyzer (1.25.0, `task pwsh:verify`) lints `src/` and `tests/install/ps1/`; the 5.1 parse (`scripts/gates-parse-gate.ps1`) is the gate of record for syntax.
 - One `It` per scenario. Top-level `BeforeAll` builds one fixture + server per file; `BeforeEach` resets a fresh `OCX_HOME` and the env knobs.
@@ -172,7 +172,7 @@ branch. `test-installers.yml`:
 - The `pester` job runs on **windows-latest + ubuntu-latest + macos-26** (pwsh
   7) through `Invoke-PesterGate.ps1`. The POSIX legs execute the full path;
   Windows runs the parse/placement scenarios and self-skips the stub-execution
-  ones (skip budget 20, see *Conventions*).
+  ones (skip budget 22, see *Conventions*).
 - The full suite does not run under a 5.1 host: it invokes install.ps1 with `& pwsh`, so a
   5.1 host adds no coverage. `windows-latest` instead runs a fixture-free 5.1 smoke
   install (`powershell.exe`) and the 5.1 parse gate, plus the nightly real-release

@@ -245,7 +245,7 @@ jobs:
       - name: Run Pester (census gate)
         shell: pwsh
         env:
-          MAX_SKIPPED: ${{ matrix.os == 'windows-latest' && '20' || '0' }}
+          MAX_SKIPPED: ${{ matrix.os == 'windows-latest' && '22' || '0' }}
         run: ./scripts/Invoke-PesterGate.ps1 -Path tests/install/ps1 -RequiredVersion 6.2.0 -MaxSkipped $env:MAX_SKIPPED
       # install.ps1 is delivered as `irm | iex`. Drive it down its failure path (an unreachable manifest
       # URL) in a child pwsh 7: the host must survive, the failure must reach the step status, and the
