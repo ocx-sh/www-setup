@@ -9,7 +9,7 @@ Every installer is a **thin bootstrap**. It does exactly four things and nothing
 1. **Detect** the platform (`<arch>-<os>-<libc/vendor>` target triple).
 2. **Resolve** the release from the distribution manifest (`dist.json`): the latest stable version (or `OCX_INSTALL_VERSION`), then the `(version, target)` row → inline `sha256` + download URL.
 3. **Download + verify** the archive against the manifest's inline `sha256` (no separate `sha256.sum` fetch), then `safe_extract`.
-   Every network fetch is **retried 3 times with 1s/2s backoff** — see *Download retry* below.
+   Every network fetch is **retried 3 times with 1s/2s backoff** — see *Download retry* below. Integrity **fails closed** — see *Integrity fails closed* below.
 4. **Hand off** to the downloaded binary's `ocx self setup`.
 
 `ocx self setup` owns *everything* that touches the user's machine: the package-store self-install, the per-shell env shims under `$OCX_HOME`, the managed shell-profile activation blocks, and completions. **The installers no longer write any of that** — there is no `create_env_file`, `modify_shell_profile`, completion sentinel, or `--remote package install` bootstrap. If you find yourself adding shim/profile/completion logic to an installer, stop: it belongs in `ocx self setup`.
@@ -122,6 +122,67 @@ This exists because a single CDN edge PoP served HTTP 500 for `dist.json` on
 defence in depth, not the cure — a client pinned to a bad PoP retries into the
 same wall. See [`deploy/bunny/README.md`](../../deploy/bunny/README.md).
 
+### Transport: https at script level, probed downloader flags
+
+- **https is asserted by the script, not left to the backend.** The manifest URL,
+  the mirror-rewritten archive URL and the manifest-row URL are each refused with
+  exit **3** (message contains `non-https`) before any request, in all five
+  dialects and on every backend, loopback included — there is no `http://127.0.0.1`
+  exemption. The assert sits in **statement position** (not in a command
+  substitution or `if` condition, where a dialect's `exit` demotes to a return) and
+  before the request is made. It does not run before the downloader is chosen: sh
+  asserts inside `download_once`, after `detect_downloader`. curl's `--proto '=https'` stays as defence in
+  depth; the fixture servers speak TLS for the same reason.
+- **Optional downloader flags are probed, never assumed** (sh and fish; nu, elvish
+  and pwsh use no wget). `curl --tlsv1.2` is sent only when `curl --help all` lists
+  it; wget gets only `-q -O` plus whichever of `--https-only`,
+  `--secure-protocol=TLSv1_2` and `--ca-certificate` its `--help` lists. A flag
+  BusyBox rejects would otherwise fail every download.
+- **BusyBox wget** is recognised by its `--help` banner and draws one `warn`, in sh
+  and in fish. A CA bundle with a wget that lacks `--ca-certificate` is exit **2**:
+  never fall back silently to the system store. In sh and fish, a wget that prints
+  `certificate validation not implemented` marks the transport unvalidated, and an
+  unpinned (rolling) manifest fetched over it is exit **4**; a `dist/<sha256>.json` pin is still accepted because
+  the digest authenticates it. Accepted gap: without `--https-only` such a wget
+  does not itself refuse an https-to-http redirect.
+- **pwsh** forces TLS 1.2 for `Invoke-WebRequest` through `Enable-Tls12`: it assigns
+  by number (adding Tls13 only when the enum has it, never naming `Tls13`), never
+  `-bor`s onto the current value, and restores the caller's `SecurityProtocol` in
+  `finally`.
+
+### Integrity fails closed
+
+Every installer verifies the archive against the manifest's inline `sha256` and
+**never** downgrades to warn-and-continue. There is no `required` argument on the
+verify function in any dialect.
+
+- **No hash tool → exit 2**, before the download is trusted. sh accepts
+  `sha256sum`, `shasum` or `openssl`; fish and elvish the same three
+  (elvish uses `certutil` on Windows); nu (`hash sha256`) and pwsh
+  (`Get-FileHash`) hash in-process, so have no missing-tool case.
+- **A manifest row whose `sha256` is blank, absent or not 64 hex digits → exit 3**,
+  message contains `no valid sha256`, checked right after the row lookup and before
+  any download (so the idempotent fast path is unaffected). nu and elvish compare
+  case-insensitively.
+- **A mismatch → exit 4**, single-shot (see *Download retry*).
+
+### Temp files and signals
+
+Temp files are removed on success, on the idempotent fast path and on **every** error
+exit. The mechanism is per dialect:
+
+| Dialect | Mechanism | Signals |
+|---|---|---|
+| sh | traps bound before `mktemp`; the `EXIT` trap preserves the status, clears itself and removes the dir | `HUP`/`INT`/`TERM` exit 129/130/143 without continuing |
+| fish | every temp path goes through `__ocx_mktemp` into one list; an `--on-event fish_exit` handler removes them | `--on-signal` handlers only record the pending signal; `__ocx_check_signal` (at the start of `__ocx_err`, after each download attempt and retry sleep, after the manifest fetch and extract, and at the end of `main`) cleans up and exits 129/130/143 from normal flow. Asserted on fish 3.6.0, 4.0.2 and 4.9 |
+| nu | `__ocx-err` raises `error make {msg: 'ocx-exit:CODE:text'}`; `__ocx-entry` is the **only** place that exits, and removes the one `mktemp -d` work dir first | none: nu has no trap, a killed run leaves its dir |
+| elvish | `ocx-err` removes every tracked temp path before `exit`, and the main call sits in `try { } finally { }` (elvish `exit` skips `finally`, so both are needed) | none: elvish has no trap |
+| pwsh | `Err` throws; `finally` removes the work dir, the temp files and the env names the script set (`Remove-Item Env:NAME`, because `SetEnvironmentVariable($n, $null)` leaves the name in the `Env:` provider) | none: PowerShell has no trap for them |
+
+The suites run each installer under a private `TMPDIR` and assert it is empty after
+every exit path. A BSD `mktemp` that ignores `TMPDIR` would make those assertions
+vacuously green, not red.
+
 ### `OCX_INSTALL_CA_BUNDLE`
 
 A PEM **file path**, or the PEM text itself, materialized to a temp file (which
@@ -192,8 +253,8 @@ raw PEM text would hand `ocx self setup` garbage.
 All five installers detect the pin the same way and MUST keep doing so: strip any `?query`/`#fragment`, take the basename, and match `^[0-9a-f]{64}\.json$`. On a match the manifest is downloaded **to a file** and hashed there — never captured into a shell variable, because every dialect's command substitution strips the trailing newline the digest covers — then compared:
 
 - mismatch → exit **4** (the ordinary checksum code);
-- no `sha256sum`/`shasum` available → exit **2**. A pin MUST NOT degrade to the unverified warn-and-continue path that a rolling manifest allows: the digest is the only thing authenticating it.
-- Non-pinned (rolling) URLs are unchanged — nothing to verify against.
+- no hash tool available → exit **2** (see *Integrity fails closed*): the digest is the only thing authenticating a pin, so there is no unverified path.
+- Non-pinned (rolling) URLs have nothing to verify against and are fetched as before — except in sh and fish over a wget that does not validate TLS, which refuses them with exit **4** (see *Transport*).
 
 The verification call must sit in **statement position**, not inside a command substitution or an `if` condition: POSIX `$(…)` runs in a subshell, and fish demotes `exit` inside a conditional's command to a plain return — either way the process would continue past a failed check and report the wrong code. `sh` and `fish` therefore pass a destination path into `fetch_dist` / `__ocx_fetch_dist` instead of echoing the body.
 
@@ -234,6 +295,9 @@ This contract is what lets downstream callers do `BIN_DIR=$(./install.sh | tail 
 | 5 | Archive extraction failure |
 | 6 | `ocx self setup` failure |
 | 7 | Unsupported platform / architecture |
+| 129, 130, 143 | sh and fish only: `HUP`, `INT`, `TERM` (128 + signal; fish from the 3.6.0 floor). nu, elvish and pwsh cannot trap and claim none of these |
+
+Codes 2, 3 and 4 also cover the integrity and transport failures of the sections above: no hash tool or a CA bundle a wget cannot take (2); a manifest row without a valid `sha256` or a non-https URL (3); a mismatch, or a rolling manifest over an unvalidated wget in sh or fish (4). Exit 7 is also the answer when any of the five installers cannot tell glibc from musl on a Linux host: sh's `detect_libc` (called by `detect_target`) tries the `ldd` banner, then the musl loader files, then glibc evidence, and exits 7 on none rather than guessing a target; the other four apply the same order and the same exit. There is deliberately no `OCX_INSTALL_TARGET` knob; it would need five-way parity.
 
 When `err()` is called from a new code path, choose the most specific code. Adding new codes is fine; reusing them across unrelated failure modes is not — it breaks the diagnostic value for CI scripts.
 
@@ -247,6 +311,20 @@ The exit-code contract above (codes 2–7 for in-script `err()` paths) holds ide
 This divergence is accepted because PowerShell parameter binding owns unknown-argument rejection and structurally cannot emit code 2. Every exit code that *is* produced by an in-script error path (2–7) remains symmetric.
 
 **pwsh delivery of the code.** `Err` never calls `exit` (under `irm … | iex` or a scriptblock that closes the caller's own PowerShell). It prints the message, then throws an exception carrying the code in `Data['OcxExit']`; the single `try/catch` at the bottom of `install.ps1` calls `exit <code>` when `$PSCommandPath` is set (file run: `-File`, called by path) and otherwise sets `$global:LASTEXITCODE` and throws `ocx install failed (exit code N)`: an interactive session survives a throw, and a non-interactive `pwsh -c "irm … | iex"` still exits non-zero, so automation never reads a failed install as success. A `catch` that could swallow that exception must rethrow when `Data.Contains('OcxExit')`. Pester: the `iex:` and `scriptblock:` scenarios in `ExitCodes.Tests.ps1`.
+
+## Script header (lines 2 to 8)
+
+Every `src/install.*` carries, in its first eight lines, a `# Kind: INST` line, a `# Exit:` line listing its codes, and its interpreter floor. Only `Source.Tests.ps1` asserts a header (`# Kind: INST` of `install.ps1`); no Bats suite asserts the others, so those headers are held by review. The floor line is dialect-specific:
+
+| Installer | Floor line |
+|---|---|
+| `install.sh` | `Floor: POSIX.1-2017` (plus probed `local`); `# Exit:` adds 129 130 143 |
+| `install.ps1` | `Floor: Windows PowerShell 5.1`, PowerShell 7 on Linux and macOS; `# Exit:` states there are no signal statuses |
+| `install.nu` | `# nu-range: 0.105.1..0.116.1`; says nu has no trap |
+| `install.fish` | `Floor: fish 3.6.0. Tested: 3.6.0, 4.8.`; `# Exit:` adds 129/130/143 |
+| `install.elv` | `# elvish-floor: 0.20.1`; says elvish has no trap |
+
+The floor is the oldest interpreter the suite is run against, not a documentation claim: a syntax or builtin newer than the floor is a regression. `core-weaken.sh` reports the added `# Kind:` lines; they are intended, and each is acknowledged with a `Weaken-Ok: <path>: Kind header changed: <reason>` line in a commit body, which `core-weaken-ack.sh` (the PR job) accepts.
 
 ## Cross-installer parity (5-way)
 
@@ -263,11 +341,24 @@ Tests in `tests/install/env-knobs.bats` + `tests/install/{nu,fish,elvish}/` (per
 
 ### Per-dialect notes
 
-- **sh** (`src/install.sh`) — POSIX (bash/zsh/ash/ksh/dash). `--version` flag + `OCX_INSTALL_VERSION`. curl/wget; `OCX_INSTALL_DOWNLOADER`.
-- **pwsh** (`src/install.ps1`) — **cross-platform**: Windows (PS 5.1 Desktop floor + 7) AND Linux/macOS (PS 7+; 5.1 is Windows-only). Switch params `-Version -NoModifyPath -Quiet -Force -PrintPath -NoSetup -NoSmoketest`. Env wins over switches. `Detect-Architecture` emits `*-pc-windows-msvc` / `*-unknown-linux-{gnu,musl}` / `*-apple-darwin` (OS gate via `RuntimeInformation.IsOSPlatform`; the `$PSVersionTable.PSEdition -eq 'Desktop'` shortcut keeps 5.1 from ever touching the Core-only Unix branch). Binary `ocx.exe`/`ocx`; `.zip` (zip-slip-safe `System.IO.Compression`) on Windows, `.tar.xz` (shells to `tar xf`, needs `xz-utils`) on Unix — dispatch keys off the manifest filename extension. 5.1-safety: no ternary/`??`/`&&`/`||`/`$IsWindows`/`$IsMacOS`/`$IsLinux` (the last collide with read-only auto-vars — local vars use other names).
-- **nu** (`src/install.nu`) — Nushell, cross-platform. **Env-driven** (Nushell gets no positional args over `curl | nu`): pin with `OCX_INSTALL_VERSION`. Native JSON (`from json`), `open --raw | hash sha256`.
-- **fish** (`src/install.fish`) — fish, unix-only. `argparse` flags + env. JSON via `string match -r` on the flat manifest (no jq). NB: `version` is a reserved fish var — locals use `ocxver`.
-- **elvish** (`src/install.elv`) — Elvish, cross-platform. Native `from-json`; `?()`/`try` wrap every external (Elvish throws on nonzero external exit).
+- **sh** (`src/install.sh`) — POSIX (bash/zsh/ash/ksh/dash/BusyBox ash), floor POSIX.1-2017. `--version` flag + `OCX_INSTALL_VERSION`. curl/wget; `OCX_INSTALL_DOWNLOADER`. Argv for the version and managed-config flags is built with `set --`, never an unquoted expansion; `main ${1+"$@"}`. Source is pure ASCII.
+- **pwsh** (`src/install.ps1`) — **cross-platform**: Windows (PS 5.1 Desktop floor + 7) AND Linux/macOS (PS 7+; 5.1 is Windows-only). Switch params `-Version -NoModifyPath -Quiet -Force -PrintPath -NoSetup -NoSmoketest`. Env wins over switches. `Detect-Architecture` emits `*-pc-windows-msvc` / `*-unknown-linux-{gnu,musl}` / `*-apple-darwin` (OS gate via `RuntimeInformation.IsOSPlatform`; the `$PSVersionTable.PSEdition -eq 'Desktop'` shortcut keeps 5.1 from ever touching the Core-only Unix branch). Binary `ocx.exe`/`ocx`; `.zip` (zip-slip-safe `System.IO.Compression`) on Windows, `.tar.gz` or older `.tar.xz` (shells to `tar xf`; `.tar.xz` needs `xz-utils`) on Unix — dispatch keys off the manifest filename extension. **`irm | iex` isolation:** the whole body runs in `& { param(...) } @PSBoundParameters`, so no function, variable, `ErrorActionPreference` or strict mode leaks into the caller's session (the script-level `$script:OcxIsWindows` is a local); it saves and restores `SecurityProtocol` and the caller's `LASTEXITCODE` (restored on success only; on failure it carries the delivered code) and removes the env names it set. The gates `ps-sec-iex-leak.ps1` and `ps-sec-iex-survival.ps1` probe both, and the `iex:` scenarios in `ExitCodes.Tests.ps1` pin them. 5.1-safety: no ternary/`??`/`&&`/`||`/`$IsWindows`/`$IsMacOS`/`$IsLinux` (the last collide with read-only auto-vars — local vars use other names).
+- **nu** (`src/install.nu`) — Nushell 0.105.1 to 0.116.1, cross-platform. **Env-driven** (Nushell gets no positional args): pin with `OCX_INSTALL_VERSION`. Native JSON (`from json`), `open --raw | hash sha256`. A bare `curl | nu` installs nothing (nu starts a REPL and exits 1 on a non-tty stdin), so the documented entry hands nu the text: `nu -c "$(curl -fsSL URL || echo 'exit 3')"` from a POSIX shell, `nu -c (http get URL)` from inside nu. Both keep the installer's exit code, run nothing on a cut-off script and (first form) exit 3 on a failed download. Forms measured on 0.105.1, 0.114.1, 0.116.0 and 0.116.1, and, with `open --raw` standing in for `http get`, on Windows nu 0.116.1 (the script text is about 24 KB of argv). `nu /dev/stdin` and `source /dev/stdin` fail on 0.105.1, and a `--stdin` temp-file wrapper works but is too long for a front-door line. Helpers raise with `error make {msg: 'ocx-exit:CODE:text'}` (only `$e.msg` is stable across the range); `__ocx-entry` is the only caller of `exit`. Avoid `get -i` and `str downcase` (deprecation warnings from 0.112 / 0.114): use `$name in $env`, `$row.field? | default ''` and a `(?i)` regex. A tail-position external inside `try` can hang on nu >= 0.112 for a large capture; keep externals behind `complete`.
+- **fish** (`src/install.fish`) — fish 3.6.0 or newer (tested 3.6.0, 4.0, 4.2, 4.8), unix-only. `argparse` flags + env. JSON via `string match -r` on the flat manifest (no jq). NB: `version` is a reserved fish var — locals use `ocxver`. `curl | fish` is a supported pipe entry; pin with `curl … | OCX_INSTALL_VERSION=x fish`. fish has no `-s` option, so flags (`--version`, `--no-modify-path`) work only when fish runs a saved file; through a pipe use the env knobs (`OCX_INSTALL_VERSION`, `OCX_NO_MODIFY_PATH`). Env knobs go on the receiving shell, never on `curl`. Never use an exit helper as a conditional's command (fish demotes the `exit`); call asserts in statement position.
+- **elvish** (`src/install.elv`) — Elvish 0.20.1 or newer (tested 0.20.1 and 0.21.0), cross-platform. Native `from-json`; `?()`/`try` wrap every external (Elvish throws on nonzero external exit). A bare `curl | elvish` installs nothing (elvish reads stdin as a REPL, fails on multi-line fns and exits 0), so the documented entry is `elvish -c "$(curl -fsSL URL || echo 'exit 3')"` from a POSIX shell and `elvish -c (e:curl -fsSL URL | slurp)` from inside elvish (the latter exits 2 on any failure, since elvish wraps the child's status). `resolve` cannot probe a module member (`resolve os:mkdir-all` succeeds on 0.20.1 and the call then throws), so `ocx-mkdir-p` is `try { os:mkdir-all } catch { e:mkdir -p }`. The elvish suite extracts `fn NAME` from the source with awk, so keep `ocx-has-musl-loader` and `ocx-certutil-digest` as top-level fns closing with a column-0 brace. Windows needs `mktemp`, `rm`, `cp`, `chmod` and `tar` on `PATH` (present with Git for Windows).
+
+## Quality-rule overrides
+
+The shell-quality and powershell-quality rules pin defaults an adopter may override once, in shared config. These are this repository's recorded overrides; nothing else deviates.
+
+| Pinned default | Override here | Why |
+|---|---|---|
+| Elvish floor 0.18.0 to 0.21.0 | Floor **0.20.1**, tested to 0.21.0 | The `os` module and `elv-gate.sh` (needs `-json`) both need 0.20.x, and 0.20.1 is what `alpine:3.20` ships |
+| TOOL and CI scripts are `#!/usr/bin/env bash`, floor bash 3.2.57 | `scripts/*.sh` and `tests/docker/*.sh` that run in containers stay **POSIX sh**; the Kind line reads `CI (POSIX sh: …)` or `TOOL (POSIX sh: …)`. `tests/docker/run.sh` is bash 3.2.57. The gate wrappers (`bats-ci.sh`, `ci-verify.sh`, `shell-format.sh`) are bash 3.2 | They run inside busybox and dash containers (Alpine, minimal Debian) where bash may be absent |
+
+The zero skip budget is not overridden: the only allowed skips are the platform facts in `CENSUS_SKIP_OK` (`GNU wget not installed`, `timeout(1) not available`, and `busybox has no macOS build` on the macOS leg).
+
+Per-site waivers are not overrides. `install.sh` keeps `SC3043` (`local`, verified at runtime by `has_local`) and two `SC2310` directives, each with a same-line reason. The PowerShell test harness leaves four gate notes unfixed on purpose: Information-level `PSProvideCommentHelp` and `ENC03` (`2>file` in tests, ASCII output), the python-launcher `Start-Process` in `Fixture.psm1`, and the intentional top-level `exit` in `Run-Installer.ps1`.
 
 ## Canonical bin dir
 

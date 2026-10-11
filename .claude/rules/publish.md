@@ -57,7 +57,7 @@ Matching is Lua patterns, not PCRE — no alternation, no lookaround. Rewrite ta
   "latest": {"version":"0.5.0","channel":"stable"},
   "latest_next": {"version":"0.6.0-rc.1","channel":"next"},
   "releases": [
-    {"version":"0.5.0","channel":"stable","tag":"v0.5.0","target":"x86_64-unknown-linux-gnu","filename":"ocx-x86_64-unknown-linux-gnu.tar.xz","sha256":"abc…","url":"https://github.com/ocx-sh/ocx/releases/download/v0.5.0/ocx-x86_64-unknown-linux-gnu.tar.xz"}
+    {"version":"0.5.0","channel":"stable","tag":"v0.5.0","target":"x86_64-unknown-linux-gnu","filename":"ocx-x86_64-unknown-linux-gnu.tar.gz","sha256":"abc…","url":"https://github.com/ocx-sh/ocx/releases/download/v0.5.0/ocx-x86_64-unknown-linux-gnu.tar.xz"}
   ]
 }
 ```
@@ -66,7 +66,7 @@ Matching is Lua patterns, not PCRE — no alternation, no lookaround. Rewrite ta
 
 #### Content-addressed snapshots
 
-`scripts/publish-dist.sh` publishes three documents per run: the immutable snapshot `dist/<sha256>.json`, the sidecar `dist.json.sha256` (sha256sum format, naming `dist.json`), and the rolling `dist.json` **last**. That order is load-bearing and matches `ocx-mirror dist sync`: a consumer reading mid-run resolves either the old manifest or the new one, and never learns a digest whose snapshot is not already fetchable. The snapshot upload uses `--ignore-existing` (content-addressed ⇒ append-only; an unchanged manifest is a no-op) and `--mkpath` to create the remote `dist/` dir, since the `rrsync`-restricted deploy key rejects an `ssh mkdir`.
+`scripts/publish-dist.sh` publishes three documents per run: the immutable snapshot `dist/<sha256>.json`, the sidecar `dist.json.sha256` (sha256sum format, naming `dist.json`), and the rolling `dist.json` **last**. That order is load-bearing and matches `ocx-mirror dist sync`: a consumer reading mid-run resolves either the old manifest or the new one, and never learns a digest whose snapshot is not already fetchable. The snapshot upload uses `bn_put_new` (content-addressed ⇒ append-only; an unchanged manifest is a no-op).
 
 `OCX_INSTALL_DIST_URL=https://setup.ocx.sh/dist/<sha256>.json` pins the **whole closure** — every release row already carries an inline `sha256`, so one hash fixes every version, URL and checksum the installer will use. The installers detect the 64-hex basename and **verify the served body against it** (mismatch → exit **4**, missing sha256 tool → exit **2**, never a silent skip). That makes the serving host pure transport, which is what lets a mirror stay untrusted — see [`mirror-auth.md`](mirror-auth.md).
 
@@ -104,10 +104,11 @@ Never publish an object under a key an edge rule reroutes — it just confuses c
 
 Two verbs, both plain `curl` against the Edge Storage HTTP API. Every upload carries a `Checksum` header (SHA256, uppercase hex) so Bunny verifies the body server-side and rejects a truncated transfer with 400:
 
-- **`bn_put_new KEY FILE`** — write-if-absent. Pinned versioned uploads and `dist/<sha256>.json` snapshots use it, so a re-run of a release tag never silently overwrites a previously published artifact. If you ever need to overwrite, do it by hand, then audit the cache invalidation downstream. It is a GET-then-PUT rather than a conditional write: the Storage API has no conditional-write header. The pipeline is single-writer (one release job; a `dist-manifest` concurrency group on the cron), so the TOCTOU window is not reachable.
+- **`bn_put_new KEY FILE`** — write-if-absent. Pinned versioned uploads and `dist/<sha256>.json` snapshots use it, so a re-run of a release tag never silently overwrites a previously published artifact. If you ever need to overwrite, do it by hand, then audit the cache invalidation downstream. It is a probe-then-PUT rather than a conditional write: the Storage API has no conditional-write header. The probe (`bn_exists`) reads **404 as absent and 200 as present, and anything else (a 5xx, a 401, a curl timeout) aborts with exit 3**. Reading an error as "absent" would overwrite an immutable object. The pipeline is single-writer (one release job; a `dist-manifest` concurrency group on the cron), so the TOCTOU window is not reachable.
 - **`bn_put KEY FILE`** — overwrite. The `latest/` + `next/` pointers and `dist.json` use it. **Nothing ever deletes** — there is no DELETE path anywhere in the pipeline, and the `archive/` versioned keys must be preserved. Publishing is an upload-only push, not a sync: removing a file from `src/` never removes it from the store.
 - `dist.json` is staged to a mktemp file first (`publish-dist.sh`); the generator is clobber-safe (exits non-zero on any fetch/parse/checksum failure and never emits a partial manifest). Generation is retried as a whole — 3 attempts, 60s apart (`GEN_ATTEMPTS`/`GEN_RETRY_DELAY`) — because GitHub's release-asset CDN intermittently 500s a healthy `sha256.sum` for minutes; once exhausted the script exits 3 before the live `dist.json` is touched.
-- Auth is `BUNNY_STORAGE_KEY` + `BUNNY_STORAGE_ZONE`, bound to the `setup.ocx.sh` environment. The storage key is scoped to that one storage zone. The account-wide `BUNNY_API_KEY` (used for edge rules and purges) is deliberately NOT in CI.
+- Every curl call has a timeout (`--connect-timeout 10`; `--max-time` 60 for the probe, 300 for an upload), so a stalled edge fails the job instead of hanging it.
+- Auth is `BUNNY_STORAGE_KEY` + `BUNNY_STORAGE_ZONE`, bound to the `setup.ocx.sh` environment. `bunny.sh` sends the key to curl on **stdin as a header file** (`-H @-`), never on argv, where `ps` and `/proc/PID/cmdline` would show it to every local user. `BUNNY_STORAGE_KEY_FILE` (a readable file holding the key) only keeps the key out of shell history; the transport is the same. The storage key is scoped to that one storage zone. The account-wide `BUNNY_API_KEY` (used for edge rules and purges) is deliberately NOT in CI.
 
 ## Versioned vs latest
 

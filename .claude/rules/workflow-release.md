@@ -68,7 +68,7 @@ A prerelease is cut by tagging with a SemVer prerelease suffix (`vX.Y.Z-rc.1`, `
 The dispatch snippet that `ocx-sh/ocx` adds to its own release workflow is checked in here as reference: [`deploy/github/ocx-release-dispatch.yml.example`](../../deploy/github/ocx-release-dispatch.yml.example). It POSTs to the setup.ocx.sh `repository_dispatch` API with `event_type: ocx-released` and `client_payload.version` = the released tag, authed Bearer with `SETUP_OCX_DISPATCH_TOKEN`.
 
 - **`SETUP_OCX_DISPATCH_TOKEN`** lives as a secret in **`ocx-sh/ocx`** (not this repo). It is a token scoped to setup.ocx.sh — a fine-grained PAT with `contents: read` + `actions: write`, or a classic PAT with `repo` scope — used only to trigger this repo's workflows.
-- Generation runs in CI with `GITHUB_TOKEN` (to avoid API rate limits); the **install path stays tokenless** — the installer reads the self-hosted `dist.json`, never the GitHub API.
+- Generation runs in CI with `GITHUB_TOKEN` (to avoid API rate limits). `gen-dist.sh` sends it to curl on stdin as a header file, never on argv. `gen-dist.sh` and `publish-dist.sh` remove their temp files on every exit and exit **129/130/143** on HUP/INT/TERM, so a cancelled run does not carry on to upload. The **install path stays tokenless** — the installer reads the self-hosted `dist.json`, never the GitHub API.
 
 ## What never goes in a release commit
 

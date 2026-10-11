@@ -1,3 +1,4 @@
+<!-- doc_type: readme -->
 <div align="center">
   <img src="assets/logo.svg" alt="OCX" width="120" />
 
@@ -18,18 +19,19 @@ https://setup.ocx.sh/elvish         # Elvish (Linux + macOS + Windows)
 https://setup.ocx.sh/dist           # dist.json — the distribution manifest the installers read
 ```
 
-Each installer is a **thin bootstrap**: it detects the platform, resolves the release from the manifest, downloads + verifies the archive against the manifest's inline `sha256`, then hands off to the downloaded binary's `ocx self setup` — which owns the package-store install, the per-shell env shims, and the managed shell-profile activation blocks.
+Each installer is a **thin bootstrap**: it detects the platform, resolves the release from the manifest, downloads + verifies the archive against the manifest's inline `sha256`, then hands off to the downloaded binary's `ocx self setup`.
+That command owns the package-store install, the per-shell env shims, and the managed shell-profile activation blocks.
 
 The bare paths are Bunny CDN edge-rule rewrites onto the latest-stable installer. The pre-release ("next") channel and pinned, immutable copies are reachable at the same friendly per-shell prefix:
 
 ```
 https://setup.ocx.sh/<shell>/next          # next (latest prerelease)  [alias: /<shell>/canary]
-https://setup.ocx.sh/<shell>/<VERSION>     # pinned, immutable (e.g. /sh/0.5.0)
+https://setup.ocx.sh/<shell>/<VERSION>     # pinned, immutable installer script (e.g. /sh/0.2.1)
 ```
 
-`<VERSION>` is the semver string without a leading `v` (e.g. `0.5.0`). The canonical, immutable artifact for a release lives at `https://setup.ocx.sh/archive/<VERSION>/install.<ext>` (`<ext>` ∈ `sh ps1 nu fish elv`) — the per-shell URLs above are nginx rewrites onto it.
+`<VERSION>` is the version of the **installer script**, a semver string without a leading `v` (e.g. `0.2.1`) — not the OCX version it installs (see [Pinning a version](#pinning-a-version)). The canonical, immutable artifact for a release lives at `https://setup.ocx.sh/archive/<VERSION>/install.<ext>` (`<ext>` ∈ `sh ps1 nu fish elv`) — the per-shell URLs above are edge-rule rewrites onto it.
 
-The GitHub Action and GitLab Function listings live in **separate repositories** so they can publish to the native GitHub Marketplace and GitLab CI Catalog. Documentation paths (`/docs/*`) and action paths (`/actions/*`) on `setup.ocx.sh` are forwarded by nginx to those upstream surfaces.
+The GitHub Action and GitLab Function listings live in **separate repositories** so they can publish to the native GitHub Marketplace and GitLab CI Catalog. Documentation paths (`/docs/*`) and action paths (`/actions/*`) on `setup.ocx.sh` are forwarded to those upstream surfaces by edge rules.
 
 ## Quick start
 
@@ -40,11 +42,13 @@ curl -fsSL https://setup.ocx.sh/sh | sh
 # fish:
 curl -fsSL https://setup.ocx.sh/fish | fish
 
-# Nushell:
-curl -fsSL https://setup.ocx.sh/nu | nu
+# Nushell (from a POSIX shell, or from inside nu):
+nu -c "$(curl -fsSL https://setup.ocx.sh/nu || echo 'exit 3')"
+nu -c (http get https://setup.ocx.sh/nu)
 
-# Elvish:
-curl -fsSL https://setup.ocx.sh/elvish | elvish
+# Elvish (from a POSIX shell, or from inside elvish):
+elvish -c "$(curl -fsSL https://setup.ocx.sh/elvish || echo 'exit 3')"
+elvish -c (e:curl -fsSL https://setup.ocx.sh/elvish | slurp)
 ```
 
 ```powershell
@@ -52,27 +56,56 @@ curl -fsSL https://setup.ocx.sh/elvish | elvish
 irm https://setup.ocx.sh/pwsh | iex
 ```
 
-On Linux/macOS the PowerShell installer needs `tar` on `PATH` for archive extraction (xz-utils only for releases older than the .tar.gz switch; both already present on most systems); for a shell-native install there, the POSIX `https://setup.ocx.sh/sh` one-liner is also available.
+Under `irm | iex`, a failed PowerShell install prints the error and throws instead of closing your session, with the exit code in `$LASTEXITCODE`. The installer runs in its own script block and restores `SecurityProtocol`, so it leaves no functions, variables or strict-mode settings in your session.
+
+Nushell and Elvish do not run a script from a pipe. A bare `curl … | nu` exits 1, because nu starts a REPL and refuses a non-terminal stdin. `curl … | elvish` reads stdin as a REPL, prints parse errors and exits 0 with nothing installed. The forms above pass the script as `-c` text instead. The installer's exit code is kept, and a cut-off download fails to parse and runs nothing. In the POSIX-shell form, `|| echo 'exit 3'` turns a failed download into exit 3. They need nu 0.105.1 or newer and Elvish 0.20.1 or newer.
+
+On Linux/macOS the PowerShell installer needs `tar` on `PATH` for archive extraction (xz-utils only for releases older than the .tar.gz switch). Most systems already have both. For a shell-native install there, use the POSIX `https://setup.ocx.sh/sh` one-liner.
 
 ### Pinning a version
 
-Use the `OCX_INSTALL_VERSION` env knob — it is portable across every shell's `curl | <shell>` argument-passing quirks:
+Use the `OCX_INSTALL_VERSION` env knob. Set it on the **receiving** shell, not on `curl`: in `VAR=x curl … | sh` the variable reaches `curl` and the installer never sees it.
 
 ```sh
-OCX_INSTALL_VERSION=0.5.0 curl -fsSL https://setup.ocx.sh/sh | sh
+# POSIX:
+curl -fsSL https://setup.ocx.sh/sh | OCX_INSTALL_VERSION=0.5.0 sh
+
+# fish:
+curl -fsSL https://setup.ocx.sh/fish | OCX_INSTALL_VERSION=0.5.0 fish
+
+# Nushell / Elvish, from a POSIX shell:
+OCX_INSTALL_VERSION=0.5.0 nu -c "$(curl -fsSL https://setup.ocx.sh/nu || echo 'exit 3')"
+OCX_INSTALL_VERSION=0.5.0 elvish -c "$(curl -fsSL https://setup.ocx.sh/elvish || echo 'exit 3')"
 ```
 
-`--version` is also accepted where the dialect parses flags cleanly (`sh`, `fish`, and `pwsh`'s `-Version`). For PowerShell, compile to a scriptblock so `-Version` binds to the param:
+```nu
+# Nushell, from inside nu:
+$env.OCX_INSTALL_VERSION = '0.5.0'; nu -c (http get https://setup.ocx.sh/nu)
+```
+
+```elvish
+# Elvish, from inside elvish:
+set-env OCX_INSTALL_VERSION 0.5.0; elvish -c (e:curl -fsSL https://setup.ocx.sh/elvish | slurp)
+```
+
+```powershell
+# PowerShell:
+$env:OCX_INSTALL_VERSION = '0.5.0'; irm https://setup.ocx.sh/pwsh | iex
+```
+
+`--version` is also accepted where the dialect parses flags: `sh -s -- --version 0.5.0`, `pwsh`'s `-Version`, and `fish install.fish --version 0.5.0` on a saved copy. `fish` reads no flags from a pipe (it has no `-s`), so use `OCX_INSTALL_VERSION` there. For PowerShell, compile to a scriptblock so `-Version` binds to the param:
 
 ```powershell
 & ([scriptblock]::Create((irm https://setup.ocx.sh/pwsh))) -Version 0.5.0
 ```
 
-### Pinned install URL (recommended for CI)
+### Pinned installer script (recommended for CI)
 
 ```sh
-curl -fsSL https://setup.ocx.sh/sh/0.5.0 | sh
+curl -fsSL https://setup.ocx.sh/sh/0.2.1 | OCX_INSTALL_VERSION=0.5.0 sh
 ```
+
+The `/<shell>/<VERSION>` URL pins the installer **script**, so a later installer release cannot change what your CI runs. It does not pin OCX: pair it with `OCX_INSTALL_VERSION` (or a pinned manifest, below).
 
 The installers resolve "latest" by reading the self-hosted distribution manifest at `https://setup.ocx.sh/dist.json` — there is **no GitHub API dependency** in the install path. The manifest lists the published OCX product versions (from `ocx-sh/ocx`) with an inline checksum and download URL per platform; override it with `OCX_INSTALL_DIST_URL`.
 
@@ -81,10 +114,17 @@ The installers resolve "latest" by reading the self-hosted distribution manifest
 Every manifest ever published is kept, unchanged, at a content-addressed URL:
 
 ```sh
-OCX_INSTALL_DIST_URL=https://setup.ocx.sh/dist/<sha256>.json curl -fsSL https://setup.ocx.sh/sh | sh
+curl -fsSL https://setup.ocx.sh/sh | OCX_INSTALL_DIST_URL=https://setup.ocx.sh/dist/<sha256>.json sh
 ```
 
-Because every release row carries an inline `sha256`, pinning the manifest pins the **whole closure** — one hash, fully reproducible. The installers recognise a `dist/<sha256>.json` URL and **verify the served body against the digest in its own name** (mismatch → exit 4), so the host serving it is pure transport and needs no trust. The current digest is published at `https://setup.ocx.sh/dist.json.sha256`, and `ocx-mirror dist sync` emits the same layout for a corporate mirror.
+Every release row carries an inline `sha256`. Pinning the manifest therefore pins the **whole closure**: one hash, fully reproducible. The installers recognise a `dist/<sha256>.json` URL and **verify the served body against the digest in its own name** (mismatch → exit 4), so the host serving it is pure transport and needs no trust. The current digest is published at `https://setup.ocx.sh/dist.json.sha256`, and `ocx-mirror dist sync` emits the same layout for a corporate mirror.
+
+## Integrity and transport
+
+- **Integrity fails closed.** The archive is checked against the manifest's inline `sha256` before it is extracted. A manifest row without a valid 64-hex `sha256` exits 3 before any download, and a missing hash tool exits 2; nothing downgrades to a warning. The tool is `sha256sum`, `shasum` or `openssl` for `sh`, `fish` and `elvish` (`elvish` uses `certutil` on Windows); `nu` and `pwsh` hash in-process.
+- **HTTPS only.** The manifest URL, the mirror URL and every row URL must be `https://`, on every download backend and for loopback too. Anything else exits 3 before a request is made.
+- **wget.** `sh` and `fish` pass `--https-only`, `--secure-protocol=TLSv1_2` and `--ca-certificate` only when `wget --help` lists them. BusyBox wget lists none of them, so both installers warn once. It cannot take `OCX_INSTALL_CA_BUNDLE` (exit 2), and it does not refuse an https-to-http redirect by itself. The official `busybox` images report that wget skips certificate validation (Alpine's wget does validate). There `sh` and `fish` refuse an unpinned manifest with exit 4: install curl or pin the manifest by digest. Prefer curl.
+- **Cleanup.** Temp files are removed on success and on every error exit. `sh` and `fish` also clean up on `SIGINT`, `SIGTERM` and `SIGHUP`. `sh` exits 130, 143 and 129; `fish` exits 143 on `SIGTERM`, and 130 and 129 only on the fish versions that allow it (see [`installers.md`](.claude/rules/installers.md)). `nu`, `elvish` and `pwsh` cannot trap signals, so a killed run can leave its temp directory behind.
 
 ## Configuration
 
@@ -108,7 +148,7 @@ The full list lives in `src/install.sh` (and its peers); see [`.claude/rules/ins
 
 ## Corporate mirrors: one patched installer
 
-A site that mirrors OCX internally usually wants **one** copy of the installer that already knows the local manifest, artifact host, CA, and managed config — instead of asking every developer to export four environment variables.
+A site that mirrors OCX internally usually wants **one** copy of the installer that already knows the local manifest, artifact host, CA, and managed config. That saves every developer from exporting four environment variables.
 
 Each installer carries an embedded configuration block near the top, holding four placeholders:
 
@@ -134,7 +174,7 @@ sed -i \
   install.*
 ```
 
-The placeholder is single-quoted in every dialect, which means the value is never interpolated **and may span newlines** — so the CA bundle can be the certificate itself, leaving nothing to distribute alongside the script. A value spanning lines needs a tool that is not line-oriented:
+The placeholder is single-quoted in every dialect. The value is never interpolated **and may span newlines**, so the CA bundle can be the certificate itself and nothing ships alongside the script. A value spanning lines needs a tool that is not line-oriented:
 
 ```sh
 python3 - install.sh <<'PY'
@@ -155,13 +195,13 @@ Rules:
 
 ### The CA bundle covers both hops
 
-An install is two HTTPS conversations, not one: the installer fetches the manifest and the archive, then `ocx self setup` pulls the package store from the registry. `OCX_INSTALL_CA_BUNDLE` covers both — the installer passes it to `curl --cacert` / `wget --ca-certificate`, and hands it to the `ocx self setup` child as **`OCX_EXTRA_CA_CERTS`** (the value as supplied, path or PEM text; `ocx self setup` persists the certificate text into `$OCX_HOME/config.toml` so every later `ocx` command trusts it, on every OS — [env reference](https://ocx.sh/docs/reference/environment#ocx-extra-ca-certs)). It also exports the bundle path as **`SSL_CERT_FILE`**, which is how an older `ocx` picks up a host CA on Linux ([external CA certificates](https://ocx.sh/docs/reference/environment#external-ca-certificates)). Either variable already in the environment is left alone.
+An install is two HTTPS conversations. The installer fetches the manifest and the archive, then `ocx self setup` pulls the package store from the registry. `OCX_INSTALL_CA_BUNDLE` covers both. The installer passes it to `curl --cacert` / `wget --ca-certificate`, and hands it to the `ocx self setup` child as **`OCX_EXTRA_CA_CERTS`** (the value as supplied, path or PEM text). `ocx self setup` persists the certificate text into `$OCX_HOME/config.toml`, so every later `ocx` command trusts it on every OS. See the [env reference](https://ocx.sh/docs/reference/environment#ocx-extra-ca-certs). It also exports the bundle path as **`SSL_CERT_FILE`**, which is how an older `ocx` picks up a host CA on Linux ([external CA certificates](https://ocx.sh/docs/reference/environment#external-ca-certificates)). Either variable already in the environment is left alone.
 
 Three things worth knowing:
 
 - **PEM only.** Both `OCX_EXTRA_CA_CERTS` and `SSL_CERT_FILE` ignore DER; convert with `openssl x509 -inform der -in corp.crt -out corp.pem`. An inline value is recognised by containing `-----BEGIN`, so a bundle that opens with comment lines (as Fedora/RHEL's does) works unchanged.
 - **curl/wget _replace_ the system trust store** with the bundle you give them, while OCX _merges_ it with its compiled-in Mozilla roots. So if the installer must reach both an internal host and a public one in the same run, the bundle needs the public roots too (`cat corp-root.pem /etc/ssl/certs/ca-certificates.crt`). Same semantics as `CURL_CA_BUNDLE`. Note that `ocx` caps `OCX_EXTRA_CA_CERTS` at 32 KiB — a bundle with the full Mozilla set concatenated exceeds it and `ocx self setup` refuses it (installer exit 6). Since the environment wins, pre-set `OCX_EXTRA_CA_CERTS=/path/to/corp-root.pem` (the corporate root alone) beside the concatenated `OCX_INSTALL_CA_BUNDLE`.
-- **`install.ps1` does not use it for its own downloads**: `Invoke-WebRequest` has no PowerShell 5.1-safe CA-bundle option, so it warns and falls back to the system trust store (on Windows, install the CA into the machine certificate store). It still validates the value, materializes an inline PEM, and hands it to `ocx self setup` as `OCX_EXTRA_CA_CERTS` (and `SSL_CERT_FILE`, which no Windows or macOS client reads) — the gap is one flag, not the knob. Patching all five copies uniformly is therefore safe.
+- **`install.ps1` does not use it for its own downloads**: `Invoke-WebRequest` has no PowerShell 5.1-safe CA-bundle option. It warns and falls back to the system trust store. On Windows, install the CA into the machine certificate store. It still validates the value, materializes an inline PEM, and hands it to `ocx self setup` as `OCX_EXTRA_CA_CERTS` (and `SSL_CERT_FILE`, which no Windows or macOS client reads). The gap is one flag, not the knob. Patching all five copies uniformly is therefore safe.
 
 ## Stdout / stderr contract
 
@@ -171,7 +211,7 @@ Three things worth knowing:
 This contract lets downstream callers do:
 
 ```sh
-BIN_DIR=$(OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 curl -fsSL https://setup.ocx.sh/sh | sh | tail -n1)
+BIN_DIR=$(curl -fsSL https://setup.ocx.sh/sh | OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 sh | tail -n1)
 export PATH="$BIN_DIR:$PATH"
 ```
 
@@ -181,20 +221,22 @@ export PATH="$BIN_DIR:$PATH"
 |---|---|
 | 0 | Success |
 | 1 | Generic / legacy fallback |
-| 2 | Argument or environment validation |
-| 3 | Network / download / manifest failure |
-| 4 | Checksum mismatch |
+| 2 | Argument or environment validation; no SHA-256 tool on `PATH`; `OCX_INSTALL_CA_BUNDLE` set with a wget that cannot take it |
+| 3 | Network / download / manifest failure; a manifest row without a valid `sha256`; a non-`https` URL |
+| 4 | Checksum mismatch; an unpinned manifest fetched by a wget that does not validate TLS (`sh`, `fish`) |
 | 5 | Archive extraction failure |
 | 6 | `ocx self setup` failure |
-| 7 | Unsupported platform / architecture |
+| 7 | Unsupported platform / architecture, including a Linux host where glibc cannot be told from musl (all five installers) |
+| 129, 130, 143 | `sh` and `fish` only: stopped by `SIGHUP`, `SIGINT`, `SIGTERM` |
 
 ## Development
 
 ```sh
 git submodule update --init --recursive        # vendored bats (external/)
-task verify                                    # lint (5 shells) + Bats + Pester
-task test:bats                                 # only Bats (vendored)
-task test:pester                               # only Pester (needs pwsh + Pester)
+task verify                                    # lint (5 shells, workflows, docs) + Bats + Pester
+task test:bats                                 # only Bats (vendored, through the census)
+task test:pester                               # only Pester (pinned Pester, through the census)
+task shell:format                              # rewrite shell files with shfmt
 task docker:integration DISTRO=alpine PLATFORM=linux/amd64
 task publish:dry-run                           # validate storage keys (offline)
 ```

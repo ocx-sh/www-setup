@@ -4,20 +4,33 @@
 
 ```
 tests/install/ps1/
-├── Fixture.psm1          # Shared fixture builder + http.server harness (imported by all suites)
+├── Fixture.psm1          # Shared fixture builder + TLS server harness (imported by all suites)
+├── Trust-Fixture.ps1     # Dot-sourced: accept the fixture's self-signed localhost cert in this process
+├── Run-Installer.ps1     # Run an installer file in a child host with that trust (Trust-Fixture + re-paired args)
 ├── Knobs.Tests.ps1       # OCX_INSTALL_* env var behavior (mirrors env-knobs.bats)
-├── ExitCodes.Tests.ps1   # Numbered exit-code paths 5/6 + self-setup argv (mirrors exit-codes.bats)
-└── PrintPath.Tests.ps1   # Stdout/stderr discipline + -PrintPath (mirrors print-path.bats)
+├── ExitCodes.Tests.ps1   # Exit-code paths 2-6, self-setup argv, iex delivery + isolation (mirrors exit-codes.bats)
+├── PrintPath.Tests.ps1   # Stdout/stderr discipline + -PrintPath (mirrors print-path.bats)
+└── Source.Tests.ps1      # Static contract of src/install.ps1: ASCII, header, each placeholder once
 ```
 
 `Fixture.psm1` is the PowerShell analogue of `tests/install/helpers/server.bash`:
 it builds the fake release tree (archive + a `dist.json` manifest) and spins the
-fixture HTTP server so the suites stay DRY.
+fixture server so the suites stay DRY.
+
+The fixture speaks **HTTPS** with the vendored localhost certificate
+(`tests/install/helpers/localhost-combined.pem`), because install.ps1 refuses plain
+`http` (exit 3). `Start-FixtureServer -Plain` serves `http` to prove that refusal.
+The installer runs in a child host through `Run-Installer.ps1`, which dot-sources
+`Trust-Fixture.ps1` so only the certificate check is relaxed in that process
+(`ServerCertificateValidationCallback` on 5.1, `-SkipCertificateCheck` on 7). The
+installer code is unchanged and the trust never leaks into the test host.
 
 ## Conventions
 
-- Use Pester v5 (`New-PesterConfiguration` API; no v3-style globals).
-- Run with: `Invoke-Pester -Configuration (New-PesterConfiguration -Hashtable @{ Run = @{ Path = 'tests/install/ps1' } })`, or via `task test:pester` / the CI Pester step.
+- Pester is pinned to **6.2.0** (`PESTER_VERSION` in `taskfiles/test.taskfile.yml`, the same literal in `test-installers.yml`), installed by `scripts/Install-PinnedModule.ps1`. Use the `New-PesterConfiguration` API; no v3-style globals and none of the forms removed in Pester 6 (`Assert-MockCalled`, `Assert-VerifiableMock`, `Set-ItResult -Pending`, `It -Focus`). Files keep `#Requires -Modules @{ ModuleName='Pester'; ModuleVersion='5.0.0' }`.
+- Run with `task test:pester` or the CI step: `scripts/Invoke-PesterGate.ps1 -Path tests/install/ps1 -RequiredVersion 6.2.0 -MaxSkipped N`. The gate is red on a failed test, zero tests discovered, zero passed, or skips over the budget. The budget is **0** on Linux and macOS and **20** on Windows, where the scenarios that execute the shell-script stub self-skip (it is not a PE), plus the Unix-only `Get-UnixTarget` scenario in `Platform.Tests.ps1`. Raise it only with a new Windows-only skip, and say why in the commit.
+- `task test:pester:lint` runs `scripts/pester-lint.sh` (P1 unpinned Pester, P2 the Pester 6 removed forms) and `scripts/Test-DiscoveryCode.ps1` (discovery-time assignments or side effects that a `BeforeAll` should own). Never pass `-AllowNullOrEmptyForEach` in a gating run.
+- PSScriptAnalyzer (1.25.0, `task pwsh:verify`) lints `src/` and `tests/install/ps1/`; the 5.1 parse (`scripts/gates-parse-gate.ps1`) is the gate of record for syntax.
 - One `It` per scenario. Top-level `BeforeAll` builds one fixture + server per file; `BeforeEach` resets a fresh `OCX_HOME` and the env knobs.
 - Build the fixture and server through `Fixture.psm1` (`New-OcxFixture`, `Start-FixtureServer`), not ad-hoc inside each `It`.
 - Test against the **environment-variable form** of every knob first, then the flag form (`-NoSetup`, `-NoSmoketest`, `-Version`, `-PrintPath`, …). The env form is the contract; flags are sugar. Env wins over switches.
@@ -28,8 +41,8 @@ Things the harness gets right that a naive `python -m http.server` does not:
 
 1. **Platform-appropriate FLAT archive.** install.ps1 is cross-platform, so the
    fixture builds the archive the host installer expects: on Windows a `.zip` with
-   `ocx.exe` at the root (`Compress-Archive`); on Unix a `.tar.xz` with an
-   executable `ocx` at the root (`tar -cJf`, chmod +x). Both are FLAT (no
+   `ocx.exe` at the root (`Compress-Archive`); on Unix a `.tar.gz` with an
+   executable `ocx` at the root (`tar -czf`, chmod +x). Both are FLAT (no
    `ocx-<target>/` wrapper dir), matching the real cargo-dist release. The target,
    binary name, and extension come from `Resolve-FixtureTarget` /
    `Get-FixtureBinName` / `Get-FixtureArchiveExt`, which mirror install.ps1's own
@@ -84,6 +97,14 @@ Things the harness gets right that a naive `python -m http.server` does not:
    snapshot is written under a name (`'a' * 64`) whose digest the body does not
    match — the altered-manifest case, which must exit **4**.
 
+8. **Decoy manifest.** `Write-OcxDecoyDist` writes a manifest with a NEWER stable
+   `9.9.9` (also `latest`) that has no row for any real target. A pinned install
+   must still resolve `0.0.0`; an installer that ignores the pin resolves `9.9.9`
+   and exits 3. Without the decoy a pin test cannot fail.
+9. **Hostile archives.** `New-HostileZip` / `New-HostileTar` build path-traversal
+   archives for the exit-5 scenarios (`..`, absolute and symlink members); `New-ArchiveFixture`
+   builds a one-off release tree around a given archive for exits 5 and 6.
+
 The canonical bin dir asserted everywhere is
 `symlinks/ocx.sh/ocx/cli/current/content/bin` via `Get-ExpectedBinDir`. The
 no-setup knob is **`OCX_INSTALL_NO_SETUP`** / `-NoSetup`; the smoketest knob is
@@ -113,7 +134,7 @@ and stay un-gated.
 ## Cross-platform execution (POSIX hosts vs windows-latest)
 
 install.ps1 is **cross-platform**. On the POSIX hosts (ubuntu + macos) the suites
-exercise the **full** path — download → `.tar.xz` extract → `ocx` chmod →
+exercise the **full** path — download → `.tar.gz` extract → `ocx` chmod →
 `self setup` hand-off — against the executable shell-script stub. On Windows the
 stub is named `ocx.exe` but is not a PE, so the scenarios that **execute** the
 stub (the recorded `self setup` argv assertion, the exit-6 `self setup`-failure
@@ -125,6 +146,19 @@ workflow_dispatch real-release jobs. Scenarios that only check exit codes / file
 placement / parsing stay un-gated and pass on every host (the placement-assert bin
 name is `Get-FixtureBinName`).
 
+### `irm | iex` isolation
+
+`ExitCodes.Tests.ps1` runs the installer the way users do (`Invoke-Expression`
+on the fetched text) in a child host of the current edition. The probe records
+the caller's preference variables, functions, variables, environment and
+`SecurityProtocol` before, runs the script, and fails on any difference. The
+`iex: a <Outcome> run leaves the caller session unchanged` pair covers a failing
+and a successful install. `LASTEXITCODE` is exempt: the exit-code delivery
+contract sets it on purpose (see `installers.md`). The probe passes an inline-PEM
+`OCX_INSTALL_CA_BUNDLE` so temp-file cleanup is exercised too. The parameter block
+is wrapped in `& { param(...) } @PSBoundParameters`, so a regression that
+re-introduces script-scope leakage fails here, not in a user's profile session.
+
 `OCX_INSTALL_DOWNLOADER` has no Pester mirror by design — it is sh-only
 (install.ps1 always uses `Invoke-WebRequest`, on every OS).
 
@@ -135,12 +169,14 @@ auto-var, `-SkipCertificateCheck`, `-SslProtocol`); the `$PSVersionTable.PSEditi
 -eq 'Desktop'` shortcut keeps a 5.1 host from ever evaluating the Core-only Unix
 branch. `test-installers.yml`:
 
-- The `pester` job runs on **windows-latest + ubuntu-latest + macos-latest** (pwsh
-  7). The POSIX legs execute the full path; Windows runs the parse/placement
-  scenarios and self-skips the stub-execution ones.
-- On `windows-latest`, also runs a 5.1 smoke install (`powershell.exe`). Install
-  Pester v5 for a 5.1 host:
-  `Install-Module Pester -MinimumVersion 5 -Force -Scope CurrentUser -SkipPublisherCheck`.
+- The `pester` job runs on **windows-latest + ubuntu-latest + macos-26** (pwsh
+  7) through `Invoke-PesterGate.ps1`. The POSIX legs execute the full path;
+  Windows runs the parse/placement scenarios and self-skips the stub-execution
+  ones (skip budget 20, see *Conventions*).
+- The full suite does not run under a 5.1 host: it invokes install.ps1 with `& pwsh`, so a
+  5.1 host adds no coverage. `windows-latest` instead runs a fixture-free 5.1 smoke
+  install (`powershell.exe`) and the 5.1 parse gate, plus the nightly real-release
+  matrix under both `powershell` and `pwsh`.
 - The 5.1 smoke install drives the test hatch:
   `powershell.exe -NoProfile -ExecutionPolicy Bypass -File src/install.ps1 -NoSetup -PrintPath -NoSmoketest`.
 - pwsh is also an INSTALLER-axis cell in `test-docker-matrix.yml` (alpine/fedora/
@@ -178,5 +214,6 @@ and `OCX_EXTRA_CA_CERTS` / `SSL_CERT_FILE` hand-down scenarios; only the curl/wg
 additionally asserts the warning and that the install still succeeds. The
 wget-backend scenarios have no ps1 mirror — install.ps1 never shells out.
 
-CI runs Bats on ubuntu (vendored bats) and Pester on windows-latest (both
-`powershell.exe` 5.1 and `pwsh` 7) + ubuntu-latest + macos-latest (pwsh 7).
+CI runs Bats on ubuntu and macos (vendored bats, through `scripts/bats-ci.sh`) and
+Pester on windows-latest + ubuntu-latest + macos-26 (pwsh 7), with the 5.1
+smoke and parse legs described above.
