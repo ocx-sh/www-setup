@@ -6,7 +6,6 @@ editUrl: https://github.com/ocx-sh/www-setup/blob/main/site/src/content/docs/ind
 {/* doc_type: how-to */}
 {/* doc_tier: first-steps */}
 
-import ShellSession from '@ocx-sh/theme/components/ShellSession.astro';
 import Tabs from '@ocx-sh/theme/components/Tabs.astro';
 import TabItem from '@ocx-sh/theme/components/TabItem.astro';
 import HubGrid from '@ocx-sh/theme/components/HubGrid.astro';
@@ -88,29 +87,9 @@ A bare `curl https://setup.ocx.sh/elvish | elvish` installs nothing and exits 0,
 The installer prints its progress to stderr and then hands over to `ocx self setup`.
 That command installs OCX into your OCX home directory, `~/.ocx` by default, and adds OCX to your shell profile.
 
-## See what the installer does {#session}
-
-This is the output of the POSIX installer on an x86-64 Linux machine, up to the hand-over.
-`ocx self setup` prints its own progress after the last line shown, then the installer ends with a short success message.
-
-<ShellSession title="Install the latest ocx">
-
-```sh
-curl -fsSL https://setup.ocx.sh/sh | sh
-```
-
-```log
-ocx-install: Resolving latest version...
-ocx-install: Installing ocx v0.6.5...
-ocx-install: Downloading ocx-x86_64-unknown-linux-gnu.tar.gz...
-ocx-install: Checksum verified.
-ocx-install: Running ocx self setup...
-```
-
-</ShellSession>
-
-The installer checked the archive against the SHA-256 digest in its manifest before it ran anything from the archive.
+The installer checks the archive against the SHA-256 digest in its manifest before it runs anything from the archive.
 Open a new terminal and run `ocx about` to confirm that `ocx` is on your path.
+[Examples](/install/examples/#output) shows what the installer prints.
 
 ## Install in CI {#ci}
 
@@ -127,6 +106,6 @@ Pin the installer and the version in CI, as [Pin a version](/install/versions/) 
 - [Pin a version](/install/versions/): install a fixed `ocx`, use the `next` channel, or freeze the whole manifest.
 - [Configuration](/install/configuration/): every environment variable and flag the installers read.
 - [Mirrors and proxies](/install/mirrors/): host one patched installer and trust a corporate CA.
-- [Examples](/install/examples/): a dev box, a Dockerfile, an air-gapped host and a generic CI job.
+- [Examples](/install/examples/): the installer output, a Dockerfile, an air-gapped host and a generic CI job.
 - [Exit codes and contract](/install/reference/): what each exit code means and what the installers print.
 - [OCX documentation](https://ocx.sh/docs/): what to do with `ocx` once it is installed.
