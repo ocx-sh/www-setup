@@ -30,6 +30,7 @@ HOSTS = [CDN, PUBLIC]
 # ActionType: 1=Redirect 2=OriginUrl 3=OverrideCacheTime 5=SetResponseHeader
 #             16=OverrideBrowserCacheTime
 # TriggerType 0=Url; PatternMatchingType 0=MatchAny 2=MatchNone
+REDIRECT = 1
 ORIGIN = 2
 SET_HEADER = 5
 EDGE_CACHE = 3
@@ -108,6 +109,11 @@ def ruleset():
     # literal prefix (`https://<host>/<shell>/`), never in the host position,
     # and exact patterns are used wherever the path set is finite.
     return [
+        # Exact `/` only (no wildcard, so nothing below the root is touched).
+        # 302, not 301: the install page may move, and a cached 301 would pin
+        # browsers to the old target. ActionParameter2 carries the status code.
+        rule("root -> install page", x("/"), "https://ocx.sh/install/",
+             action=REDIRECT, p2="302"),
         rule("dist alias", x("/dist", "/releases"), f"https://{CDN}/dist.json"),
         rule("bare shell -> latest",
              x(*[f"/{s}" for s in SHELLS]),
@@ -254,6 +260,21 @@ def fetch(path, host=None):
         return e.code, b""
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+def fetch_redirect(path):
+    """(status, Location) of PATH on the CDN host, without following it."""
+    try:
+        with urllib.request.build_opener(_NoRedirect).open(
+                f"https://{CDN}{path}", timeout=30) as r:
+            return r.status, r.headers.get("Location")
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("Location")
+
+
 def cmd_verify():
     bad = 0
     def check(label, path, ref):
@@ -274,6 +295,12 @@ def cmd_verify():
         check(f"pinned /{s}/0.1.1", f"/{s}/0.1.1", f"/archive/0.1.1/{s}")
     check("dist alias", "/dist", "/dist.json")
     check("releases alias", "/releases", "/dist.json")
+
+    c, loc = fetch_redirect("/")
+    ok = c in (301, 302) and loc == "https://ocx.sh/install/"
+    if not ok:
+        bad += 1
+    print(f"  [{'OK ' if ok else 'XX '}] root redirect / {c} -> {loc}")
 
     print("  --- must NOT be rewritten ---")
     for p in ["/archive/0.1.1/install.sh", "/archive/0.1.1/sh", "/dist.json",
