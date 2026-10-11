@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+# shellcheck shell=bash
+# Kind: LIB. Dialect: bash 3.2 (the macOS bats leg); sourced by the bats suites, never executed.
 # Load bats-support + bats-assert from the vendored submodules so suites can use
 # assert_success / assert_failure / assert_output / refute_output, etc.
 # Existing suites that use raw `[ "$status" -eq N ]` keep working; new suites

@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+# Kind: LIB. Dialect: bash 3.2 (the macOS bats leg); sourced by the bats suites, never executed.
 # Shared Bats helpers for the fixture HTTPS server.
 # Sourced via `load helpers/server` from individual .bats files.
 #
@@ -30,7 +32,10 @@ server_start() {
     local _combined
     _combined="$(_server_helper_dir)/localhost-combined.pem"
     (
-        cd "$_root" || { echo "server_start: cd '$_root' failed"; exit 1; }
+        cd "$_root" || {
+            echo "server_start: cd '$_root' failed"
+            exit 1
+        }
         # Pre-exec marker: proves the logfile redirect works and records the
         # interpreter + cert state, so an empty log vs. a python traceback is
         # distinguishable when this leg fails (notably on macOS).
@@ -177,6 +182,10 @@ server_stub_body() {
 if [ -n "${OCX_STUB_ARGV:-}" ]; then
     printf '%s\n' "$*" >>"$OCX_STUB_ARGV"
 fi
+# One argument per line, so a test can tell "a b" from "a" "b".
+if [ -n "${OCX_STUB_ARGV_LINES:-}" ]; then
+    printf '%s\n' "$@" >>"$OCX_STUB_ARGV_LINES"
+fi
 # `ocx self setup` takes the CA as OCX_EXTRA_CA_CERTS (persisted; path or PEM
 # text) and, for older ocx, SSL_CERT_FILE (a path); record what the installer
 # handed down so the CA tests can assert BOTH hops are covered. An inline PEM
@@ -236,6 +245,21 @@ server_write_dist() {
   ]
 }
 EOF
+}
+
+# Write $1/dist-decoy.json: the fixture manifest plus a NEWER stable 9.9.9 row
+# (also named latest) with no row for any real target. A pin must resolve 0.0.0
+# and install; an installer that ignores the pin resolves 9.9.9 and exits 3.
+# Without the decoy latest == pinned, so a pin test cannot fail.
+server_write_decoy_dist() {
+    local _root="$1" _row
+    _row='    {"version":"9.9.9","channel":"stable","tag":"v9.9.9","target":"decoy-target","filename":"missing.tar.xz","sha256":"0000000000000000000000000000000000000000000000000000000000000000","url":"https://example.invalid/missing"},'
+    # awk, not sed: a newline in a sed replacement is GNU-only (macOS bats leg).
+    awk -v row="$_row" '
+        { sub(/"latest": \{"version":"0\.0\.0"/, "\"latest\": {\"version\":\"9.9.9\"") }
+        { print }
+        /^  "releases": \[$/ { print row }
+    ' "$_root/dist.json" >"$_root/dist-decoy.json"
 }
 
 # Publish the fixture's dist.json as a content-addressed snapshot at
@@ -347,32 +371,198 @@ server_have_gnu_wget() {
     wget --version 2>&1 | head -n 1 | grep -q 'GNU Wget'
 }
 
-# server_path_without_curl
+# server_path_without NAME...
 #
-# Echo a PATH whose entries mirror the current PATH except that `curl` is
-# absent. Forcing a dialect's wget fallback needs curl to be genuinely
-# unreachable — `command -v curl` skips non-executables and keeps searching, so
-# shadowing it does not work. A symlink farm does. Built once per .bats file.
-server_path_without_curl() {
-    local _farm="${BATS_FILE_TMPDIR}/nocurl-bin"
+# Echo a PATH whose entries mirror the current PATH except that every NAME is
+# absent. Forcing a fallback (wget without curl, no hash tool) needs the tool to
+# be genuinely unreachable -- `command -v` skips non-executables and keeps
+# searching, so shadowing it does not work. A symlink farm does. Built once per
+# .bats file and name set.
+server_path_without() {
+    local _farm="${BATS_FILE_TMPDIR}/nopath-$*"
+    _farm="${_farm// /-}"
     if [ ! -d "$_farm" ]; then
         mkdir -p "$_farm"
-        local _dir _f _b
+        local _dir _f _b _n _skip
         while IFS= read -r _dir; do
             [ -n "$_dir" ] && [ -d "$_dir" ] || continue
             for _f in "$_dir"/*; do
                 [ -x "$_f" ] || continue
                 _b="${_f##*/}"
+                _skip=0
+                for _n in "$@"; do
+                    if [ "$_b" = "$_n" ]; then _skip=1; fi
+                done
                 # An `if`, not `[ ... ] && continue`: bats runs test code under
                 # `set -e`, where a bare `&&` list that evaluates false is itself
                 # a failing command.
-                if [ "$_b" != "curl" ] && [ ! -e "$_farm/$_b" ]; then
+                if [ "$_skip" = 0 ] && [ ! -e "$_farm/$_b" ]; then
                     ln -s "$_f" "$_farm/$_b" 2>/dev/null || true
                 fi
             done
         done <<<"${PATH//:/$'\n'}"
     fi
     printf '%s' "$_farm"
+}
+
+server_path_without_curl() {
+    server_path_without curl
+}
+
+# server_fake_curl DIR
+#
+# Write DIR/curl, a curl stand-in that delegates every fetch to the real curl
+# (the curl on PATH at write time). Probes (`--help`, `--version`) are answered
+# without logging or hanging, so only a real fetch is ever counted or stalled.
+# Behaviour by env:
+#   FAKE_CURL_LOG    append the argv of each fetch (not a probe) to this file
+#   FAKE_CURL_TLS12  non-empty: `--help all` lists --tlsv1.2
+#   FAKE_CURL_HANG   non-empty: log, then block 30s instead of fetching
+server_fake_curl() {
+    local _dir="$1"
+    mkdir -p "$_dir"
+    cat >"$_dir/curl" <<'FAKE'
+#!/bin/sh
+if [ "$1" = "--help" ]; then
+    echo "Usage: curl [options...] <url>"
+    if [ -n "${FAKE_CURL_TLS12:-}" ]; then
+        echo "     --tlsv1.2           Use TLSv1.2 or greater"
+    fi
+    exit 0
+fi
+if [ "$1" = "--version" ]; then
+    echo "curl 8.5.0 (fake)"
+    exit 0
+fi
+if [ -n "${FAKE_CURL_LOG:-}" ]; then
+    printf '%s\n' "$*" >>"$FAKE_CURL_LOG"
+fi
+if [ -n "${FAKE_CURL_HANG:-}" ]; then
+    exec sleep 30
+fi
+FAKE
+    printf 'exec "%s" "$@"\n' "$(command -v curl)" >>"$_dir/curl"
+    chmod +x "$_dir/curl"
+}
+
+# server_fake_busybox_wget DIR
+#
+# Write DIR/wget, a BusyBox-style wget: `--help` prints a BusyBox banner and the
+# usage line without the GNU TLS flags, any option outside -q/-O is rejected the
+# way BusyBox does, and the fetch itself goes through the real curl (the one on
+# PATH at write time). Env: FAKE_WGET_LOG appends each fetch argv;
+# FAKE_WGET_UNVALIDATED (non-empty) prints the "certificate validation not
+# implemented" note the official busybox images print on every https fetch.
+server_fake_busybox_wget() {
+    local _dir="$1"
+    mkdir -p "$_dir"
+    cat >"$_dir/wget" <<'FAKE'
+#!/bin/sh
+if [ "$1" = "--help" ]; then
+    {
+        echo "BusyBox v1.37.0 (fixture) multi-call binary."
+        echo
+        echo "Usage: wget [-cqS] [--spider] [-O FILE] [-o LOGFILE] [--header STR]"
+        echo "	[--no-check-certificate] [-P DIR] [-U AGENT] [-T SEC] URL..."
+    } >&2
+    exit 1
+fi
+if [ -n "${FAKE_WGET_LOG:-}" ]; then
+    printf '%s\n' "$*" >>"$FAKE_WGET_LOG"
+fi
+out="" url=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -q) ;;
+        -O)
+            shift
+            out="$1"
+            ;;
+        -*)
+            echo "wget: unrecognized option: ${1#--}" >&2
+            exit 1
+            ;;
+        *) url="$1" ;;
+    esac
+    shift
+done
+if [ -n "${FAKE_WGET_UNVALIDATED:-}" ]; then
+    echo "wget: note: TLS certificate validation not implemented" >&2
+fi
+FAKE
+    # shellcheck disable=SC2016  # $out and $url expand in the generated script, not here
+    printf 'exec "%s" -fsSL -o "$out" "$url"\n' "$(command -v curl)" >>"$_dir/wget"
+    chmod +x "$_dir/wget"
+}
+
+# server_fake_platform DIR OS ARCH [LDD_TEXT [SYSCTL_ARM64]]
+#
+# Write DIR/uname (answering -s/-m with OS/ARCH), DIR/ldd (printing LDD_TEXT and
+# exiting 1, as musl's does) and, with SYSCTL_ARM64, DIR/sysctl (answering
+# hw.optional.arm64) so platform detection can be driven on any host. Everything
+# else on PATH stays real.
+server_fake_platform() {
+    local _dir="$1" _os="$2" _arch="$3" _ldd="${4:-}" _arm="${5:-}"
+    mkdir -p "$_dir"
+    cat >"$_dir/uname" <<EOF
+#!/bin/sh
+case "\$1" in
+    -s) echo $_os ;;
+    -m) echo $_arch ;;
+    *) echo $_os ;;
+esac
+EOF
+    chmod +x "$_dir/uname"
+    if [ -n "$_ldd" ]; then
+        {
+            echo '#!/bin/sh'
+            echo "cat <<'EOT'"
+            printf '%s\n' "$_ldd"
+            echo EOT
+            echo 'exit 1'
+        } >"$_dir/ldd"
+        chmod +x "$_dir/ldd"
+    fi
+    if [ -n "$_arm" ]; then
+        printf '#!/bin/sh\necho %s\n' "$_arm" >"$_dir/sysctl"
+        chmod +x "$_dir/sysctl"
+    fi
+}
+
+# server_signal_run SIGNAME MARKFILE CMD [ARG...]
+#
+# Start CMD in its own session, wait until MARKFILE exists (CMD is then mid-
+# download), send SIGNAME to its whole process group (what a terminal does for
+# Ctrl-C) and echo CMD's exit status; HANG if it outlives 20s after the signal.
+# A shell defers a trap until its foreground child ends, so signalling only the
+# shell would test the deferral, not the handler. Portable: python3, no setsid.
+server_signal_run() {
+    python3 - "$@" <<'PY'
+import os, signal, subprocess, sys, time
+
+name, mark, cmd = sys.argv[1], sys.argv[2], sys.argv[3:]
+
+
+def reset():
+    # A backgrounded harness hands down ignored INT/QUIT; a trap cannot be set on those.
+    for sig in (signal.SIGINT, signal.SIGHUP, signal.SIGTERM):
+        signal.signal(sig, signal.SIG_DFL)
+
+
+p = subprocess.Popen(cmd, start_new_session=True, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, preexec_fn=reset)
+deadline = time.time() + 20
+while not os.path.exists(mark) and p.poll() is None and time.time() < deadline:
+    time.sleep(0.05)
+if p.poll() is None:
+    os.killpg(p.pid, getattr(signal, "SIG" + name))
+try:
+    print(p.wait(timeout=20))
+except subprocess.TimeoutExpired:
+    os.killpg(p.pid, signal.SIGKILL)
+    p.wait()
+    print("HANG")
+PY
 }
 
 # server_pad_dist ROOT [BYTES]
@@ -408,4 +598,16 @@ server_pad_dist() {
 server_ca_bundle_inline() {
     printf '# Corp Root CA\n#\n# Issuer: Corp Internal Root\n'
     cat "$(server_ca_bundle)"
+}
+
+# Skip the test when interpreter $1 is absent, unless OCX_TEST_REQUIRE_SHELLS is
+# set: CI sets it on every leg that provisions the shell, so a lost interpreter
+# (a `-g` scope typo, a dropped pull) fails the leg instead of skipping it green.
+server_require_shell() {
+    command -v "$1" >/dev/null 2>&1 && return 0
+    if [ -n "${OCX_TEST_REQUIRE_SHELLS:-}" ]; then
+        echo "required interpreter '$1' not on PATH (OCX_TEST_REQUIRE_SHELLS is set)" >&2
+        return 1
+    fi
+    skip "$1 not installed"
 }
