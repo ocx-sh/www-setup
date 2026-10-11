@@ -246,6 +246,8 @@ The exit-code contract above (codes 2–7 for in-script `err()` paths) holds ide
 
 This divergence is accepted because PowerShell parameter binding owns unknown-argument rejection and structurally cannot emit code 2. Every exit code that *is* produced by an in-script error path (2–7) remains symmetric.
 
+**pwsh delivery of the code.** `Err` never calls `exit` (under `irm … | iex` or a scriptblock that closes the caller's own PowerShell). It prints the message, then throws an exception carrying the code in `Data['OcxExit']`; the single `try/catch` at the bottom of `install.ps1` calls `exit <code>` when `$PSCommandPath` is set (file run: `-File`, called by path) and otherwise sets `$global:LASTEXITCODE` and throws `ocx install failed (exit code N)`: an interactive session survives a throw, and a non-interactive `pwsh -c "irm … | iex"` still exits non-zero, so automation never reads a failed install as success. A `catch` that could swallow that exception must rethrow when `Data.Contains('OcxExit')`. Pester: the `iex:` and `scriptblock:` scenarios in `ExitCodes.Tests.ps1`.
+
 ## Cross-installer parity (5-way)
 
 `src/install.{sh,ps1,nu,fish,elv}` are independent implementations of the same thin contract. Whenever you change one, change the others in the same PR:

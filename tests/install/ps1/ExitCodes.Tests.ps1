@@ -2,6 +2,8 @@
 # Pester coverage for the numbered exit-code contract of src/install.ps1.
 # Mirrors ../exit-codes.bats: exit 5 (extract), 6 (`ocx self setup`), 3 (manifest
 # fetch), 2 (test hatch). Exit 4 is covered by Knobs; exit 7 by tests/docker/.
+# The last two scenarios run the installer the documented way (`irm | iex`, a
+# scriptblock), where `exit` would close the caller's session.
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot 'Fixture.psm1') -Force
@@ -112,6 +114,42 @@ Describe 'install.ps1 exit codes' {
         $env:__OCX_TESTING_INSTALL_BINARY = Join-Path ([System.IO.Path]::GetTempPath()) 'no-such-binary.exe'
         & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 2
+    }
+
+    # `irm | iex` has no script file, so $PSCommandPath is empty and `exit` would
+    # kill the user's PowerShell. Run through -Command (not a wrapper file, whose
+    # path iex would inherit) in the current host, so a 5.1 Pester run drives 5.1.
+    It 'iex: a failure reports the error, throws, and the session survives' {
+        $hostExe = (Get-Process -Id $PID).Path
+        $errFile = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-ec-iex-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).log"
+        $env:__OCX_TESTING_INSTALL_BINARY = Join-Path ([System.IO.Path]::GetTempPath()) 'no-such-binary.exe'
+        $cmd = "try { Get-Content -Raw -LiteralPath '$InstallPs1' | Invoke-Expression } catch { 'CAUGHT ' + `$_ }; 'SURVIVED rc=' + `$LASTEXITCODE"
+        try {
+            $out = & $hostExe -NoProfile -Command $cmd 2>$errFile
+            $LASTEXITCODE | Should -Be 0
+            ($out -join "`n") | Should -Match 'CAUGHT ocx install failed \(exit code 2\)'
+            ($out -join "`n") | Should -Match 'SURVIVED rc=2'
+            (Get-Content $errFile -Raw) | Should -Match '__OCX_TESTING_INSTALL_BINARY'
+        }
+        finally {
+            Remove-Item -Force $errFile -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'iex: a non-interactive host still exits non-zero on a failed install' {
+        $hostExe = (Get-Process -Id $PID).Path
+        $env:__OCX_TESTING_INSTALL_BINARY = Join-Path ([System.IO.Path]::GetTempPath()) 'no-such-binary.exe'
+        $cmd = "Get-Content -Raw -LiteralPath '$InstallPs1' | Invoke-Expression"
+        & $hostExe -NoProfile -Command $cmd 2>$null | Out-Null
+        $LASTEXITCODE | Should -Not -Be 0
+    }
+
+    It 'scriptblock: a failure throws and leaves the code in LASTEXITCODE' {
+        $hostExe = (Get-Process -Id $PID).Path
+        $env:__OCX_TESTING_INSTALL_BINARY = Join-Path ([System.IO.Path]::GetTempPath()) 'no-such-binary.exe'
+        $cmd = "try { & ([scriptblock]::Create((Get-Content -Raw -LiteralPath '$InstallPs1'))) 2>`$null } catch { }; 'SURVIVED rc=' + `$LASTEXITCODE"
+        $out = & $hostExe -NoProfile -Command $cmd
+        ($out -join "`n") | Should -Match 'SURVIVED rc=2'
     }
 
     # Retry. The real incident: one CDN edge PoP answered 500 for dist.json while

@@ -46,6 +46,12 @@
 #   5  archive extraction failure
 #   6  'ocx self setup' failure
 #   7  unsupported platform / architecture
+#
+# The numbers are the process exit code when this file runs as a script
+# (-File, or called by path). Run through `irm | iex` or a scriptblock there is
+# no child process, and `exit` would close the caller's own PowerShell window:
+# the failure is reported on stderr, the code is left in $LASTEXITCODE, and the
+# script throws, so the session survives and `pwsh -c` still exits non-zero.
 
 #Requires -Version 5.1
 
@@ -179,7 +185,12 @@ function Say {
 function Err {
     param([string]$Message, [int]$Code = 1)
     [Console]::Error.WriteLine("ocx-install: error: $Message")
-    exit $Code
+    # Never `exit` here: under `irm | iex` that closes the caller's session. The
+    # code travels on the exception to the single exit at the bottom of the
+    # script. A catch that would swallow it must rethrow when Data has OcxExit.
+    $ex = [System.Exception]::new($Message)
+    $ex.Data['OcxExit'] = $Code
+    throw $ex
 }
 
 function Warn {
@@ -204,6 +215,7 @@ function Detect-Architecture {
         }
     }
     catch {
+        if ($_.Exception.Data.Contains('OcxExit')) { throw }
         Write-Verbose "OSArchitecture probe failed, falling back to PROCESSOR_ARCHITECTURE: $($_.Exception.Message)"
     }
 
@@ -345,6 +357,7 @@ function Download-FileOnce {
         return $true
     }
     catch {
+        if ($_.Exception.Data.Contains('OcxExit')) { throw }
         return $false
     }
 }
@@ -391,7 +404,7 @@ function Download-String {
             return Download-StringOnce $Url
         }
         catch {
-            if ($attempt -ge $OcxDownloadAttempts) { throw }
+            if ($_.Exception.Data.Contains('OcxExit') -or $attempt -ge $OcxDownloadAttempts) { throw }
             Say "download failed (attempt $attempt/$OcxDownloadAttempts), retrying in ${delay}s"
             Start-Sleep -Seconds $delay
             $attempt++
@@ -578,7 +591,10 @@ function Get-DistManifest {
     }
     else {
         try { $body = Download-String $OcxInstallDistUrl }
-        catch { Err "Failed to fetch the latest version from the manifest ($OcxInstallDistUrl): $($_.Exception.Message)" 3 }
+        catch {
+            if ($_.Exception.Data.Contains('OcxExit')) { throw }
+            Err "Failed to fetch the latest version from the manifest ($OcxInstallDistUrl): $($_.Exception.Message)" 3
+        }
     }
 
     if ([string]::IsNullOrWhiteSpace([string]$body)) {
@@ -729,9 +745,7 @@ function Main {
     param([string]$RequestedVersion = '')
 
     if ($PSVersionTable.PSVersion -lt [Version]'5.1') {
-        [Console]::Error.WriteLine('ocx-install: error: PowerShell 5.1+ required.')
-        [Console]::Error.WriteLine('Upgrade: https://aka.ms/install-powershell')
-        exit 2
+        Err 'PowerShell 5.1+ required. Upgrade: https://aka.ms/install-powershell' 2
     }
 
     # Version precedence: -Version flag > OCX_INSTALL_VERSION env > caller-scope
@@ -948,4 +962,17 @@ function Main {
     }
 }
 
-Main -RequestedVersion $Version
+# The one exit. A file has its own process, so the numbered code is returned
+# there. Under `irm | iex` or a scriptblock $PSCommandPath is empty and `exit`
+# would close the caller's session, so the code goes to $LASTEXITCODE and the
+# script throws: an interactive prompt survives a throw, and a non-interactive
+# `pwsh -c "irm ... | iex"` (a Dockerfile RUN) still exits non-zero instead of
+# reporting a failed install as success. Any other error is rethrown untouched.
+try { Main -RequestedVersion $Version }
+catch {
+    if (-not $_.Exception.Data.Contains('OcxExit')) { throw }
+    $ocxExitCode = [int]$_.Exception.Data['OcxExit']
+    if (-not [string]::IsNullOrEmpty($PSCommandPath)) { exit $ocxExitCode }
+    $global:LASTEXITCODE = $ocxExitCode
+    throw "ocx install failed (exit code $ocxExitCode)"
+}
