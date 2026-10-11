@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
+# Kind: TOOL (bash, floor 3.2.57: the host-side driver of the docker matrix)
+# Exit: 0 ok, 1 build failed, 2 usage, else the container's status
+
 set -euo pipefail
 
 DISTRO="${1:?distro required (alpine|fedora|ubuntu)}"
@@ -111,6 +114,7 @@ else
     echo "==> Running smoke ($DISTRO, $PLATFORM, version=$VERSION, installer=$INSTALLER) [${INJECT_DESC}]"
     docker run --rm \
         --platform "$PLATFORM" \
+        --env "OCX_TEST_NO_CURL=${OCX_TEST_NO_CURL:-}" \
         ${INJECT_ARGS[@]+"${INJECT_ARGS[@]}"} \
         "$TAG" "$VERSION" "$INSTALLER"
 fi

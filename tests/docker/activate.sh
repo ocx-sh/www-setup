@@ -2,15 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
-# SC2016: the per-shell probe snippets are intentionally single-quoted so they
-# are interpreted by the TARGET shell (bash/zsh/fish/nu/elvish), not the outer
-# POSIX sh. Expansion in the outer shell would be a bug.
-# shellcheck disable=SC2016
+# Kind: TOOL (POSIX sh: the container entrypoint of the SHELL-axis activation test)
+# Exit: 0 ok, 2 usage or shell missing, 3 install failed, 8 not activated,
+# 9 binary broken, 10 no completion
+
+# shellcheck disable=SC2016 # the probe snippets are single-quoted on purpose: the TARGET shell expands them, not this sh
 
 set -eu
 
 SHELL_UNDER_TEST="${1:?activate.sh: shell required (bash|dash|zsh|ksh|fish|nu|elvish|pwsh)}"
-VERSION="${2:-latest}"
+TARGET_VERSION="${2:-latest}"
 
 # Canonical real-CLI bin dir relative to OCX_HOME (audit ground truth).
 OCX_BIN_SUBPATH="symlinks/ocx.sh/ocx/cli/current/content/bin"
@@ -30,7 +31,7 @@ mkdir -p "$HOME"
 # writable, home-scoped OCX_HOME, but ignore the container's baked root smoke
 # path (/work/.ocx) which the 'tester' user cannot write to.
 case "${OCX_HOME:-}" in
-    "$HOME"/*) ;; # inherited per-user value — keep it
+    "$HOME"/*) ;; # inherited per-user value -- keep it
     *) OCX_HOME="$HOME/.ocx" ;;
 esac
 export OCX_HOME
@@ -56,7 +57,7 @@ fail() {
 
 distro_desc() {
     if [ -r /etc/os-release ]; then
-        # shellcheck disable=SC1091
+        # shellcheck disable=SC1091 # /etc/os-release exists only on the target distro
         (. /etc/os-release 2>/dev/null && printf '%s' "${PRETTY_NAME:-}") || uname -a
     else
         uname -a
@@ -67,7 +68,7 @@ log "distro:  $(distro_desc)"
 log "arch:    $(uname -m)"
 log "user:    $(id -un) (HOME=$HOME)"
 log "shell:   $SHELL_UNDER_TEST"
-log "version: $VERSION"
+log "version: $TARGET_VERSION"
 log "OCX_HOME: $OCX_HOME"
 
 # --- Map shell name -> the SHELL value install.sh keys profile detection off ---
@@ -81,7 +82,8 @@ resolve_shell_bin() {
     esac
 }
 
-SHELL_BIN=$(resolve_shell_bin "$SHELL_UNDER_TEST" 2>/dev/null || true)
+# shellcheck disable=SC2310 # resolve_shell_bin is one command -v, the -z check below is the test
+SHELL_BIN=$(resolve_shell_bin "$SHELL_UNDER_TEST" || true)
 if [ -z "$SHELL_BIN" ]; then
     fail 2 "shell '$SHELL_UNDER_TEST' is not installed in this image (run install-shells.sh)"
 fi
@@ -111,10 +113,10 @@ if [ -n "${__OCX_TESTING_INSTALL_BINARY:-}" ]; then
     [ -f "${__OCX_TESTING_INSTALL_BINARY}" ] ||
         fail 2 "__OCX_TESTING_INSTALL_BINARY does not point to a file: ${__OCX_TESTING_INSTALL_BINARY}"
     sh /work/install.sh
-elif [ "$VERSION" = "latest" ]; then
+elif [ "$TARGET_VERSION" = "latest" ]; then
     sh /work/install.sh
 else
-    sh /work/install.sh --version "$VERSION"
+    sh /work/install.sh --version "$TARGET_VERSION"
 fi
 
 # Sanity: the installer must have placed a runnable binary at the canonical path.
@@ -151,7 +153,7 @@ case "$SHELL_UNDER_TEST" in
         # PATH resolution uses `type -P`, not `command -v`: since ocx 0.6.0 the
         # activation block registers an `ocx` shell FUNCTION wrapper (it runs the
         # binary, then the reconcile prompt hook), and `command -v` answers with
-        # the bare name `ocx` for a function — which reads as a PATH shadow. Only
+        # the bare name `ocx` for a function -- which reads as a PATH shadow. Only
         # `type -P` (bash) / `whence -p` (zsh) skips functions and aliases and
         # resolves PATH alone, which is what this test asserts.
         run_probe bash -lic '
@@ -165,8 +167,8 @@ case "$SHELL_UNDER_TEST" in
     zsh)
         # Completion introspection: zsh registers completers in the $_comps
         # associative array. The ocx activation block (sourced from the profile by
-        # `zsh -lic`) ALREADY initializes the completion system — it runs
-        # `compinit -C` itself when `compdef` is not yet defined — and registers
+        # `zsh -lic`) ALREADY initializes the completion system -- it runs
+        # `compinit -C` itself when `compdef` is not yet defined -- and registers
         # the ocx completer at runtime via `compdef`. We therefore do NOT run
         # `compinit` again here: a second `compinit` rebuilds $_comps from fpath
         # completion FILES and so WIPES the runtime `compdef` registration (the ocx
@@ -214,7 +216,7 @@ case "$SHELL_UNDER_TEST" in
         # nushell loads the installer's shim through its vendor autoload dir
         # ($XDG_DATA_HOME/nushell/vendor/autoload/ocx.nu -> env.nu). BUT vendor
         # autoload ONLY fires in an interactive REPL, which nushell refuses to
-        # start without a TTY ("launched as a REPL, but STDIN is not a TTY") — so
+        # start without a TTY ("launched as a REPL, but STDIN is not a TTY") -- so
         # we cannot drive it over stdin like elvish. And `nu -c` does NOT load
         # vendor autoload at all. So, exactly as the dash/ksh probes source
         # ~/.profile explicitly to emulate a login shell, source the installer's
@@ -289,7 +291,7 @@ case "$SHELL_UNDER_TEST" in
             if ($p) { & ocx about | Out-Null }
         '
         if ! printf '%s' "$PROBE_OUT" | grep -q 'OCX_RESOLVED=..*'; then
-            log "pwsh login shell did not auto-activate (expected — no profile hook)"
+            log "pwsh login shell did not auto-activate (expected -- no profile hook)"
             if [ -f "$ENV_PS1" ]; then
                 log "sourcing env.ps1 explicitly (best-effort)..."
                 run_probe pwsh -NoLogo -Command "
@@ -318,7 +320,7 @@ printf '%s\n' "$PROBE_OUT" | sed 's/^/    /' >&2
 RESOLVED=$(printf '%s\n' "$PROBE_OUT" | sed -n 's/^OCX_RESOLVED=//p' | head -n1)
 
 if [ -z "$RESOLVED" ]; then
-    fail 8 "$SHELL_UNDER_TEST started but ocx is NOT on PATH — activation did NOT happen (shim/profile not sourced)"
+    fail 8 "$SHELL_UNDER_TEST started but ocx is NOT on PATH -- activation did NOT happen (shim/profile not sourced)"
 fi
 
 # Activation happened: the resolved path must be the canonical OCX bin (allow a
@@ -327,7 +329,7 @@ case "$RESOLVED" in
     "$EXPECTED") : ;;
     "$OCX_BIN_DIR"/ocx) : ;;
     *)
-        # Resolved to *some* ocx but not ours — flag it (PATH shadow) but only if
+        # Resolved to *some* ocx but not ours -- flag it (PATH shadow) but only if
         # it is outside our OCX_HOME.
         case "$RESOLVED" in
             "$OCX_HOME"/*) : ;;
@@ -337,7 +339,7 @@ case "$RESOLVED" in
 esac
 
 if [ "$PROBE_RC" -ne 0 ]; then
-    fail 9 "$SHELL_UNDER_TEST: ocx is on PATH at '$RESOLVED' but failed to run (exit $PROBE_RC) — binary broken, not an activation problem"
+    fail 9 "$SHELL_UNDER_TEST: ocx is on PATH at '$RESOLVED' but failed to run (exit $PROBE_RC) -- binary broken, not an activation problem"
 fi
 
 # --- Step (c): completion-table introspection (shared) ---
@@ -347,22 +349,20 @@ fi
 # elvish + nushell completion is BEST-EFFORT (interactive-only / no backend), so
 # an empty value there is logged but never fails the test. dash/ksh have no
 # completion model at all and emit no sentinel.
-completion_required() {
-    case "$1" in
-        bash | zsh | fish) return 0 ;;
-        *) return 1 ;;
-    esac
-}
+case "$SHELL_UNDER_TEST" in
+    bash | zsh | fish) COMPLETION_REQUIRED=1 ;;
+    *) COMPLETION_REQUIRED=0 ;;
+esac
 
 # Only shells whose probe emits an OCX_COMPLETION sentinel are evaluated.
 if printf '%s\n' "$PROBE_OUT" | grep -q '^OCX_COMPLETION='; then
     COMPLETION=$(printf '%s\n' "$PROBE_OUT" | sed -n 's/^OCX_COMPLETION=//p' | head -n1)
     if [ -n "$COMPLETION" ]; then
         log "completion registered for $SHELL_UNDER_TEST: $COMPLETION"
-    elif completion_required "$SHELL_UNDER_TEST"; then
+    elif [ "$COMPLETION_REQUIRED" -eq 1 ]; then
         fail 10 "$SHELL_UNDER_TEST: ocx is on PATH and runs, but NO completion is registered (shim passed wrong --shell/--completion or completer did not register)"
     else
-        log "completion not registered for $SHELL_UNDER_TEST (best-effort shell — OK)"
+        log "completion not registered for $SHELL_UNDER_TEST (best-effort shell -- OK)"
     fi
 fi
 

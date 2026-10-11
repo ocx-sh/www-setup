@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
+# Kind: TOOL (POSIX sh: the container entrypoint of the INSTALLER-axis smoke)
+# Exit: 0 ok, 1 assertion failed, 2 usage, 69 interpreter missing
+
 set -eu
 
 VERSION="${1:-latest}"
@@ -14,7 +17,7 @@ OCX_BIN_SUBPATH="symlinks/ocx.sh/ocx/cli/current/content/bin"
 
 # Map the INSTALLER axis to (interpreter, script). All five are copied into /work
 # by the Dockerfile. The exotic shells must be provisioned in the image
-# (install-shells.sh); a missing interpreter is a skip, not a failure.
+# (install-shells.sh); a missing interpreter fails the cell, it never skips.
 case "$INSTALLER" in
     sh)
         OCX_RUN="sh"
@@ -42,8 +45,37 @@ case "$INSTALLER" in
         ;;
 esac
 if ! command -v "$OCX_RUN" >/dev/null 2>&1; then
-    echo ">>> [smoke] interpreter '$OCX_RUN' not installed — skipping $INSTALLER installer" >&2
-    exit 0
+    echo "!!! [smoke] interpreter '$OCX_RUN' not installed, cannot test the $INSTALLER installer" >&2
+    exit 69
+fi
+
+# OCX_TEST_NO_CURL=1: delete curl so install.sh can only fall back to BusyBox wget, then let it
+# download for real. An injected binary skips the download and would prove nothing, so it is refused;
+# a host that is not a container is refused too, because this deletes a system binary.
+if [ -n "${OCX_TEST_NO_CURL:-}" ]; then
+    if [ -n "${__OCX_TESTING_INSTALL_BINARY:-}" ]; then
+        echo "!!! [smoke] OCX_TEST_NO_CURL needs a real download: unset __OCX_TESTING_INSTALL_BINARY" >&2
+        exit 2
+    fi
+    if [ ! -f /.dockerenv ] && [ ! -f /run/.containerenv ]; then
+        echo "!!! [smoke] OCX_TEST_NO_CURL deletes curl and only runs inside a container" >&2
+        exit 2
+    fi
+    if _curl=$(command -v curl); then
+        rm -f -- "$_curl" || exit 1
+    fi
+    if command -v curl >/dev/null 2>&1; then
+        echo "!!! [smoke] curl is still on PATH after removal" >&2
+        exit 1
+    fi
+    case "$(wget --help 2>&1)" in
+        *BusyBox*) ;;
+        *)
+            echo "!!! [smoke] wget is not BusyBox wget, the fallback under test is absent" >&2
+            exit 69
+            ;;
+    esac
+    echo ">>> [smoke] curl removed, wget is BusyBox: the download goes through the wget fallback"
 fi
 
 distro_desc() {
@@ -81,7 +113,7 @@ echo ">>> [smoke] bin dir: $BIN_DIR"
 # --- Assert: print-path emitted the canonical bin dir ---
 case "$BIN_DIR" in
     */"$OCX_BIN_SUBPATH")
-        : # ok — print-path ends with the canonical subpath
+        : # ok -- print-path ends with the canonical subpath
         ;;
     *)
         echo "!!! [smoke] print-path '$BIN_DIR' does not end with canonical subpath '$OCX_BIN_SUBPATH'" >&2
