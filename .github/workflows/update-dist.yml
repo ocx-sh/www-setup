@@ -24,7 +24,9 @@ jobs:
 
       - name: Log dispatch payload
         if: github.event_name == 'repository_dispatch'
-        run: echo "Refreshing dist manifest for ocx version ${{ github.event.client_payload.version }}"
+        env:
+          OCX_VERSION: ${{ github.event.client_payload.version }}
+        run: echo "Refreshing dist manifest for ocx version $OCX_VERSION"
 
       - name: Publish dist manifest
         env:
