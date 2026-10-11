@@ -507,6 +507,12 @@ function __ocx_run_self_setup
     end
 end
 
+# Closing banner on stderr (mirrors install.sh print_success); QUIET silences it.
+function __ocx_print_success --argument-names ocxver ocx_home
+    __ocx_is_truthy $OCX_INSTALL_QUIET; and return 0
+    printf '\n  ocx %s installed successfully!\n\n  Restart your shell, then verify with:\n\n    ocx about\n\n  To uninstall, remove the OCX home directory:\n\n    rm -rf %s\n\n' $ocxver $ocx_home >&2
+end
+
 function __ocx_export_github_path --argument-names ocx_home
     if set -q GITHUB_PATH
         echo "$ocx_home/$OCX_BIN_SUBPATH" >>$GITHUB_PATH
@@ -736,6 +742,7 @@ function __ocx_main
         __ocx_say "Installed to $bin_dir/ocx"
     else
         __ocx_run_self_setup $bin -- $ocxver $managed_post
+        __ocx_print_success $ocxver $ocx_home
     end
 
     __ocx_check_signal

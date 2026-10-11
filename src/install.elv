@@ -421,6 +421,14 @@ fn ocx-run-self-setup {|bin pre post|
     }
 }
 
+# Closing banner on stderr (mirrors install.sh print_success); QUIET silences it.
+fn ocx-print-success {|version ocx_home|
+    if (not (ocx-quiet)) {
+        var rm = (if (eq $platform:os windows) { put 'Remove-Item -Recurse -Force "'$ocx_home'"' } else { put 'rm -rf '$ocx_home })
+        print "\n  ocx "$version" installed successfully!\n\n  Restart your shell, then verify with:\n\n    ocx about\n\n  To uninstall, remove the OCX home directory:\n\n    "$rm"\n\n" >&2
+    }
+}
+
 fn ocx-export-github-path {|ocx_home|
     if (has-env GITHUB_PATH) {
         echo $ocx_home"/"$bin-subpath >> (get-env GITHUB_PATH)
@@ -645,6 +653,7 @@ fn ocx-main {|@args|
         ocx-say "Installed to "$bin_dir"/"$exe
     } else {
         ocx-run-self-setup $bin [] [$version $@managed_post]
+        ocx-print-success $version $ocx_home
     }
 
     ocx-export-github-path $ocx_home

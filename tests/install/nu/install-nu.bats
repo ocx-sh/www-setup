@@ -92,6 +92,22 @@ setup() {
     echo "$stderr" | grep -qF 'ocx-stub: self setup result'
 }
 
+@test "nu: the success banner goes to stderr after the self setup hand-off" {
+    OCX_INSTALL_VERSION=0.0.0 run --separate-stderr nu "$INSTALL_NU"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    echo "$stderr" | grep -qF 'ocx 0.0.0 installed successfully!'
+    echo "$stderr" | grep -qF 'Restart your shell'
+}
+
+@test "nu: OCX_INSTALL_QUIET silences the success banner" {
+    OCX_INSTALL_VERSION=0.0.0 OCX_INSTALL_QUIET=1 run --separate-stderr nu "$INSTALL_NU"
+    [ "$status" -eq 0 ]
+    if echo "$stderr" | grep -qF 'installed successfully'; then
+        false
+    fi
+}
+
 @test "nu: no row for the version → exit 3" {
     OCX_INSTALL_VERSION=9.9.9 run nu "$INSTALL_NU"
     [ "$status" -eq 3 ]
