@@ -21,10 +21,18 @@ task = "ocx.sh/go-task/task:3"
 [group.unix.tools]
 fish = "ocx.sh/fish-shell/fish:latest"
 
-# pwsh is LINUX-GLIBC-ONLY: the ocx.sh/powershell/powershell package ships only
-# linux/{amd64,arm64}+libc.glibc leaves (no darwin, no windows, no musl).
-# Isolating it here keeps `ocx pull` green on the macOS + Windows CI hosts
-# (they scope their pulls to default[,unix]). Linux consumers select it with
-# `ocx run -g all pwsh …`; macOS/Windows hosts use a system PowerShell instead.
+# pwsh is Linux-only HERE by choice: on Linux the locked ocx.sh/powershell/powershell
+# has linux/{amd64,arm64}+libc.glibc leaves only (no musl). The locked release also
+# ships darwin and windows leaves, but the macOS + Windows CI hosts use a system
+# PowerShell and scope their pulls to default[,unix], so this group keeps their
+# `ocx pull` from fetching it. Linux consumers select it with `ocx run -g all pwsh …`.
 [group.linux.tools]
 pwsh = "ocx.sh/powershell/powershell:latest"
+
+# The nushell range install.nu declares ('# nu-range: FLOOR..CEILING'). The default [tools] nushell
+# floats on latest and is locked, so the two ends of the range are pinned here and the gate and the
+# suite run on both. Both ship windows, darwin and linux leaves; the group stays out of the Windows and
+# macOS pulls (they scope to default[,unix]) because nothing there needs both ends.
+[group.nurange.tools]
+nushell-floor = "ocx.sh/nushell/nushell:0.105.1"
+nushell-ceiling = "ocx.sh/nushell/nushell:0.116.1"
