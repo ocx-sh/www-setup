@@ -359,9 +359,12 @@ def __ocx-dist-row [dist: record, version: string, target: string]: nothing -> a
 
 def __ocx-run-self-setup [bin: string, pre: list<string>, post: list<string>] {
     __ocx-say 'Running ocx self setup...'
+    # Its result table goes to stderr: stdout is reserved for OCX_INSTALL_PRINT_PATH.
     let ok = try {
-        ^$bin ...$pre self setup ...$post
-        true
+        let r = (^$bin ...$pre self setup ...$post | complete)
+        print -e -n $r.stdout
+        print -e -n $r.stderr
+        $r.exit_code == 0
     } catch {
         false
     }

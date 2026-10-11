@@ -700,7 +700,8 @@ function Invoke-SelfSetup {
     param([string]$Bin, [string[]]$PreArgs = @(), [string[]]$PostArgs = @())
     Say 'Running ocx self setup...'
     $argList = @($PreArgs) + @('self', 'setup') + @($PostArgs)
-    & $Bin @argList
+    # Its result table goes to stderr: stdout is reserved for OCX_INSTALL_PRINT_PATH.
+    & $Bin @argList | ForEach-Object { [Console]::Error.WriteLine($_) }
     if ($LASTEXITCODE -ne 0) {
         Err "'ocx self setup' failed - see the output above for details" 6
     }

@@ -194,6 +194,9 @@ if [ -n "${OCX_STUB_ENV:-}" ]; then
     printf 'SSL_CERT_FILE=%s\n' "${SSL_CERT_FILE:-}" >>"$OCX_STUB_ENV"
     printf 'OCX_EXTRA_CA_CERTS=%s\n' "${OCX_EXTRA_CA_CERTS:-}" >>"$OCX_STUB_ENV"
 fi
+# The real `ocx self setup` prints its result table on STDOUT; the stub does the
+# same (marker line below) so the suites can prove the installers keep it off
+# their own stdout.
 case "$1" in
     version)
         echo "0.0.0"
@@ -206,7 +209,7 @@ case "$1" in
         # Global pre-flag, then `self setup` (the test-hatch hand-off).
         shift
         if [ "$1" = "self" ] && [ "$2" = "setup" ]; then
-            echo "ocx self setup (offline) ok" >&2
+            echo "ocx-stub: self setup result"
             exit 0
         fi
         echo "stub ocx"
@@ -214,7 +217,7 @@ case "$1" in
     self)
         # `ocx self setup <version> [--no-modify-path]` (the default hand-off).
         if [ "$2" = "setup" ]; then
-            echo "ocx self setup ok" >&2
+            echo "ocx-stub: self setup result"
             exit 0
         fi
         echo "stub ocx"

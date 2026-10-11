@@ -113,7 +113,7 @@ setup() {
 @test "stderr discipline: stdout is empty on success without PRINT_PATH" {
     run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
-    [ -z "$stdout" ]
+    [ -z "$output" ]
 }
 
 @test "url passthrough: dist.json url is used when no mirror override" {

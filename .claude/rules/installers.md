@@ -30,6 +30,8 @@ environment. `ocx self setup` resolves the ref itself when the flag is absent
 (its own order is flag > `OCX_MANAGED_CONFIG` > existing seed), so omitting the
 flag is what keeps env ahead of embedded.
 
+The child's stdout is routed to **stderr** in all five dialects (its result table is informational, and stdout is reserved for `OCX_INSTALL_PRINT_PATH`); elvish needs the `>&2` inside the capture-free `?( )` form, and nu collects with `complete` and re-prints.
+
 A non-zero `self setup` exit → `err`/`Err` exit **6**. The recorded argv is asserted by the Bats/Pester suites (a regression to the old `--remote package install` would fail them).
 
 ## Env-knob naming (two-tier taxonomy)

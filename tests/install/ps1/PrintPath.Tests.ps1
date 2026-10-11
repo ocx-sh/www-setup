@@ -86,6 +86,24 @@ Describe 'install.ps1 stdout/stderr discipline' {
         (Get-Content $ErrFile -Raw) | Should -Match 'Invalid|invalid|error'
     }
 
+    It 'ocx self setup output goes to stderr, stdout stays silent' -Skip:($env:OS -eq 'Windows_NT') {
+        Remove-Item Env:OCX_INSTALL_NO_SETUP -ErrorAction SilentlyContinue
+        $out = & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$ErrFile
+        $LASTEXITCODE | Should -Be 0
+        ($out | Where-Object { $_ -ne '' }) | Should -BeNullOrEmpty
+        (Get-Content $ErrFile -Raw) | Should -Match 'ocx-stub: self setup result'
+    }
+
+    It 'with PRINT_PATH stdout is exactly the bin dir, self setup output on stderr' -Skip:($env:OS -eq 'Windows_NT') {
+        Remove-Item Env:OCX_INSTALL_NO_SETUP -ErrorAction SilentlyContinue
+        $env:OCX_INSTALL_PRINT_PATH = '1'
+        $out = @(& pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$ErrFile)
+        $LASTEXITCODE | Should -Be 0
+        $out | Should -HaveCount 1
+        $out[0] | Should -Be (Get-ExpectedBinDir -OcxHome $OcxHome)
+        (Get-Content $ErrFile -Raw) | Should -Match 'ocx-stub: self setup result'
+    }
+
     It '__OCX_TESTING_INSTALL_BINARY honors PRINT_PATH on the final stdout line' {
         $binDir = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-pp-tb-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
         $stub = New-OcxTestBinary -Dir $binDir

@@ -113,7 +113,8 @@ function Get-PythonExe {
 
 # Write the stub `ocx`/`ocx.exe` into $BuildDir.
 #   - default: answers `version` -> 0.0.0, `about`, and the `ocx self setup`
-#     hand-off (records "$*" to $ArgvLog when set, exits 0).
+#     hand-off (records "$*" to $ArgvLog when set, prints the marker line
+#     `ocx-stub: self setup result` on STDOUT like the real result table, exits 0).
 #   - $FailSelfSetup: the `self setup` hand-off exits 9 (drives the exit-6 path).
 # The stub is a `#!/bin/sh` script. On Unix it is named `ocx` and chmod +x so the
 # extracted/copied binary runs; on Windows it is named `ocx.exe` but is not a PE,
@@ -144,8 +145,8 @@ function New-OcxStub {
             "case `"`$1`" in`n" +
             "  version) $versionBody ;;`n" +
             "  about) echo 'ocx 0.0.0 (fixture stub)' ;;`n" +
-            "  --offline) shift; [ `"`$1`" = self ] && [ `"`$2`" = setup ] && exit $setupExit; echo 'stub ocx' ;;`n" +
-            "  self) [ `"`$2`" = setup ] && exit $setupExit; echo 'stub ocx' ;;`n" +
+            "  --offline) shift; [ `"`$1`" = self ] && [ `"`$2`" = setup ] && { echo 'ocx-stub: self setup result'; exit $setupExit; }; echo 'stub ocx' ;;`n" +
+            "  self) [ `"`$2`" = setup ] && { echo 'ocx-stub: self setup result'; exit $setupExit; }; echo 'stub ocx' ;;`n" +
             "  *) echo 'stub ocx' ;;`n" +
             "esac`n"
     [System.IO.File]::WriteAllText($stubPath, $body)

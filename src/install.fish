@@ -501,7 +501,8 @@ function __ocx_run_self_setup
         set pre $rest
     end
     __ocx_say "Running ocx self setup..."
-    if not $bin $pre self setup $post
+    # Its result table goes to stderr: stdout is reserved for OCX_INSTALL_PRINT_PATH.
+    if not $bin $pre self setup $post >&2
         __ocx_err "'ocx self setup' failed -- see the output above for details" 6
     end
 end
