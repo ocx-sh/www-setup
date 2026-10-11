@@ -89,7 +89,7 @@ That command installs OCX into your OCX home directory, `~/.ocx` by default, and
 
 The installer checks the archive against the SHA-256 digest in its manifest before it runs anything from the archive.
 Open a new terminal and run `ocx about` to confirm that `ocx` is on your path.
-[Examples](/install/examples/#output) shows what the installer prints.
+[Installer output](/install/examples/dev-box/#output) shows what the installer prints.
 
 ## Install in CI {#ci}
 
@@ -106,6 +106,7 @@ Pin the installer and the version in CI, as [Pin a version](/install/versions/) 
 - [Pin a version](/install/versions/): install a fixed `ocx`, use the `next` channel, or freeze the whole manifest.
 - [Configuration](/install/configuration/): every environment variable and flag the installers read.
 - [Mirrors and proxies](/install/mirrors/): host one patched installer and trust a corporate CA.
-- [Examples](/install/examples/): the installer output, a Dockerfile, an air-gapped host and a generic CI job.
+- [Installer output](/install/examples/dev-box/): what the installer prints, in each shell.
+- [Examples](/install/examples/): a Dockerfile, an air-gapped host and a generic CI job.
 - [Exit codes and contract](/install/reference/): what each exit code means and what the installers print.
 - [OCX documentation](https://ocx.sh/docs/): what to do with `ocx` once it is installed.

@@ -11,7 +11,7 @@ const site = (p) => fileURLToPath(new URL(`../${p}`, import.meta.url));
 const page = (name) => readFileSync(site(`src/content/docs/${name}.mdx`), 'utf8');
 
 // A session with no <Cast> right after it shows the run of the cast named here.
-const SHARED = { 'examples:Install the latest ocx': 'examples/dev-box-sh' };
+const SHARED = { 'examples/dev-box:Install the latest ocx': 'examples/dev-box-sh' };
 
 /** [{ title, command, output, cast }] for each ShellSession; `cast` is the key of the <Cast> right after it. */
 export function sessions(name) {
@@ -23,7 +23,7 @@ export function sessions(name) {
   });
 }
 
-for (const name of ['examples']) {
+for (const name of ['examples', 'examples/dev-box']) {
   for (const s of sessions(name)) {
     test(`${name}: "${s.title}" matches its recorded run`, () => {
       assert.ok(s.cast, 'no cast follows this session');
