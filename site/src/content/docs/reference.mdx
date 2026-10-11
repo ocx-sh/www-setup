@@ -41,7 +41,7 @@ The POSIX and fish installers exit with code 2 for an unknown option.
 ## Output contract {#output}
 
 - All messages go to stderr: progress, warnings and errors.
-- Stdout is silent on success.
+- The installer itself writes nothing to stdout on success. `ocx self setup`, which it runs, prints its result table there.
 - With `OCX_INSTALL_PRINT_PATH` true, or `-PrintPath` in PowerShell, the final line of stdout is the absolute OCX bin directory.
 
 A wrapper can capture the directory with `BIN_DIR=$(... | tail -n1)`.

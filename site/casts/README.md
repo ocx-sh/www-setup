@@ -8,7 +8,7 @@ then run `task site:test`, whose `session-casts.test.mjs` fails when a page sess
 
 | Key | Example |
 |---|---|
-| `examples/dev-box-sh` | Dev box, POSIX shell (also the landing page session) |
+| `examples/dev-box-sh` | Dev box, POSIX shell (also the installer output session) |
 | `examples/dev-box-pwsh` | Dev box, PowerShell 7 on Linux |
 | `examples/dev-box-nu` | Dev box, Nushell |
 | `examples/dev-box-fish` | Dev box, fish |
