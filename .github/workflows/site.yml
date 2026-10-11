@@ -1,0 +1,83 @@
+name: site
+
+# The /install/ section of ocx.sh (site/). Built and checked on every PR that touches it; deployed
+# to ocx.sh from main. src/install.* is a trigger because the drift guard (site/scripts/contract.test.mjs)
+# compares the installers' knobs and exit codes with the pages.
+on:
+  pull_request:
+    paths:
+      - 'site/**'
+      - 'src/install.*'
+      - '.claude/rules/docs-quality/**'
+      - 'ocx.toml'
+      - 'ocx.lock'
+      - 'taskfile.yml'
+      - 'taskfiles/site.taskfile.yml'
+      - '.github/workflows/site.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'src/install.*'
+      - 'ocx.toml'
+      - 'ocx.lock'
+      - '.github/workflows/site.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build and check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+        with:
+          groups: default,site
+      - run: task site:check
+      - name: Upload the build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: site
+          path: site/dist
+
+  deploy:
+    name: Deploy
+    needs: build
+    # Off until the ocx.sh environment and the BUNNY_DEPLOY variable exist on this repo.
+    if: vars.BUNNY_DEPLOY == 'true' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    # The ocx.sh environment holds a BUNNY_STORAGE_KEY scoped to the ocx.sh storage zone. The
+    # setup.ocx.sh environment holds a secret of the same name for another zone; the two never meet.
+    environment:
+      name: ocx.sh
+      url: ${{ steps.deploy.outputs.url }}
+    concurrency:
+      group: ocx-sh-deploy
+      cancel-in-progress: false
+    permissions: {}
+    steps:
+      - name: Download the build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: site
+          path: dist
+      - name: Deploy
+        id: deploy
+        uses: ocx-sh/website/.github/actions/deploy@f3814ad4c5a3f95c886b8f9657e14889001b79d9 # theme pin, replace with the deploy action release SHA
+        with:
+          dist: dist
+          storage-key: ${{ secrets.BUNNY_STORAGE_KEY }}

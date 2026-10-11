@@ -16,6 +16,8 @@ config:
 # Installed by grim, not authored here: edits are overwritten on the next
 # install, so findings there are fixed upstream (same set shell-gate.sh skips).
 ignores:
+  # site/ is gated by its own stricter config (site/.markdownlint.jsonc via site/scripts/docs-gate.mjs).
+  - "site/**"
   - ".agents/**"
   - ".opencode/**"
   - ".claude/skills/**"

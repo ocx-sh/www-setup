@@ -1,0 +1,3 @@
+# The README links to https://ocx.sh/install/, which this repo's site/ deploys. Until the first
+# deploy those URLs 404, so lychee skips them.
+exclude = ['^https://ocx\.sh/install/']
