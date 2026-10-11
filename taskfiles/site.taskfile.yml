@@ -42,3 +42,11 @@ tasks:
     desc: Record the terminal casts (pending, no recorder is wired yet; casts/README.md lists the keys).
     cmds:
       - echo "site:casts is a stub; see site/casts/README.md" >&2
+
+  lighthouse:
+    desc: Lighthouse (mobile, 100 in all four categories, budgets) over every built page under the base path.
+    dir: site
+    deps: [build]
+    cmds:
+      - '{{.SITE}} pnpm exec playwright-core install chromium'
+      - '{{.SITE}} pnpm run lighthouse'
