@@ -7,7 +7,7 @@
 # redirects the download to the fixture server.
 #
 # Cross-platform gating: install.ps1 is cross-platform, but the fixture stub is a
-# POSIX `#!/bin/sh` script, so it only EXECUTES on a POSIX host (ubuntu + macos) —
+# POSIX `#!/bin/sh` script, so it only EXECUTES on a POSIX host (ubuntu + macos) -
 # never on Windows (it is not a PE). Scenarios that execute the stub (the `self
 # setup` hand-off, the idempotent version probe) therefore run on the POSIX hosts
 # and self-skip on Windows. The skip keys off `$env:OS -eq 'Windows_NT'` rather
@@ -20,6 +20,7 @@
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot 'Fixture.psm1') -Force
     $script:InstallPs1 = Join-Path $PSScriptRoot '..\..\..\src\install.ps1'
+    $script:RunInstaller = Join-Path $PSScriptRoot 'Run-Installer.ps1'
     $script:Target = Get-FixtureTarget
 
     $script:FixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-kn-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
@@ -32,6 +33,7 @@ BeforeAll {
     # serving an altered manifest produces.
     $script:DistPinSha = Publish-DistSnapshot -SrvRoot $fixture.SrvRoot
     $script:DistPinBadSha = 'a' * 64
+    Write-OcxDecoyDist -SrvRoot $fixture.SrvRoot
     Copy-Item -Path (Join-Path $fixture.SrvRoot 'dist.json') `
         -Destination (Join-Path $fixture.SrvRoot "dist/$DistPinBadSha.json") -Force
 }
@@ -71,21 +73,21 @@ Describe 'install.ps1 env knobs' {
     }
 
     It 'default install hands off to ocx self setup <version>' -Skip:($env:OS -eq 'Windows_NT') {
-        & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
         (Get-Content $ArgvLog) | Should -Contain 'self setup 0.0.0 --no-modify-path'
     }
 
     It 'OCX_INSTALL_VERSION pins the version' -Skip:($env:OS -eq 'Windows_NT') {
         $env:OCX_INSTALL_VERSION = '0.0.0'
-        & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
         (Get-Content $ArgvLog) | Should -Contain 'self setup 0.0.0 --no-modify-path'
     }
 
     It 'OCX_INSTALL_NO_SETUP places the binary and skips self setup' {
         $env:OCX_INSTALL_NO_SETUP = '1'
-        & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
         $bin = Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) (Get-FixtureBinName)
         Test-Path $bin | Should -BeTrue
@@ -96,7 +98,7 @@ Describe 'install.ps1 env knobs' {
     It 'OCX_INSTALL_PRINT_PATH emits the bin dir as the final stdout line' {
         $env:OCX_INSTALL_NO_SETUP = '1'
         $env:OCX_INSTALL_PRINT_PATH = '1'
-        $out = & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null
+        $out = & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null
         $LASTEXITCODE | Should -Be 0
         ($out | Select-Object -Last 1) | Should -Be (Get-ExpectedBinDir -OcxHome $OcxHome)
     }
@@ -109,7 +111,7 @@ Describe 'install.ps1 env knobs' {
         # execution is needed, so this runs on every host (incl. Windows pwsh 7).
         $env:OCX_INSTALL_NO_SETUP = '1'
         $env:OCX_INSTALL_MIRROR_URL = $Server.RedirectMirrorUrl
-        & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
         $bin = Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) (Get-FixtureBinName)
         Test-Path $bin | Should -BeTrue
@@ -122,7 +124,7 @@ Describe 'install.ps1 env knobs' {
         try {
             $env:OCX_INSTALL_DIST_URL = $srv.DistUrl
             $env:OCX_INSTALL_MIRROR_URL = $srv.MirrorUrl
-            & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+            & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
             $LASTEXITCODE | Should -Be 4
         }
         finally {
@@ -132,34 +134,34 @@ Describe 'install.ps1 env knobs' {
     }
 
     It 'invalid version exits 2' {
-        & pwsh -NoProfile -File $InstallPs1 -Version 'foo;rm' 2>$null | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version 'foo;rm' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 2
     }
 
     It 'unknown flag is rejected by the binder (accepted divergence: non-zero, not 2)' {
-        & pwsh -NoProfile -File $InstallPs1 -BogusFlag 2>$null | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 -BogusFlag 2>$null | Out-Null
         $LASTEXITCODE | Should -Not -Be 0
     }
 
     It 'no manifest row for the (version,target) exits 3' {
-        & pwsh -NoProfile -File $InstallPs1 -Version '9.9.9' 2>$null | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '9.9.9' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 3
     }
 
     It 'OCX_INSTALL_FORCE reinstalls when same version present' -Skip:($env:OS -eq 'Windows_NT') {
         $env:OCX_INSTALL_NO_SETUP = '1'
-        & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
-        & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
         $env:OCX_INSTALL_FORCE = '1'
-        & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
     }
 
     It 'latest version resolves from dist.json (no version pin)' {
         $env:OCX_INSTALL_NO_SETUP = '1'
-        & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
         Test-Path (Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) (Get-FixtureBinName)) | Should -BeTrue
     }
@@ -169,7 +171,7 @@ Describe 'install.ps1 env knobs' {
         $stub = New-OcxTestBinary -Dir $binDir -ArgvLog 'on'
         try {
             $env:__OCX_TESTING_INSTALL_BINARY = $stub
-            & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
+            & pwsh -NoProfile -File $RunInstaller $InstallPs1 2>$null | Out-Null
             $LASTEXITCODE | Should -Be 0
             Test-Path (Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) (Get-FixtureBinName)) | Should -BeTrue
             (Get-Content $ArgvLog) | Should -Contain '--offline self setup --no-modify-path'
@@ -181,21 +183,21 @@ Describe 'install.ps1 env knobs' {
 
     It '__OCX_TESTING_INSTALL_BINARY pointing at a non-file exits 2' {
         $env:__OCX_TESTING_INSTALL_BINARY = Join-Path ([System.IO.Path]::GetTempPath()) 'no-such-ocx-binary.exe'
-        & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 2
     }
 
     It 'pinned manifest dist/<sha256>.json installs and is digest-verified' {
         $env:OCX_INSTALL_NO_SETUP = '1'
-        $env:OCX_INSTALL_DIST_URL = "http://127.0.0.1:$($Server.Port)/dist/$DistPinSha.json"
-        & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
+        $env:OCX_INSTALL_DIST_URL = "https://127.0.0.1:$($Server.Port)/dist/$DistPinSha.json"
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
         Test-Path (Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) (Get-FixtureBinName)) | Should -BeTrue
     }
 
     It 'pinned manifest with an altered body exits 4' {
-        $env:OCX_INSTALL_DIST_URL = "http://127.0.0.1:$($Server.Port)/dist/$DistPinBadSha.json"
-        & pwsh -NoProfile -File $InstallPs1 2>$null | Out-Null
+        $env:OCX_INSTALL_DIST_URL = "https://127.0.0.1:$($Server.Port)/dist/$DistPinBadSha.json"
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 4
     }
 
@@ -210,7 +212,7 @@ Describe 'install.ps1 env knobs' {
         } | Out-Null
         Remove-Item Env:OCX_INSTALL_DIST_URL, Env:OCX_INSTALL_MIRROR_URL -ErrorAction SilentlyContinue
         try {
-            & pwsh -NoProfile -File $copy -Version '0.0.0' 2>$null | Out-Null
+            & pwsh -NoProfile -File $RunInstaller $copy -Version '0.0.0' 2>$null | Out-Null
             $LASTEXITCODE | Should -Be 0
             (Get-Content $ArgvLog) | Should -Contain 'self setup 0.0.0 --no-modify-path'
         }
@@ -224,7 +226,7 @@ Describe 'install.ps1 env knobs' {
             OCX_INSTALL_DIST_URL = 'https://127.0.0.1:1/dead/dist.json'
         } | Out-Null
         try {
-            & pwsh -NoProfile -File $copy -Version '0.0.0' 2>$null | Out-Null
+            & pwsh -NoProfile -File $RunInstaller $copy -Version '0.0.0' 2>$null | Out-Null
             $LASTEXITCODE | Should -Be 0
             (Get-Content $ArgvLog) | Should -Contain 'self setup 0.0.0 --no-modify-path'
         }
@@ -237,7 +239,7 @@ Describe 'install.ps1 env knobs' {
             OCX_MANAGED_CONFIG = 'registry.corp.example/ocx/managed-config:v1'
         } | Out-Null
         try {
-            & pwsh -NoProfile -File $copy -Version '0.0.0' 2>$null | Out-Null
+            & pwsh -NoProfile -File $RunInstaller $copy -Version '0.0.0' 2>$null | Out-Null
             $LASTEXITCODE | Should -Be 0
             (Get-Content $ArgvLog) | Should -Contain 'self setup 0.0.0 --no-modify-path --managed-config registry.corp.example/ocx/managed-config:v1'
         }
@@ -253,7 +255,7 @@ Describe 'install.ps1 env knobs' {
         # not override it with the embedded default.
         $env:OCX_MANAGED_CONFIG = 'registry.other.example/ocx/managed-config:v2'
         try {
-            & pwsh -NoProfile -File $copy -Version '0.0.0' 2>$null | Out-Null
+            & pwsh -NoProfile -File $RunInstaller $copy -Version '0.0.0' 2>$null | Out-Null
             $LASTEXITCODE | Should -Be 0
             (Get-Content $ArgvLog) | Should -Contain 'self setup 0.0.0 --no-modify-path'
             (Get-Content $ArgvLog) -join "`n" | Should -Not -Match '--managed-config'
@@ -269,7 +271,7 @@ Describe 'install.ps1 env knobs' {
         $env:OCX_INSTALL_CA_BUNDLE = Join-Path $PSScriptRoot '..\helpers\localhost-cert.pem'
         $errLog = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-ca-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).err"
         try {
-            & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$errLog | Out-Null
+            & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$errLog | Out-Null
             $LASTEXITCODE | Should -Be 0
             (Get-Content $errLog -Raw) | Should -Match "not honored by install.ps1's own downloads"
         }
@@ -283,7 +285,7 @@ Describe 'install.ps1 env knobs' {
         # SSL_CERT_FILE for an older ocx (Linux only).
         $ca = Join-Path $PSScriptRoot '..\helpers\localhost-cert.pem'
         $env:OCX_INSTALL_CA_BUNDLE = $ca
-        & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 0
         (Get-Content $EnvLog) | Should -Contain "OCX_EXTRA_CA_CERTS=$ca"
         (Get-Content $EnvLog) | Should -Contain "SSL_CERT_FILE=$ca"
@@ -298,13 +300,16 @@ Describe 'install.ps1 env knobs' {
             OCX_INSTALL_CA_BUNDLE = "# Corp Root CA`n#`n" + [System.IO.File]::ReadAllText($ca)
         } | Out-Null
         try {
-            & pwsh -NoProfile -File $copy -Version '0.0.0' 2>$null | Out-Null
+            & pwsh -NoProfile -File $RunInstaller $copy -Version '0.0.0' 2>$null | Out-Null
             $LASTEXITCODE | Should -Be 0
             # SSL_CERT_FILE is a PATH, so the inline PEM must be materialized.
             $recorded = (Get-Content $EnvLog) | Where-Object { $_ -like 'SSL_CERT_FILE=*' } | Select-Object -First 1
             $recorded | Should -Match '^SSL_CERT_FILE=.+\.pem$'
             $path = $recorded.Substring('SSL_CERT_FILE='.Length)
-            (Get-Content $path -Raw) | Should -Match '-----BEGIN CERTIFICATE-----'
+            # The stub read the file while `self setup` ran; the installer then
+            # removes it, so the PEM body is recorded rather than re-read here.
+            (Get-Content $EnvLog) | Should -Contain 'SSL_CERT_BODY=-----BEGIN CERTIFICATE-----'
+            Test-Path -LiteralPath $path | Should -BeFalse
             # OCX_EXTRA_CA_CERTS carries the PEM text AS SUPPLIED (ocx sniffs it
             # the same way and persists it), not the temp path.
             (Get-Content $EnvLog) | Should -Contain 'OCX_EXTRA_CA_CERTS=# Corp Root CA'
@@ -315,7 +320,7 @@ Describe 'install.ps1 env knobs' {
 
     It 'OCX_INSTALL_CA_BUNDLE neither a file nor inline PEM exits 2' {
         $env:OCX_INSTALL_CA_BUNDLE = Join-Path ([System.IO.Path]::GetTempPath()) 'no-such-ca.pem'
-        & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
         $LASTEXITCODE | Should -Be 2
     }
 
@@ -327,11 +332,127 @@ Describe 'install.ps1 env knobs' {
         $env:SSL_CERT_FILE = $preset
         $env:OCX_EXTRA_CA_CERTS = $preset
         try {
-            & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+            & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
             $LASTEXITCODE | Should -Be 0
             (Get-Content $EnvLog) | Should -Contain "SSL_CERT_FILE=$preset"
             (Get-Content $EnvLog) | Should -Contain "OCX_EXTRA_CA_CERTS=$preset"
         }
         finally { Remove-Item -Force $preset -ErrorAction SilentlyContinue }
+    }
+
+    # --- Pin versus latest ---
+    # dist-decoy.json lists a newer stable release (9.9.9) with no row for this
+    # host, then the real 0.0.0. A pin that is silently ignored lands on the
+    # decoy and exits 3.
+
+    It 'latest resolves the newest release of the decoy manifest and finds no row (exit 3)' {
+        $env:OCX_INSTALL_NO_SETUP = '1'
+        $env:OCX_INSTALL_DIST_URL = $Server.DistUrl.Replace('dist.json', 'dist-decoy.json')
+        $errFile = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-kn-dc-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).log"
+        try {
+            & pwsh -NoProfile -File $RunInstaller $InstallPs1 2>$errFile | Out-Null
+            $LASTEXITCODE | Should -Be 3
+            (Get-Content -LiteralPath $errFile -Raw) | Should -Match 'No published artifact for ocx v9\.9\.9'
+        }
+        finally { Remove-Item -LiteralPath $errFile -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'OCX_INSTALL_VERSION is honoured over the decoy latest' {
+        $env:OCX_INSTALL_NO_SETUP = '1'
+        $env:OCX_INSTALL_VERSION = '0.0.0'
+        $env:OCX_INSTALL_DIST_URL = $Server.DistUrl.Replace('dist.json', 'dist-decoy.json')
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 2>$null | Out-Null
+        $LASTEXITCODE | Should -Be 0
+        Test-Path -LiteralPath (Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) (Get-FixtureBinName)) | Should -BeTrue
+    }
+
+    It '-Version is honoured over the decoy latest' {
+        $env:OCX_INSTALL_NO_SETUP = '1'
+        $env:OCX_INSTALL_DIST_URL = $Server.DistUrl.Replace('dist.json', 'dist-decoy.json')
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+        $LASTEXITCODE | Should -Be 0
+        Test-Path -LiteralPath (Join-Path (Get-ExpectedBinDir -OcxHome $OcxHome) (Get-FixtureBinName)) | Should -BeTrue
+    }
+
+    # --- CI PATH export ---
+
+    It 'GITHUB_PATH receives the bin dir as UTF-8 without a BOM (non-ASCII OCX_HOME)' {
+        # U+00FC is one byte in the ANSI code page and two in UTF-8; the runner
+        # reads the file as UTF-8, so the wrong encoding drops the dir from PATH.
+        $env:OCX_HOME = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-gh-$([char]0xFC)-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+        $ghPath = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-gh-path-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).txt"
+        $env:GITHUB_PATH = $ghPath
+        $env:OCX_INSTALL_NO_SETUP = '1'
+        try {
+            & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+            $LASTEXITCODE | Should -Be 0
+            $bytes = [System.IO.File]::ReadAllBytes($ghPath)
+            ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) | Should -BeFalse
+            $strict = New-Object System.Text.UTF8Encoding($false, $true)
+            $strict.GetString($bytes) | Should -BeExactly ((Get-ExpectedBinDir -OcxHome $env:OCX_HOME) + "`n")
+        }
+        finally {
+            Remove-Item -LiteralPath $env:OCX_HOME -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $ghPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # --- Temp files ---
+    # TMPDIR / TEMP / TMP point at a fresh directory for the run, so anything the
+    # installer creates and forgets shows up there.
+
+    It 'temp: nothing is left behind after <Outcome>' -ForEach @(
+        @{ Outcome = 'a successful install'; Tamper = $false; Code = 0; Ca = $false }
+        @{ Outcome = 'a checksum mismatch'; Tamper = $true; Code = 4; Ca = $false }
+        @{ Outcome = 'a successful install with an inline CA bundle'; Tamper = $false; Code = 0; Ca = $true }
+        @{ Outcome = 'a checksum mismatch with an inline CA bundle'; Tamper = $true; Code = 4; Ca = $true }
+    ) {
+        $scratch = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-kn-tmp-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+        New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-kn-tf-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+        $fx = New-OcxFixture -Root $root -TamperChecksum:$Tamper
+        $srv = Start-FixtureServer -SrvRoot $fx.SrvRoot
+        $saved = @{}
+        foreach ($v in 'TMPDIR', 'TEMP', 'TMP') { $saved[$v] = [Environment]::GetEnvironmentVariable($v) }
+        try {
+            $env:OCX_INSTALL_DIST_URL = $srv.DistUrl
+            $env:OCX_INSTALL_MIRROR_URL = $srv.MirrorUrl
+            $env:OCX_INSTALL_NO_SETUP = '1'
+            if ($Ca) {
+                $env:OCX_INSTALL_CA_BUNDLE = "# Corp Root CA`n" + [System.IO.File]::ReadAllText((Join-Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'helpers') 'localhost-cert.pem'))
+            }
+            foreach ($v in 'TMPDIR', 'TEMP', 'TMP') { [Environment]::SetEnvironmentVariable($v, $scratch) }
+            & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+            $LASTEXITCODE | Should -Be $Code
+            @(Get-ChildItem -LiteralPath $scratch -Force | Where-Object { $_.Name -match '^(ocx-install-|tmp.*\.tmp$|.*\.pem$)' }).Count | Should -Be 0
+        }
+        finally {
+            foreach ($v in 'TMPDIR', 'TEMP', 'TMP') { [Environment]::SetEnvironmentVariable($v, $saved[$v]) }
+            Stop-FixtureServer -Server $srv
+            Remove-Item -LiteralPath $root, $scratch -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # --- Idempotent fast path ---
+
+    It 'the fast path still fires when ocx version writes to stderr' -Skip:($env:OS -eq 'Windows_NT') {
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-kn-fp-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+        $fx = New-OcxFixture -Root $root -StderrOnVersion
+        $srv = Start-FixtureServer -SrvRoot $fx.SrvRoot
+        $errFile = Join-Path $root 'stderr.log'
+        try {
+            $env:OCX_INSTALL_DIST_URL = $srv.DistUrl
+            $env:OCX_INSTALL_MIRROR_URL = $srv.MirrorUrl
+            $env:OCX_INSTALL_NO_SETUP = '1'
+            & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$null | Out-Null
+            $LASTEXITCODE | Should -Be 0
+            & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$errFile | Out-Null
+            $LASTEXITCODE | Should -Be 0
+            (Get-Content -LiteralPath $errFile -Raw) | Should -Match 'already installed'
+        }
+        finally {
+            Stop-FixtureServer -Server $srv
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }

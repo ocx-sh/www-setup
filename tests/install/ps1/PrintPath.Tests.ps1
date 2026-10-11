@@ -7,12 +7,13 @@
 #
 # We split the streams with `2>$errFile`, so $out is pure stdout. These tests use
 # OCX_INSTALL_NO_SETUP (and the test hatch) so they assert the stdout/stderr
-# discipline without depending on the binary executing — meaningful on Windows,
+# discipline without depending on the binary executing - meaningful on Windows,
 # ubuntu, and macos alike.
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot 'Fixture.psm1') -Force
     $script:InstallPs1 = Join-Path $PSScriptRoot '..\..\..\src\install.ps1'
+    $script:RunInstaller = Join-Path $PSScriptRoot 'Run-Installer.ps1'
     $script:Target = Get-FixtureTarget
 
     $script:FixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-pp-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
@@ -47,7 +48,7 @@ Describe 'install.ps1 stdout/stderr discipline' {
     }
 
     It 'stdout is empty on success (no PRINT_PATH)' {
-        $out = & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$ErrFile
+        $out = & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$ErrFile
         $LASTEXITCODE | Should -Be 0
         ($out | Where-Object { $_ -ne '' }) | Should -BeNullOrEmpty
         # ...and the installer was not silent: its banner went to stderr.
@@ -56,14 +57,14 @@ Describe 'install.ps1 stdout/stderr discipline' {
 
     It 'OCX_INSTALL_PRINT_PATH prints the bin dir as the final stdout line' {
         $env:OCX_INSTALL_PRINT_PATH = '1'
-        $out = & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$ErrFile
+        $out = & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$ErrFile
         $LASTEXITCODE | Should -Be 0
         ($out | Select-Object -Last 1) | Should -Be (Get-ExpectedBinDir -OcxHome $OcxHome)
     }
 
     It 'stderr carries informational lines even with PRINT_PATH set' {
         $env:OCX_INSTALL_PRINT_PATH = '1'
-        $out = & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$ErrFile
+        $out = & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$ErrFile
         $LASTEXITCODE | Should -Be 0
         (Get-Content $ErrFile -Raw) | Should -Match 'Installing|Detected|Downloading|Verified|Installed'
         # The banner must NOT have leaked onto stdout.
@@ -72,14 +73,14 @@ Describe 'install.ps1 stdout/stderr discipline' {
 
     It 'OCX_INSTALL_QUIET silences stderr informational lines' {
         $env:OCX_INSTALL_QUIET = '1'
-        & pwsh -NoProfile -File $InstallPs1 -Version '0.0.0' 2>$ErrFile | Out-Null
+        & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>$ErrFile | Out-Null
         $LASTEXITCODE | Should -Be 0
         $err = Get-Content $ErrFile -Raw
         if ($err) { $err | Should -Not -Match 'Installing|Downloading|Detected platform' }
     }
 
     It 'error messages go to stderr (exit 2 path)' {
-        $out = & pwsh -NoProfile -File $InstallPs1 -Version 'foo;rm' 2>$ErrFile
+        $out = & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version 'foo;rm' 2>$ErrFile
         $LASTEXITCODE | Should -Be 2
         ($out | Where-Object { $_ -ne '' }) | Should -BeNullOrEmpty
         (Get-Content $ErrFile -Raw) | Should -Match 'Invalid|invalid|error'
@@ -91,7 +92,7 @@ Describe 'install.ps1 stdout/stderr discipline' {
         try {
             $env:__OCX_TESTING_INSTALL_BINARY = $stub
             $env:OCX_INSTALL_PRINT_PATH = '1'
-            $out = & pwsh -NoProfile -File $InstallPs1 2>$ErrFile
+            $out = & pwsh -NoProfile -File $RunInstaller $InstallPs1 2>$ErrFile
             $LASTEXITCODE | Should -Be 0
             ($out | Select-Object -Last 1) | Should -Be (Get-ExpectedBinDir -OcxHome $OcxHome)
         }

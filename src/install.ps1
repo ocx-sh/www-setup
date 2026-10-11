@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
+# Kind: INST. Floor: Windows PowerShell 5.1 (#Requires -Version 5.1); PowerShell 7 on Linux and macOS.
+# Exit: 0 ok; 1 generic; 2 usage or environment; 3 network or manifest; 4 checksum mismatch; 5 extract; 6 self setup; 7 platform. No signal statuses (129 130 143): PowerShell has no trap for them.
 #
 # install.ps1 - OCX installer for Windows, Linux, and macOS
 # https://ocx.sh
@@ -66,6 +68,19 @@ param(
     [switch]$NoSmoketest
 )
 
+# The whole script runs in a child scope: under `irm | iex` the top level is the
+# caller's scope, so a preference, StrictMode, function or variable set here
+# would outlive the install in the user's session.
+& {
+    param(
+        [string]$Version = '',
+        [switch]$NoModifyPath,
+        [switch]$Quiet,
+        [switch]$Force,
+        [switch]$PrintPath,
+        [switch]$NoSetup,
+        [switch]$NoSmoketest
+    )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -105,17 +120,17 @@ function Resolve-EmbeddedConfig {
 # Windows-only, so the PSEdition shortcut returns $true WITHOUT ever evaluating
 # the .NET Core / 4.7.1-era RuntimeInformation API on a 5.1 host. Every
 # Unix-only construct below (IsOSPlatform(Linux/OSX), sysctl, ldd, tar, chmod,
-# /lib + /etc probes) is gated behind `-not $script:OcxIsWindows`, so a 5.1 host
+# /lib + /etc probes) is gated behind `-not $OcxIsWindows`, so a 5.1 host
 # never reaches them.
 function Test-IsWindowsHost {
     if ($PSVersionTable.PSEdition -eq 'Desktop') { return $true }
     return [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
         [System.Runtime.InteropServices.OSPlatform]::Windows)
 }
-$script:OcxIsWindows = Test-IsWindowsHost
+$OcxIsWindows = Test-IsWindowsHost
 
 # Binary name: ocx.exe on Windows, ocx on Unix.
-$OcxBinName = if ($script:OcxIsWindows) { 'ocx.exe' } else { 'ocx' }
+$OcxBinName = if ($OcxIsWindows) { 'ocx.exe' } else { 'ocx' }
 
 # --- Truthy helper ---
 
@@ -170,6 +185,14 @@ $OcxNoModifyPath      = if (Test-Truthy $env:OCX_NO_MODIFY_PATH)      { $true } 
 # on both Windows (\) and Unix (/).
 $OcxBinSubPath = (@('symlinks', 'ocx.sh', 'ocx', 'cli', 'current', 'content', 'bin') -join [System.IO.Path]::DirectorySeparatorChar)
 
+# Temp files and environment variables the install creates, removed by the
+# final cleanup. A hashtable of lists: functions mutate it without assigning,
+# so no variable leaks into a caller scope.
+$OcxCleanup = @{
+    Files    = New-Object System.Collections.ArrayList
+    EnvNames = New-Object System.Collections.ArrayList
+}
+
 # Attempts per network fetch (see Download-File / Download-String). Deliberately
 # not an OCX_INSTALL_* knob - three is right for a transient edge failure.
 $OcxDownloadAttempts = 3
@@ -201,7 +224,7 @@ function Warn {
 # --- Platform detection ---
 
 function Detect-Architecture {
-    if (-not $script:OcxIsWindows) { return Get-UnixTarget }
+    if (-not $OcxIsWindows) { return Get-UnixTarget }
 
     # --- Windows branch: OSArchitecture -> PROCESSOR_ARCHITECTURE fallback ---
     try {
@@ -226,6 +249,26 @@ function Detect-Architecture {
         'x86'   { Err '32-bit Windows is not supported. OCX requires a 64-bit system.' 7 }
         default { Err "Unsupported architecture: $procArch" 7 }
     }
+}
+
+# Mirrors install.sh detect_libc, same order: the ldd banner, then musl loader
+# files, then glibc evidence; no evidence is exit 7, never a guessed glibc that a
+# musl-only host cannot load. $Root prefixes the probed paths so a test can point
+# them at a fake tree; a real host passes nothing.
+function Get-LinuxLibc {
+    param([string]$Root = '')
+    $banner = ''
+    if (Get-Command ldd -CommandType Application -ErrorAction SilentlyContinue) {
+        try { $banner = (& ldd --version 2>&1 | Out-String) } catch { $banner = '' }
+    }
+    if ($banner -cmatch 'musl') { return 'musl' }
+    if ($banner -cmatch 'GLIBC|GNU libc|GNU C Library') { return 'gnu' }
+    if ((Get-ChildItem -Path "$Root/lib/ld-musl-*.so.1" -ErrorAction SilentlyContinue) -or
+        (Test-Path -LiteralPath "$Root/etc/alpine-release")) { return 'musl' }
+    foreach ($loader in '/lib64/ld-linux*', '/lib/ld-linux*', '/lib/*/ld-linux*', '/usr/lib/ld-linux*', '/usr/lib64/ld-linux*') {
+        if (Get-ChildItem -Path "$Root$loader" -ErrorAction SilentlyContinue) { return 'gnu' }
+    }
+    Err 'cannot tell glibc from musl on this host (no ldd output, loader file or alpine-release)' 7
 }
 
 # Resolve the <arch>-<os>-<libc/vendor> target on a non-Windows host (PS 7+).
@@ -265,17 +308,7 @@ function Get-UnixTarget {
         return "$arch-apple-darwin"
     }
 
-    # Linux libc: gnu default; musl on Alpine/musl. Ordering MUST mirror
-    # install.sh - when ldd exists it is authoritative; only when ldd is ABSENT
-    # do we fall back to the loader-file / alpine-release probes.
-    $libc = 'gnu'
-    if (Get-Command ldd -ErrorAction SilentlyContinue) {
-        $lddOut = ''
-        try { $lddOut = (& ldd --version 2>&1 | Out-String) } catch { $lddOut = '' }
-        if ($lddOut -match 'musl') { $libc = 'musl' }
-    }
-    elseif (Get-ChildItem -Path '/lib/ld-musl-*.so.1' -ErrorAction SilentlyContinue) { $libc = 'musl' }
-    elseif (Test-Path '/etc/alpine-release') { $libc = 'musl' }
+    $libc = Get-LinuxLibc
     return "$arch-unknown-linux-$libc"
 }
 
@@ -283,13 +316,11 @@ function Get-UnixTarget {
 
 # TLS fail-closed gate. OCX_INSTALL_DIST_URL / OCX_INSTALL_MIRROR_URL are
 # CI-injectable, so reject any non-https URL with exit 3 before a request leaves
-# the machine. Loopback (127.0.0.1 / [::1] / localhost) is exempt so the
-# Pester/Bats fixture servers can run on loopback; no credential is ever
-# attached, so the public network stays https-only.
+# the machine. There is no loopback exemption: a plaintext hop would let a
+# network attacker swap the manifest or the archive.
 function Assert-HttpsUrl {
     param([string]$Url)
     if ($Url -match '^https://') { return }
-    if ($Url -match '^https?://(?:127\.0\.0\.1|\[::1\]|localhost)(?::\d+)?(?:/|$)') { return }
     Err "refusing insecure (non-https) URL: $Url" 3
 }
 
@@ -343,10 +374,24 @@ function Resolve-DownloadUrl {
     Err "too many redirects resolving $Url" 3
 }
 
+# Windows PowerShell 5.1 on .NET before 4.7 does not offer TLS 1.2 by default.
+# Touch the process-wide setting only on the Desktop edition and only when it is
+# not SystemDefault; assign the numeric values because the Tls13 member does not
+# exist before .NET 4.8 and naming it would throw under StrictMode. Returns the
+# previous value (to restore) or $null when nothing was changed.
+function Enable-Tls12 {
+    if ($PSVersionTable.PSEdition -ne 'Desktop') { return $null }
+    $previous = [Net.ServicePointManager]::SecurityProtocol
+    if ([int]$previous -eq 0) { return $null }
+    $wanted = 3072
+    if ([enum]::GetNames([Net.SecurityProtocolType]) -contains 'Tls13') { $wanted = $wanted -bor 12288 }
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]$wanted
+    return $previous
+}
+
 function Download-FileOnce {
     param([string]$Url, [string]$Destination)
 
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
     try {
         # Resolve-DownloadUrl scheme-checks every hop; a downgrade hard-exits via
         # Err. The returned URL is the final https artifact - hand it to IWR with
@@ -365,7 +410,6 @@ function Download-FileOnce {
 function Download-StringOnce {
     param([string]$Url)
     Assert-HttpsUrl $Url
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
     $ProgressPreference = 'SilentlyContinue'
     (Invoke-WebRequest -Uri $Url -MaximumRedirection 0 -UseBasicParsing).Content
 }
@@ -415,17 +459,23 @@ function Download-String {
 
 # --- Checksum verification ---
 
+# A blank or malformed digest aborts: verifying against nothing would extract
+# and run unchecked bytes.
+function Assert-Sha256Digest {
+    param([string]$Digest)
+    if ($Digest -notmatch '^[0-9A-Fa-f]{64}\z') {
+        Err 'manifest row has no valid sha256 (expected 64 hex digits)' 3
+    }
+}
+
 # Verify-Checksum <file_path> <expected_sha256>. The expected hash comes inline
 # from dist.json - no separate sha256.sum fetch.
 function Verify-Checksum {
     param([string]$FilePath, [string]$Expected)
 
-    if ([string]::IsNullOrWhiteSpace($Expected)) {
-        Warn 'No inline checksum in the manifest - skipping verification.'
-        return
-    }
+    Assert-Sha256Digest $Expected
     $expectedLower = $Expected.ToLower()
-    $actual = (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash.ToLower()
+    $actual = (Get-FileHash -LiteralPath $FilePath -Algorithm SHA256).Hash.ToLower()
     if ($expectedLower -ne $actual) {
         Err "Checksum mismatch for $(Split-Path $FilePath -Leaf)`n  expected: $expectedLower`n  got:      $actual" 4
     }
@@ -585,9 +635,9 @@ function Get-DistManifest {
                 Err "Failed to fetch the pinned manifest ($OcxInstallDistUrl)." 3
             }
             Verify-Checksum -FilePath $pinTmp -Expected $pin
-            $body = Get-Content -Path $pinTmp -Raw
+            $body = [System.IO.File]::ReadAllText($pinTmp)
         }
-        finally { Remove-Item -Path $pinTmp -Force -ErrorAction SilentlyContinue }
+        finally { Remove-Item -LiteralPath $pinTmp -Force -ErrorAction SilentlyContinue }
     }
     else {
         try { $body = Download-String $OcxInstallDistUrl }
@@ -665,8 +715,8 @@ function Install-PlaceBinary {
     $binDir = Join-Path $OcxHome $OcxBinSubPath
     New-Item -ItemType Directory -Path $binDir -Force | Out-Null
     $dest = Join-Path $binDir $OcxBinName
-    Copy-Item -Path $Bin -Destination $dest -Force
-    if (-not $script:OcxIsWindows) {
+    Copy-Item -LiteralPath $Bin -Destination $dest -Force
+    if (-not $OcxIsWindows) {
         try { & chmod +x $dest 2>$null } catch { Write-Verbose "chmod +x failed: $($_.Exception.Message)" }
     }
     Say "Installed to $dest"
@@ -679,15 +729,15 @@ function Install-PlaceBinary {
 # test-only, undocumented). Validates the source is a file (exit 2).
 function Install-LocalTestBinary {
     param([string]$Source, [string]$OcxHome)
-    if (-not (Test-Path $Source -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
         Err "__OCX_TESTING_INSTALL_BINARY does not point to a file: $Source" 2
     }
     $binDir = Join-Path $OcxHome $OcxBinSubPath
     Say 'Test mode: installing local binary as the candidate (no download).'
     New-Item -ItemType Directory -Path $binDir -Force | Out-Null
     $dest = Join-Path $binDir $OcxBinName
-    Copy-Item -Path $Source -Destination $dest -Force
-    if (-not $script:OcxIsWindows) {
+    Copy-Item -LiteralPath $Source -Destination $dest -Force
+    if (-not $OcxIsWindows) {
         try { & chmod +x $dest 2>$null } catch { Write-Verbose "chmod +x failed: $($_.Exception.Message)" }
     }
     Say "Installed to $dest"
@@ -702,7 +752,7 @@ function Get-DefaultOcxHome {
     if ($env:OCX_HOME) { return $env:OCX_HOME }
     $base = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
     if ([string]::IsNullOrEmpty($base)) {
-        $base = if ($script:OcxIsWindows) { $env:USERPROFILE } else { $env:HOME }
+        $base = if ($OcxIsWindows) { $env:USERPROFILE } else { $env:HOME }
     }
     return Join-Path $base '.ocx'
 }
@@ -734,9 +784,25 @@ function Export-GithubPath {
     param([string]$OcxHome)
     if ($env:GITHUB_PATH) {
         $ghBinPath = Join-Path $OcxHome $OcxBinSubPath
-        try { Add-Content -Path $env:GITHUB_PATH -Value $ghBinPath }
+        # The runner reads GITHUB_PATH as UTF-8: Add-Content would write the
+        # ANSI code page (or a BOM) and corrupt a non-ASCII OCX_HOME.
+        try { [System.IO.File]::AppendAllText($env:GITHUB_PATH, $ghBinPath + "`n", (New-Object System.Text.UTF8Encoding($false))) }
         catch { Warn 'Failed to write to $GITHUB_PATH.' }
     }
+}
+
+# Run `<bin> version` and return its stdout, or '' when it cannot run or exits
+# non-zero. Windows PowerShell 5.1 turns the first stderr byte of a native into
+# a terminating error under Stop, so the preference is relaxed for the call.
+function Get-OcxVersion {
+    param([string]$Bin)
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & $Bin version 2>$null
+        if ($LASTEXITCODE -ne 0) { return '' }
+        return ([string]($out | Select-Object -First 1)).Trim()
+    }
+    catch { return '' }
 }
 
 # --- Main ---
@@ -748,14 +814,9 @@ function Main {
         Err 'PowerShell 5.1+ required. Upgrade: https://aka.ms/install-powershell' 2
     }
 
-    # Version precedence: -Version flag > OCX_INSTALL_VERSION env > caller-scope
-    # $Version idiom > latest lookup.
+    # Version precedence: -Version flag > OCX_INSTALL_VERSION env > latest lookup.
     $requestedVersion = $RequestedVersion
     if (-not $requestedVersion -and $env:OCX_INSTALL_VERSION) { $requestedVersion = $env:OCX_INSTALL_VERSION }
-    if (-not $requestedVersion) {
-        $callerVersion = Get-Variable -Name 'Version' -Scope 1 -ErrorAction SilentlyContinue
-        if ($callerVersion -and $callerVersion.Value) { $requestedVersion = $callerVersion.Value }
-    }
 
     # `ocx self setup` does its own HTTPS work (it pulls the package store from
     # the registry), so the bundle is handed down even though install.ps1 cannot
@@ -771,8 +832,8 @@ function Main {
     #
     # The value is either a path or the PEM text itself (the embedded placeholder
     # is single-quoted, and single quotes span newlines in every dialect). Inline
-    # PEM is materialized to a temp file, because SSL_CERT_FILE is a PATH; it is a
-    # public certificate, so it is left for TEMP to reap.
+    # PEM is materialized to a temp file, because SSL_CERT_FILE is a PATH. The
+    # temp file and any variable set here are removed again by the final cleanup.
     if ($OcxInstallCaBundle) {
         Warn ("OCX_INSTALL_CA_BUNDLE is not honored by install.ps1's own downloads " +
             '(Invoke-WebRequest has no CA-bundle option) - install the CA into the machine ' +
@@ -784,6 +845,7 @@ function Main {
         if ($OcxInstallCaBundle.Contains('-----BEGIN')) {
             $caPath = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName() + '.pem')
             [System.IO.File]::WriteAllText($caPath, $OcxInstallCaBundle + "`n")
+            [void]$OcxCleanup.Files.Add($caPath)
         }
         else {
             # Test-Path can THROW on a string with characters that are illegal in
@@ -795,8 +857,8 @@ function Main {
                 Err "OCX_INSTALL_CA_BUNDLE is neither a readable file nor an inline PEM block: $caPath" 2
             }
         }
-        if (-not $env:SSL_CERT_FILE) { $env:SSL_CERT_FILE = $caPath }
-        if (-not $env:OCX_EXTRA_CA_CERTS) { $env:OCX_EXTRA_CA_CERTS = $OcxInstallCaBundle }
+        if (-not $env:SSL_CERT_FILE) { $env:SSL_CERT_FILE = $caPath; [void]$OcxCleanup.EnvNames.Add('SSL_CERT_FILE') }
+        if (-not $env:OCX_EXTRA_CA_CERTS) { $env:OCX_EXTRA_CA_CERTS = $OcxInstallCaBundle; [void]$OcxCleanup.EnvNames.Add('OCX_EXTRA_CA_CERTS') }
     }
 
     $ocxHome = Get-DefaultOcxHome
@@ -850,9 +912,7 @@ function Main {
     # Idempotent fast-path.
     $oldVersion = ''
     $existingBin = Join-Path $installBinDir $OcxBinName
-    if (Test-Path $existingBin) {
-        try { $oldVersion = & $existingBin version 2>$null } catch { Write-Verbose "version probe failed: $($_.Exception.Message)" }
-    }
+    if (Test-Path -LiteralPath $existingBin) { $oldVersion = Get-OcxVersion $existingBin }
     if ($oldVersion -and ($oldVersion -eq $requestedVersion) -and -not $OcxInstallForce) {
         Say "ocx v$requestedVersion already installed at $existingBin (set OCX_INSTALL_FORCE=1 to reinstall)"
         if ($OcxInstallPrintPath) { Write-Output $installBinDir }
@@ -872,6 +932,7 @@ function Main {
     if (-not $url -or -not $filename) {
         Err "Manifest row for v$requestedVersion/$target is missing url/filename." 3
     }
+    Assert-Sha256Digest $sha
 
     # Artifact host override (mirror): rewrite the host, keep <tag>/<filename>.
     if ($OcxInstallMirrorUrl) {
@@ -913,19 +974,18 @@ function Main {
             (Join-Path $extractDir $OcxBinName)
         )
         foreach ($candidate in $candidatePaths) {
-            if (Test-Path $candidate) { $bin = $candidate; break }
+            if (Test-Path -LiteralPath $candidate) { $bin = $candidate; break }
         }
         if (-not $bin) { Err "Could not find $OcxBinName binary in archive." 5 }
 
         # On a non-Windows host the extracted binary lacks the executable bit -
         # set it before the binary is smoke-tested or handed off to `self setup`.
-        if (-not $script:OcxIsWindows) {
+        if (-not $OcxIsWindows) {
             try { & chmod +x $bin 2>$null } catch { Write-Verbose "chmod +x failed: $($_.Exception.Message)" }
         }
 
-        if (-not $OcxInstallNoSmoketest) {
-            try { $null = & $bin version 2>$null }
-            catch { Warn 'Binary failed to execute - it may be blocked by antivirus or execution policy.' }
+        if (-not $OcxInstallNoSmoketest -and -not (Get-OcxVersion $bin)) {
+            Warn 'Binary failed to execute - it may be blocked by antivirus or execution policy.'
         }
 
         # PATH shadowing warning (trailing-sep anchored; case-insensitive on
@@ -934,13 +994,13 @@ function Main {
         $existingOcx = Get-Command ocx -ErrorAction SilentlyContinue
         $sep = [System.IO.Path]::DirectorySeparatorChar
         $ocxHomePrefix = $ocxHome.TrimEnd('\', '/') + $sep
-        $cmp = if ($script:OcxIsWindows) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+        $cmp = if ($OcxIsWindows) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
         if ($existingOcx -and -not $existingOcx.Source.StartsWith($ocxHomePrefix, $cmp)) {
             Warn "An existing ocx was found at $($existingOcx.Source)"
             Warn 'The new install may be shadowed - check your PATH order.'
         }
 
-        if (-not (Test-Path $ocxHome)) { New-Item -ItemType Directory -Path $ocxHome -Force | Out-Null }
+        if (-not (Test-Path -LiteralPath $ocxHome)) { New-Item -ItemType Directory -Path $ocxHome -Force | Out-Null }
 
         if ($OcxInstallNoSetup) {
             # Binary-on-PATH only: place the binary, skip `ocx self setup`.
@@ -958,7 +1018,7 @@ function Main {
         if ($OcxInstallPrintPath) { Write-Output $installBinDir }
     }
     finally {
-        Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -968,7 +1028,13 @@ function Main {
 # script throws: an interactive prompt survives a throw, and a non-interactive
 # `pwsh -c "irm ... | iex"` (a Dockerfile RUN) still exits non-zero instead of
 # reporting a failed install as success. Any other error is rethrown untouched.
-try { Main -RequestedVersion $Version }
+$OcxPreviousTls = $null
+$OcxHadExit = $null -ne (Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue)
+$OcxSavedExit = if ($OcxHadExit) { $global:LASTEXITCODE } else { $null }
+try {
+    $OcxPreviousTls = Enable-Tls12
+    Main -RequestedVersion $Version
+}
 catch {
     if (-not $_.Exception.Data.Contains('OcxExit')) { throw }
     $ocxExitCode = [int]$_.Exception.Data['OcxExit']
@@ -976,3 +1042,13 @@ catch {
     $global:LASTEXITCODE = $ocxExitCode
     throw "ocx install failed (exit code $ocxExitCode)"
 }
+finally {
+    if ($null -ne $OcxPreviousTls) { [Net.ServicePointManager]::SecurityProtocol = $OcxPreviousTls }
+    foreach ($ocxName in $OcxCleanup.EnvNames) { Remove-Item -LiteralPath "Env:$ocxName" -ErrorAction SilentlyContinue }
+    foreach ($ocxFile in $OcxCleanup.Files) { Remove-Item -LiteralPath $ocxFile -Force -ErrorAction SilentlyContinue }
+}
+# Reached only on success (the catch above always throws or exits): hand back
+# the caller's own $LASTEXITCODE, which the natives run above overwrote.
+if ($OcxHadExit) { $global:LASTEXITCODE = $OcxSavedExit }
+else { Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue }
+} @PSBoundParameters
