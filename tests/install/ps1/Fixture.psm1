@@ -3,8 +3,11 @@
 #
 # PowerShell analogue of tests/install/helpers/server.bash: it builds a fake
 # release tree (a platform-appropriate archive + a dist.json manifest with an
-# INLINE sha256) and spins a `python http.server` against it so install.ps1 runs
-# end-to-end without network access.
+# INLINE sha256) and spins a python HTTPS server against it (the vendored
+# localhost certificate in ../helpers) so install.ps1 runs end-to-end without
+# network access. install.ps1 refuses plain http, so Run-Installer.ps1 makes the
+# child accept that certificate; `Start-FixtureServer -Plain` serves http for the
+# refusal scenarios.
 #
 # The installer resolves latest + the per-target checksum/URL from dist.json.
 # The manifest `url` is a dummy (example.invalid); suites set OCX_INSTALL_MIRROR_URL
@@ -17,7 +20,7 @@
 # Unix. The fixture mirrors that: on Windows it builds a FLAT .zip with ocx.exe at
 # the root; on Unix it builds a FLAT .tar.gz with an executable `ocx` at the root
 # (so the full download -> extract -> `self setup` hand-off path EXECUTES on the
-# POSIX hosts — ubuntu + macos). The stub is a `#!/bin/sh` script; on Windows it is
+# POSIX hosts - ubuntu + macos). The stub is a `#!/bin/sh` script; on Windows it is
 # not a PE, so suites that execute it self-skip there (see -Skip:($env:OS -eq
 # 'Windows_NT')). Windows execution coverage lives in the 5.1 smoke + real-release
 # dispatch jobs.
@@ -51,14 +54,17 @@ function Resolve-FixtureTarget {
         return "$arch-apple-darwin"
     }
     # Linux libc, same ordering as install.ps1.
-    $libc = 'gnu'
-    if (Get-Command ldd -ErrorAction SilentlyContinue) {
-        $lddOut = ''
+    # The installer exits 7 when none of these decide, so 'gnu' below is only
+    # reached on a host the installer itself would refuse.
+    $lddOut = ''
+    if (Get-Command ldd -CommandType Application -ErrorAction SilentlyContinue) {
         try { $lddOut = (& ldd --version 2>&1 | Out-String) } catch { $lddOut = '' }
-        if ($lddOut -match 'musl') { $libc = 'musl' }
     }
-    elseif (Get-ChildItem -Path '/lib/ld-musl-*.so.1' -ErrorAction SilentlyContinue) { $libc = 'musl' }
-    elseif (Test-Path '/etc/alpine-release') { $libc = 'musl' }
+    $libc = 'gnu'
+    if ($lddOut -cmatch 'musl') { $libc = 'musl' }
+    elseif ($lddOut -cmatch 'GLIBC|GNU libc|GNU C Library') { $libc = 'gnu' }
+    elseif ((Get-ChildItem -Path '/lib/ld-musl-*.so.1' -ErrorAction SilentlyContinue) -or
+        (Test-Path '/etc/alpine-release')) { $libc = 'musl' }
     return "$arch-unknown-linux-$libc"
 }
 
@@ -117,7 +123,8 @@ function New-OcxStub {
         [Parameter(Mandatory)][string]$BuildDir,
         [string]$ArgvLog,
         [string]$BinName,
-        [switch]$FailSelfSetup
+        [switch]$FailSelfSetup,
+        [switch]$StderrOnVersion
     )
     if (-not $BinName) { $BinName = Get-FixtureBinName }
     New-Item -ItemType Directory -Path $BuildDir -Force | Out-Null
@@ -127,13 +134,15 @@ function New-OcxStub {
     if ($ArgvLog) {
         $record = "if [ -n `"`$OCX_STUB_ARGV`" ]; then printf '%s\n' `"`$*`" >> `"`$OCX_STUB_ARGV`"; fi`n" +
             "if [ -n `"`$OCX_STUB_ENV`" ]; then printf 'SSL_CERT_FILE=%s\n' `"`$SSL_CERT_FILE`" >> `"`$OCX_STUB_ENV`"; fi`n" +
-            "if [ -n `"`$OCX_STUB_ENV`" ]; then printf 'OCX_EXTRA_CA_CERTS=%s\n' `"`$OCX_EXTRA_CA_CERTS`" >> `"`$OCX_STUB_ENV`"; fi`n"
+            "if [ -n `"`$OCX_STUB_ENV`" ]; then printf 'OCX_EXTRA_CA_CERTS=%s\n' `"`$OCX_EXTRA_CA_CERTS`" >> `"`$OCX_STUB_ENV`"; fi`n" +
+            "if [ -n `"`$OCX_STUB_ENV`" ] && [ -f `"`$SSL_CERT_FILE`" ]; then printf 'SSL_CERT_BODY=%s\n' `"`$(grep -m1 BEGIN `"`$SSL_CERT_FILE`")`" >> `"`$OCX_STUB_ENV`"; fi`n"
     }
     $setupExit = if ($FailSelfSetup) { '9' } else { '0' }
+    $versionBody = if ($StderrOnVersion) { 'echo 0.0.0; echo noisy >&2' } else { 'echo 0.0.0' }
     $body = "#!/bin/sh`n" +
             $record +
             "case `"`$1`" in`n" +
-            "  version) echo 0.0.0 ;;`n" +
+            "  version) $versionBody ;;`n" +
             "  about) echo 'ocx 0.0.0 (fixture stub)' ;;`n" +
             "  --offline) shift; [ `"`$1`" = self ] && [ `"`$2`" = setup ] && exit $setupExit; echo 'stub ocx' ;;`n" +
             "  self) [ `"`$2`" = setup ] && exit $setupExit; echo 'stub ocx' ;;`n" +
@@ -180,20 +189,114 @@ function Write-OcxDist {
     param(
         [Parameter(Mandatory)][string]$SrvRoot,
         [Parameter(Mandatory)][string]$Target,
-        [Parameter(Mandatory)][string]$Sha,
-        [Parameter(Mandatory)][string]$Filename
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Sha,
+        [Parameter(Mandatory)][string]$Filename,
+        [switch]$OmitSha
     )
+    $shaField = if ($OmitSha) { '' } else { ",`"sha256`":`"$Sha`"" }
     $json = @"
 {
   "schema": 1,
   "latest": {"version":"0.0.0","channel":"stable"},
   "latest_next": null,
   "releases": [
-    {"version":"0.0.0","channel":"stable","tag":"v0.0.0","target":"$Target","filename":"$Filename","sha256":"$Sha","url":"https://example.invalid/ocx/releases/download/v0.0.0/$Filename"}
+    {"version":"0.0.0","channel":"stable","tag":"v0.0.0","target":"$Target","filename":"$Filename"$shaField,"url":"https://example.invalid/ocx/releases/download/v0.0.0/$Filename"}
   ]
 }
 "@
-    Set-Content -Path (Join-Path $SrvRoot 'dist.json') -Value $json -Encoding ASCII -NoNewline
+    Set-Content -LiteralPath (Join-Path $SrvRoot 'dist.json') -Value $json -Encoding ASCII -NoNewline
+}
+
+# Write dist-decoy.json beside dist.json: a manifest whose newest stable release
+# (9.9.9) has no row for this host's target, then the real 0.0.0 row. Latest
+# resolution lands on the decoy (exit 3); pinning 0.0.0 must still install.
+# Mirror of server_write_decoy_dist in ../helpers/server.bash.
+function Write-OcxDecoyDist {
+    param([Parameter(Mandatory)][string]$SrvRoot)
+    $real = Get-Content -LiteralPath (Join-Path $SrvRoot 'dist.json') -Raw | ConvertFrom-Json
+    $row = $real.releases[0]
+    $json = @"
+{
+  "schema": 1,
+  "latest": {"version":"9.9.9","channel":"stable"},
+  "latest_next": null,
+  "releases": [
+    {"version":"9.9.9","channel":"stable","tag":"v9.9.9","target":"decoy-unknown-none","filename":"ocx-decoy.tar.gz","sha256":"$('0' * 64)","url":"https://example.invalid/ocx/releases/download/v9.9.9/ocx-decoy.tar.gz"},
+    {"version":"0.0.0","channel":"stable","tag":"v0.0.0","target":"$($row.target)","filename":"$($row.filename)","sha256":"$($row.sha256)","url":"$($row.url)"}
+  ]
+}
+"@
+    Set-Content -LiteralPath (Join-Path $SrvRoot 'dist-decoy.json') -Value $json -Encoding ASCII -NoNewline
+}
+
+# Serve an arbitrary prepared archive as the v0.0.0 release for this host. The
+# manifest carries the archive's real sha256 unless $Sha overrides it. Returns
+# the same shape as New-OcxFixture.
+function New-ArchiveFixture {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Archive,
+        [Parameter(Mandatory)][string]$Filename,
+        [string]$Sha,
+        [switch]$OmitSha
+    )
+    $srvRoot = Join-Path $Root 'srv'
+    $srvDir = Join-Path $srvRoot 'releases/download/v0.0.0'
+    New-Item -ItemType Directory -Path $srvDir -Force | Out-Null
+    Copy-Item -LiteralPath $Archive -Destination (Join-Path $srvDir $Filename) -Force
+    if (-not $PSBoundParameters.ContainsKey('Sha')) {
+        $Sha = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLower()
+    }
+    Write-OcxDist -SrvRoot $srvRoot -Target $script:Target -Sha $Sha -Filename $Filename -OmitSha:$OmitSha
+    return @{ Root = $Root; SrvRoot = $srvRoot; Target = $script:Target; Archive = $Filename }
+}
+
+# A .zip holding one tiny file per name in $EntryNames, names taken verbatim
+# (so '..\x', '/x' and 'C:x' reach the installer's containment checks).
+function New-HostileZip {
+    param(
+        [Parameter(Mandatory)][string]$OutFile,
+        [Parameter(Mandatory)][string[]]$EntryNames
+    )
+    Add-Type -AssemblyName System.IO.Compression
+    Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+    $fs = [System.IO.File]::Open($OutFile, [System.IO.FileMode]::Create)
+    $zip = New-Object System.IO.Compression.ZipArchive($fs, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($name in $EntryNames) {
+            $w = New-Object System.IO.StreamWriter($zip.CreateEntry($name).Open())
+            try { $w.Write('evil') } finally { $w.Dispose() }
+        }
+    }
+    finally { $zip.Dispose(); $fs.Dispose() }
+}
+
+# A .tar.gz with one hostile member: Kind is dotdot ('../x'), abs ('/x') or
+# symlink (a link to '../..'). Built by python's tarfile, which writes names as given.
+function New-HostileTar {
+    param(
+        [Parameter(Mandatory)][string]$OutFile,
+        [Parameter(Mandatory)][ValidateSet('dotdot', 'abs', 'symlink')][string]$Kind,
+        [string]$EvilName = 'ocx-evil.txt'
+    )
+    $py = Join-Path (Split-Path $OutFile -Parent) 'hostile-tar.py'
+    [System.IO.File]::WriteAllText($py, @'
+import io, sys, tarfile
+out, kind, evil = sys.argv[1:4]
+t = tarfile.open(out, 'w:gz')
+if kind == 'symlink':
+    i = tarfile.TarInfo('link')
+    i.type = tarfile.SYMTYPE
+    i.linkname = '../..'
+    t.addfile(i)
+else:
+    i = tarfile.TarInfo(('../' if kind == 'dotdot' else '/tmp/') + evil)
+    i.size = 4
+    t.addfile(i, io.BytesIO(b'evil'))
+t.close()
+'@)
+    & (Get-PythonExe) -I $py $OutFile $Kind $EvilName
+    if ($LASTEXITCODE -ne 0) { throw "python failed building $OutFile" }
 }
 
 # Build the fake release tree under $Root and return a hashtable describing it.
@@ -202,12 +305,13 @@ function New-OcxFixture {
         [Parameter(Mandatory)][string]$Root,
         [switch]$TamperChecksum,
         [string]$ArgvLog,
-        [switch]$FailSelfSetup
+        [switch]$FailSelfSetup,
+        [switch]$StderrOnVersion
     )
 
     $target = $script:Target
     $build = Join-Path $Root 'build'
-    New-OcxStub -BuildDir $build -ArgvLog $ArgvLog -FailSelfSetup:$FailSelfSetup | Out-Null
+    New-OcxStub -BuildDir $build -ArgvLog $ArgvLog -FailSelfSetup:$FailSelfSetup -StderrOnVersion:$StderrOnVersion | Out-Null
 
     $srvDir = Join-Path $Root 'srv/releases/download/v0.0.0'
     New-Item -ItemType Directory -Path $srvDir -Force | Out-Null
@@ -221,7 +325,7 @@ function New-OcxFixture {
         $hash = '0' * 64
     }
     else {
-        $hash = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLower()
+        $hash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLower()
     }
     Write-OcxDist -SrvRoot $srvRoot -Target $target -Sha $hash -Filename $archive
 
@@ -233,19 +337,30 @@ function New-OcxFixture {
     }
 }
 
-# Spin a python http.server against $SrvRoot. Returns @{ Process; Port; DistUrl;
-# MirrorUrl }. dist.json is served as application/json so ConvertFrom-Json is happy.
+# Spin a python server against $SrvRoot: HTTPS with the vendored localhost
+# certificate, or plain http with -Plain (to prove the installer refuses it and
+# never sends a request). Returns @{ Process; Port; DistUrl; MirrorUrl; ... }.
+# dist.json is served as application/json so ConvertFrom-Json is happy.
 function Start-FixtureServer {
-    param([Parameter(Mandatory)][string]$SrvRoot)
+    param(
+        [Parameter(Mandatory)][string]$SrvRoot,
+        [switch]$Plain
+    )
 
     $python = Get-PythonExe
     $parent = Split-Path $SrvRoot -Parent
-    $outLog = Join-Path $parent 'srv.out.log'
-    $errLog = Join-Path $parent 'srv.err.log'
+    $tag = if ($Plain) { '-plain' } else { '' }
+    $outLog = Join-Path $parent "srv$tag.out.log"
+    $errLog = Join-Path $parent "srv$tag.err.log"
+    $scheme = if ($Plain) { 'http' } else { 'https' }
+    $cert = if ($Plain) { 'plain' } else { (Join-Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'helpers') 'localhost-combined.pem') }
 
-    $serverPy = Join-Path $parent 'fixture-server.py'
+    $serverPy = Join-Path $parent "fixture-server$tag.py"
     $pyBody = @'
-import http.server, socketserver
+import http.server, socketserver, ssl, sys
+
+CERT = sys.argv[1]
+SCHEME = 'http' if CERT == 'plain' else 'https'
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def guess_type(self, path):
@@ -253,22 +368,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return 'application/json'
         return super().guess_type(path)
 
-    # /redirect/<path> answers 302 -> http://127.0.0.1:<port>/<path>, mirroring
+    # /redirect/<path> answers 302 -> <scheme>://127.0.0.1:<port>/<path>, mirroring
     # GitHub's release-asset redirect so the installer's redirect resolver is
-    # exercised. The Location is an absolute (cross-"host") https-on-localhost URL.
+    # exercised. /downgrade/<path> answers 302 -> http://... (a TLS downgrade the
+    # installer must refuse).
     # /flaky/<n>/<path> answers 500 for the first <n> hits of that exact URL,
-    # then serves <path> normally — the retry path. Counter is a CLASS attribute
+    # then serves <path> normally - the retry path. Counter is a CLASS attribute
     # because a new Handler instance is built per request.
     hits = {}
 
     def do_GET(self):
-        if self.path.startswith('/redirect/'):
-            target = self.path[len('/redirect'):]
-            port = self.server.server_address[1]
-            self.send_response(302)
-            self.send_header('Location', 'http://127.0.0.1:%d%s' % (port, target))
-            self.end_headers()
-            return
+        port = self.server.server_address[1]
+        for prefix, scheme in (('/redirect', SCHEME), ('/downgrade', 'http')):
+            if self.path.startswith(prefix + '/'):
+                self.send_response(302)
+                self.send_header('Location', '%s://127.0.0.1:%d%s' % (scheme, port, self.path[len(prefix):]))
+                self.end_headers()
+                return
         if self.path.startswith('/flaky/'):
             rest = self.path[len('/flaky/'):]
             count, _, target = rest.partition('/')
@@ -286,13 +402,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return super().do_GET()
 
 with socketserver.TCPServer(('127.0.0.1', 0), Handler) as httpd:
-    print('Serving HTTP on 127.0.0.1 port %d' % httpd.server_address[1], flush=True)
+    if SCHEME == 'https':
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(CERT)
+        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+    print('Serving %s on 127.0.0.1 port %d' % (SCHEME.upper(), httpd.server_address[1]), flush=True)
     httpd.serve_forever()
 '@
     [System.IO.File]::WriteAllText($serverPy, $pyBody)
 
     $proc = Start-Process -FilePath $python `
-        -ArgumentList '-u', $serverPy `
+        -ArgumentList '-u', "`"$serverPy`"", "`"$cert`"" `
         -WorkingDirectory $SrvRoot `
         -RedirectStandardOutput $outLog `
         -RedirectStandardError $errLog `
@@ -307,11 +427,13 @@ with socketserver.TCPServer(('127.0.0.1', 0), Handler) as httpd:
     return @{
         Process   = $proc
         Port      = $port
-        DistUrl   = "http://127.0.0.1:$port/dist.json"
-        MirrorUrl = "http://127.0.0.1:$port/releases/download"
+        DistUrl   = "${scheme}://127.0.0.1:$port/dist.json"
+        MirrorUrl = "${scheme}://127.0.0.1:$port/releases/download"
         # Same artifact, reached through a 302 hop (see the /redirect route above).
-        RedirectMirrorUrl = "http://127.0.0.1:$port/redirect/releases/download"
-        # The python access log — one line per request, so a retry test can
+        RedirectMirrorUrl = "${scheme}://127.0.0.1:$port/redirect/releases/download"
+        # A 302 to plain http (see the /downgrade route above).
+        DowngradeMirrorUrl = "${scheme}://127.0.0.1:$port/downgrade/releases/download"
+        # The python access log - one line per request, so a retry test can
         # count attempts (see the /flaky route above).
         ErrLog    = $errLog
     }
@@ -334,7 +456,7 @@ function Stop-FixtureServer {
 function Publish-DistSnapshot {
     param([Parameter(Mandatory)][string]$SrvRoot)
     $dist = Join-Path $SrvRoot 'dist.json'
-    $sha = (Get-FileHash -Path $dist -Algorithm SHA256).Hash.ToLower()
+    $sha = (Get-FileHash -LiteralPath $dist -Algorithm SHA256).Hash.ToLower()
     $dir = Join-Path $SrvRoot 'dist'
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     Copy-Item -Path $dist -Destination (Join-Path $dir "$sha.json") -Force
@@ -377,7 +499,8 @@ function New-EmbeddedInstaller {
 
 Export-ModuleMember -Function `
     Get-FixtureTarget, Get-FixtureBinName, Get-FixtureArchiveExt, `
-    New-OcxFixture, New-OcxStub, New-OcxArchive, New-OcxTestBinary, Write-OcxDist, `
+    New-OcxFixture, New-OcxStub, New-OcxArchive, New-OcxTestBinary, Write-OcxDist, Write-OcxDecoyDist, `
+    New-ArchiveFixture, New-HostileZip, New-HostileTar, `
     New-EmbeddedInstaller, `
     Publish-DistSnapshot, `
     Start-FixtureServer, Stop-FixtureServer, Get-ExpectedBinDir, `
