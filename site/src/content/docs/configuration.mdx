@@ -11,12 +11,13 @@ Set a variable in the environment of the shell that runs the installer, not on t
 
 ## Precedence {#precedence}
 
-A setting comes from the first of these that is present:
+How a setting is chosen depends on its kind:
 
-1. The environment variable.
-2. A flag, where the installer parses flags (see [Flags](#flags)). In PowerShell the environment wins over the switches.
-3. The value embedded in a patched copy of the installer (see [Mirrors and proxies](/install/mirrors/#embedded-config)).
-4. The built-in default.
+- **A value that has a flag** (the version): the flag wins over the environment variable, which wins over the default.
+  `--version` and `-Version` beat `OCX_INSTALL_VERSION` in the POSIX, fish and PowerShell installers.
+- **A boolean that has a flag:** the setting is on when the environment variable is true or the flag is given.
+  A false variable does not switch a flag off.
+- **A value a patched installer can embed** (see [Mirrors and proxies](/install/mirrors/#embedded-config)): the environment variable wins over the embedded value, which wins over the default.
 
 A boolean variable is true for `1`, `true`, `yes`, `TRUE`, `YES`, `True` and `Yes`.
 Any other value, including `0` and the empty string, is false.
@@ -27,7 +28,7 @@ These are shared with `ocx` itself or standard across tools.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `OCX_HOME` | `~/.ocx` | The OCX home directory. The installer requires an absolute path with no `..` segment and none of the characters `"` `$` `` ` `` `;` `&` `\|` `<` `>` `(` `)` `\`. Anything else exits with code 2. |
+| `OCX_HOME` | `~/.ocx` | The OCX home directory. The installer requires an absolute path with no `..` segment and none of the [characters each installer refuses](#home-chars). Anything else exits with code 2. |
 | `OCX_NO_MODIFY_PATH` | false | When true, `ocx self setup` does not edit shell profiles. The flags `--no-modify-path` and `-NoModifyPath` do the same. It has no effect when `OCX_INSTALL_NO_SETUP` is true, because setup does not run. |
 | `OCX_MANAGED_CONFIG` | unset | A managed-configuration OCI reference. `ocx self setup` reads it. When set, it overrides the value embedded in a patched installer. |
 | `NO_COLOR` | unset | Disables colored output. |
@@ -35,6 +36,17 @@ These are shared with `ocx` itself or standard across tools.
 
 The installer also reads `GITHUB_PATH`, which GitHub Actions sets.
 When it is set, the installer appends the OCX bin directory to that file, so later steps find `ocx`.
+
+### Characters `OCX_HOME` may not contain {#home-chars}
+
+The refused characters differ by installer:
+
+| Installer | Refused characters |
+|---|---|
+| POSIX (`sh`) | `"` `$` `` ` `` `;` `&` `\|` `<` `>` `(` `)` `\`, and a newline |
+| fish | `"` `$` `` ` `` `;` `&` `\|` `<` `>` `(` `)` `\` |
+| Nushell, Elvish | `"` `$` `` ` `` `;` `&` `\|` `<` `>` `(` `)` |
+| PowerShell (`pwsh`) | `"` `$` `` ` `` `;` `[` `]` `(` `)`, a carriage return and a newline |
 
 ## Installer variables {#install-vars}
 

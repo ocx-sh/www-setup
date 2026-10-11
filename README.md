@@ -22,10 +22,10 @@ https://setup.ocx.sh/dist           # dist.json — the distribution manifest th
 Each installer is a **thin bootstrap**: it detects the platform, resolves the release from the manifest, downloads + verifies the archive against the manifest's inline `sha256`, then hands off to the downloaded binary's `ocx self setup`.
 That command owns the package-store install, the per-shell env shims, and the managed shell-profile activation blocks.
 
-The bare paths are Bunny CDN edge-rule rewrites onto the latest-stable installer. The pre-release ("next") channel and pinned, immutable copies are reachable at the same friendly per-shell prefix:
+The bare paths are Bunny CDN edge-rule rewrites onto the latest-stable installer. The `next` channel (the newest of stable and prerelease) and pinned, immutable copies are reachable at the same friendly per-shell prefix:
 
 ```
-https://setup.ocx.sh/<shell>/next          # next (latest prerelease)  [alias: /<shell>/canary]
+https://setup.ocx.sh/<shell>/next          # next (newest of stable and prerelease)  [alias: /<shell>/canary]
 https://setup.ocx.sh/<shell>/<VERSION>     # pinned, immutable installer script (e.g. /sh/0.2.1)
 ```
 

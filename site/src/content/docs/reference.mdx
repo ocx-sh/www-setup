@@ -27,8 +27,7 @@ A script that wraps an installer can rely on the exit codes, the output streams 
 A signal code is 128 plus the signal number.
 Nushell, Elvish and PowerShell cannot trap signals.
 A run they lose to a signal exits by that signal and can leave its temporary directory behind.
-fish exits 143 for `SIGTERM` on every supported version.
-It exits 130 and 129 only on the fish versions that allow it.
+fish exits 129, 130 and 143 on every supported version.
 
 PowerShell delivers its code in one of two ways.
 Run as a file, with `pwsh -File` or by path, the script exits with the code.
