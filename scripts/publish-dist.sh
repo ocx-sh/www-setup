@@ -2,7 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
-# publish-dist.sh — regenerate the distribution manifest and upload it to
+# Kind: CI (POSIX sh: runs on dash and busybox ash)
+# Exit: 0 ok, 1 missing generator, 3 generation failed, curl's status on a failed
+# upload, 129/130/143 HUP/INT/TERM
+
+# publish-dist.sh -- regenerate the distribution manifest and upload it to
 # setup.ocx.sh (Bunny Edge Storage) as dist.json (overwrite, never deleted), alongside an
 # immutable content-addressed snapshot and a sha256 sidecar:
 #
@@ -42,10 +46,7 @@ DRY_RUN="${DRY_RUN:-0}"
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 GEN_DIST="$REPO_ROOT/scripts/gen-dist.sh"
 
-# bunny.sh is linted on its own via `git ls-files '*.sh'`; shellcheck cannot
-# resolve the runtime-computed $REPO_ROOT, hence the disable rather than -x
-# (which would surface unrelated findings elsewhere in the repo).
-# shellcheck source=scripts/lib/bunny.sh disable=SC1091
+# shellcheck source=lib/bunny.sh
 . "$REPO_ROOT/scripts/lib/bunny.sh"
 
 [ -f "$GEN_DIST" ] || {
@@ -59,9 +60,22 @@ echo "publish-dist: ZONE=${BUNNY_STORAGE_ZONE:-<unset>} REPO=${OCX_RELEASES_REPO
 
 # Generate the manifest. On any generator failure (curl rc!=0, HTTP error,
 # unparseable body, sha256.sum fetch failure) gen-dist.sh exits 3 and NEVER
-# prints a partial manifest — the live dist.json is left untouched.
+# prints a partial manifest -- the live dist.json is left untouched.
+# Temp state goes on every exit path; HUP/INT/TERM end the run with 128+N. A
+# returning cleanup trap on EXIT INT TERM would let a cancelled run carry on.
+STAGE=
+cleanup() { [ -z "$STAGE" ] || rm -rf "$STAGE"; }
+on_exit() {
+    rc=$?
+    trap - EXIT
+    cleanup
+    exit "$rc"
+}
+trap on_exit EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 STAGE=$(mktemp -d)
-trap 'rm -rf "$STAGE"' EXIT INT TERM
 DIST_TMP="$STAGE/dist.json"
 
 # GitHub serves release assets through a CDN that intermittently 500s a healthy
@@ -88,7 +102,7 @@ done
 
 echo "publish-dist: generated dist manifest ($(wc -c <"$DIST_TMP") bytes)"
 
-# Digest over the bytes as generated — the same bytes served, and the same bytes
+# Digest over the bytes as generated -- the same bytes served, and the same bytes
 # the installers hash when the URL is a pin. macOS ships shasum, not sha256sum.
 if command -v sha256sum >/dev/null 2>&1; then
     DIST_SHA=$(sha256sum "$DIST_TMP" | awk '{print $1}')
