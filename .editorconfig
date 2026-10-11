@@ -1,0 +1,16 @@
+# [[shell]] is what styles extensionless scripts (a four-space bin/tool is dirty without it on shfmt 3.12.0 to 3.14.1)
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+
+[*.{sh,bash,bats,ksh}]
+indent_style = space
+indent_size = 4
+switch_case_indent = true
+
+[[shell]]
+indent_style = space
+indent_size = 4
+switch_case_indent = true

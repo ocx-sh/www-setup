@@ -16,7 +16,7 @@ tasks:
     cmd: ocx run git-cliff -- git-cliff --unreleased
 
   # Version selection:
-  #   task release:prepare                 # interactive menu: auto | patch | minor | major
+  #   task release:prepare                 # interactive menu: auto, patch, minor or major
   #   task release:prepare BUMP=minor      # skip the menu, force a bump level
   #   task release:prepare BUMP=auto VERSION=0.2.0   # pin an exact version (v prefix optional)
   #

@@ -19,21 +19,8 @@ includes:
   # NAME is the binding declared in ocx.toml [tools]; `ocx run NAME -- BINARY`
   # composes the toolchain env. bats is NOT registered here — it is a vendored
   # git submodule (external/bats-core), not an OCX package. markdownlint-cli2
-  # is npm-only (no OCX package); meta:verify skips it locally.
-  shellcheck:
-    taskfile: ./taskfiles/ocx.taskfile.yml
-    internal: true
-    vars:
-      NAME: shellcheck
-      TOOL: shellcheck
-      GLOB: '*.sh'
-  shfmt:
-    taskfile: ./taskfiles/ocx.taskfile.yml
-    internal: true
-    vars:
-      NAME: shfmt
-      TOOL: shfmt
-      GLOB: '*.sh'
+  # is npm-only (no OCX package); CI runs it, meta:markdownlint needs a local one.
+  # ShellCheck and shfmt are not registered: scripts/shell-gate.sh feeds them a git-listed file set.
   lychee:
     taskfile: ./taskfiles/ocx.taskfile.yml
     internal: true
@@ -68,7 +55,8 @@ tasks:
   verify:
     desc: Full quality gate (lint + bats + pester)
     summary: |
-      Phase 1 (parallel): shell:verify, pwsh:verify, meta:verify
+      Phase 1 (parallel): shell:verify, pwsh:verify, nu/fish/elvish:verify, meta:verify,
+        ci:verify, ci:zizmor, test:pester:lint
       Phase 2 (sequential): test:bats, test:pester
     cmds:
       - task: .verify:lint
@@ -83,6 +71,19 @@ tasks:
       - task: fish:verify
       - task: elvish:verify
       - task: meta:verify
+      - task: ci:verify
+      - task: ci:zizmor
+      - task: test:pester:lint
+
+  ci:verify:
+    desc: Workflow and Taskfile checks (ci-steps, ci-taint, ci-orand, ci-task-pipefail, ci-extract-lint, job and pwsh run lint)
+    # ShellCheck must be on PATH: ci-extract-lint feeds it the shell bodies embedded in the Taskfiles.
+    cmd: ocx run shellcheck -- bash scripts/ci-verify.sh
+
+  ci:zizmor:
+    desc: Workflow security audit (zizmor 1.30.1, regular persona, medium floor; config in zizmor.yml; CI runs it online in verify.yml)
+    # uvx pins the version; --offline skips the audits that need a token (CI runs them with one).
+    cmd: uvx zizmor@1.30.1 --offline --min-severity medium --config zizmor.yml .github/workflows
 
   .verify:tests:
     internal: true
@@ -96,7 +97,7 @@ tasks:
       # Strip any leading v AND any prerelease suffix so this always exercises
       # the stable channel (which writes both the latest/ and next/ pointers).
       VERSION:
-        sh: 'ocx run git-cliff -- git-cliff --bumped-version 2>/dev/null | sed "s/^v//; s/-.*//" || echo "0.0.0"'
+        sh: 'set -o pipefail; ocx run git-cliff -- git-cliff --bumped-version | sed "s/^v//; s/-.*//"'
     cmd: DRY_RUN=1 VERSION={{.VERSION}} scripts/publish-installers.sh
 
   publish:dev-dry-run:
@@ -141,6 +142,7 @@ tasks:
     cmd: python3 edge-rules.py zone-apply
 
   format:
-    desc: Auto-format shell scripts
+    desc: Auto-format shell and fish scripts
     cmds:
       - task: shell:format
+      - task: fish:format

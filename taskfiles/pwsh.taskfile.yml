@@ -1,32 +1,19 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 #
-# PowerShell quality gate. On Linux the `pwsh` interpreter is bootstrapped from
-# ocx.toml (binding `pwsh` in [group.linux], hence `-g all`) via `ocx run` — no
-# system PowerShell required. The ocx.sh/powershell/powershell package ships
-# linux-glibc leaves only, so on macOS/Windows the gate falls back to a system
-# pwsh on PATH. PSScriptAnalyzer is installed into the CurrentUser scope on
-# demand.
+# PowerShell quality gate. On Linux `pwsh` comes from ocx.toml ([group.linux], hence `-g all`;
+# glibc leaves only, no musl). macOS and Windows use a system pwsh on PATH: the group is kept out of their pulls.
+# PSScriptAnalyzer is pinned to one exact version, and the 5.1 parse runs in CI on windows-latest.
 
 version: '3'
 
 vars:
-  # ocx-provisioned on Linux; system pwsh elsewhere (no darwin/windows leaf).
-  PWSH: '{{if eq OS "linux"}}ocx run -g all pwsh -- pwsh{{else}}pwsh{{end}}'
+  PWSH: '{{if eq OS "linux"}}ocx run -g all pwsh -- pwsh{{else}}pwsh{{end}} -NoProfile -NonInteractive'
+  PSA_VERSION: '1.25.0'
 
 tasks:
   verify:
-    desc: PowerShell quality gate (PSScriptAnalyzer; pwsh via ocx.toml on Linux)
-    cmd: |
-      {{.PWSH}} -NoProfile -Command '
-        if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
-          Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force -Repository PSGallery
-        }
-        Invoke-ScriptAnalyzer -Path src/install.ps1 -Severity Warning,Error -Settings ./PSScriptAnalyzerSettings.psd1 -EnableExit
-      '
-
-  format:check:
-    desc: PSScriptAnalyzer format-rule subset (pwsh via ocx.toml on Linux)
-    cmd: |
-      {{.PWSH}} -NoProfile -Command '
-        Invoke-ScriptAnalyzer -Path src/install.ps1 -Settings PSGallery -EnableExit
-      '
+    desc: PowerShell quality gate (scripts/Invoke-PSGate.ps1 over src and tests; pwsh via ocx.toml on Linux)
+    cmds:
+      - '{{.PWSH}} -File scripts/Install-PinnedModule.ps1 -Name PSScriptAnalyzer -Version {{.PSA_VERSION}}'
+      - '{{.PWSH}} -File scripts/Invoke-PSGate.ps1 -Path src -Settings PSScriptAnalyzerSettings.installer.psd1 -RequiredVersion {{.PSA_VERSION}}'
+      - '{{.PWSH}} -File scripts/Invoke-PSGate.ps1 -Path tests/install/ps1 -Settings PSScriptAnalyzerSettings.test.psd1 -RequiredVersion {{.PSA_VERSION}}'

@@ -2,6 +2,10 @@
 
 version: '3'
 
+vars:
+  PWSH: '{{if eq OS "linux"}}ocx run -g all pwsh -- pwsh{{else}}pwsh{{end}} -NoProfile -NonInteractive'
+  PESTER_VERSION: '6.2.0'
+
 tasks:
   bootstrap:
     desc: Initialize the vendored bats submodules (external/bats-*).
@@ -15,7 +19,7 @@ tasks:
       - git submodule update --init --recursive
 
   bats:
-    desc: Run the Bats install suites against the fixture HTTPS server (vendored bats)
+    desc: Run the Bats install suites and the tests/scripts suites (vendored bats, censused; Linux only)
     deps: [bootstrap]
     preconditions:
       - sh: command -v python3
@@ -26,28 +30,36 @@ tasks:
         msg: 'xz required for fixture archive build'
       - sh: command -v sha256sum
         msg: 'sha256sum required for fixture checksum generation'
-    # The nu/fish/elvish interpreters are bootstrapped from ocx.toml via `ocx run`
-    # so the per-shell suites (tests/install/{nu,fish,elvish}/) actually execute
-    # instead of self-skipping on `command -v`. The POSIX (sh) suites use the
-    # system shell and are unaffected by the composed env.
-    cmd: ocx run -g all nushell fish elvish -- external/bats-core/bin/bats -r tests/install/
+    # nu/fish/elvish come from ocx.toml via `ocx run`, and OCX_TEST_REQUIRE_SHELLS turns an absent
+    # interpreter into a failure instead of a skip. The census budget allows only platform-fact skips.
+    env:
+      OCX_TEST_REQUIRE_SHELLS: '1'
+      CENSUS_SKIP_OK: 'GNU wget not installed|timeout[(]1[)] not available'
+    cmds:
+      - ocx run -g all nushell fish elvish -- bash scripts/bats-ci.sh tests/install/dist.bats tests/install/env-knobs.bats tests/install/exit-codes.bats tests/install/print-path.bats tests/install/nu tests/install/fish tests/install/elvish
+      - ocx run -g all shellcheck shfmt nushell fish elvish -- env TESTS_DIR=tests/scripts bash scripts/bats-ci.sh tests/scripts
+
+  bats:lint:
+    desc: Lint the .bats files for vacuous forms and unlisted suites (bats-lint.sh, bats-runner-list.sh)
+    cmds:
+      - sh scripts/bats-lint.sh
+      - sh scripts/bats-runner-list.sh tests/install taskfiles/test.taskfile.yml
+      - sh scripts/bats-runner-list.sh tests/scripts taskfiles/test.taskfile.yml
 
   pester:
-    desc: Run Pester equivalents on pwsh (ocx.toml [group.linux] on Linux; system pwsh elsewhere)
-    cmd: |
-      {{if eq OS "linux"}}ocx run -g all pwsh -- pwsh{{else}}pwsh{{end}} -NoProfile -Command '
-        if (-not (Get-Module -ListAvailable Pester)) {
-          Install-Module -Name Pester -Scope CurrentUser -Force -Repository PSGallery -SkipPublisherCheck
-        }
-        $cfg = New-PesterConfiguration
-        $cfg.Run.Path = "tests/install/ps1"
-        $cfg.Run.Exit = $true
-        $cfg.Output.Verbosity = "Detailed"
-        Invoke-Pester -Configuration $cfg
-      '
+    desc: Run Pester equivalents on pwsh through the census gate (pinned Pester; pwsh via ocx.toml on Linux)
+    cmds:
+      - '{{.PWSH}} -File scripts/Install-PinnedModule.ps1 -Name Pester -Version {{.PESTER_VERSION}}'
+      - '{{.PWSH}} -File scripts/Invoke-PesterGate.ps1 -Path tests/install/ps1 -RequiredVersion {{.PESTER_VERSION}} -MaxSkipped {{if eq OS "windows"}}20{{else}}0{{end}}'
+
+  pester:lint:
+    desc: Lint the Pester pin, the Pester 6 removed forms and discovery-time code
+    cmds:
+      - sh scripts/pester-lint.sh
+      - '{{.PWSH}} -File scripts/Test-DiscoveryCode.ps1 tests/install/ps1/*.Tests.ps1'
 
   bats:single:
     desc: Run a single Bats file (pass FILE=path/to.bats)
     deps: [bootstrap]
     requires: { vars: [FILE] }
-    cmd: external/bats-core/bin/bats {{.FILE}}
+    cmd: bash external/bats-core/bin/bats {{.FILE}}

@@ -1,0 +1,5 @@
+# Only the nearest rc is read, a nested one must repeat every line. Severity is a command-line concept, never an rc key.
+external-sources=true         # follow `source` without -x
+source-path=SCRIPTDIR         # resolve `. "$here/../lib/x.sh"` from the script directory
+enable=check-set-e-suppressed # SC2310 and SC2311: set -e silently off inside `if f`, `f &&`, `f ||`
+enable=deprecate-which        # SC2230: `which` is not POSIX, use `command -v`

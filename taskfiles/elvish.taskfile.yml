@@ -1,13 +1,13 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 #
-# Elvish quality gate. The `elvish` interpreter is bootstrapped from ocx.toml
-# (binding `elvish`) via `ocx run` — no system Elvish required. install.elv is
-# compile-checked with `elvish -compileonly` (parses + compiles without
-# executing).
+# Elvish quality gate. The `elvish` interpreter is bootstrapped from ocx.toml (binding `elvish`)
+# via `ocx run`. scripts/elv-gate.sh adds the deprecation and removed-name checks that
+# `elvish -compileonly` alone cannot see; it takes explicit files because the repo vendors
+# deliberate plant fixtures under .agents/, .claude/ and .opencode/.
 
 version: '3'
 
 tasks:
   verify:
-    desc: Elvish quality gate (elvish -compileonly, elvish via ocx.toml)
-    cmd: ocx run elvish -- elvish -compileonly src/install.elv
+    desc: Elvish quality gate (scripts/elv-gate.sh, elvish via ocx.toml)
+    cmd: ocx run elvish -- sh scripts/elv-gate.sh src/install.elv

@@ -1,28 +1,19 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 #
-# Fish quality gate. The `fish` interpreter is bootstrapped from ocx.toml
-# (binding `fish`) via `ocx run` — no system Fish required. install.fish is
-# parse-checked (`fish -n`, the hard gate). The `fish_indent` format check is
-# best-effort: the ocx fish package ships only the `fish` binary, so the indent
-# check runs only when a `fish_indent` is otherwise available (system install).
+# Fish quality gate. The `fish` interpreter is bootstrapped from ocx.toml (binding `fish`,
+# [group.unix]) via `ocx run -g all`. The ocx fish package ships no fish_indent binary, so
+# scripts/fish-indent.sh links the fish binary under that name (fish 4.x is multicall).
 
 version: '3'
 
 tasks:
   verify:
-    desc: Fish quality gate (fish -n via ocx.toml; fish_indent --check if present)
+    desc: Fish quality gate (fish --no-execute, fish-scan.sh, fish_indent --check; fish via ocx.toml)
     cmds:
-      - ocx run -g all fish -- fish -n src/install.fish
-      - |
-        if command -v fish_indent >/dev/null 2>&1; then
-          fish_indent --check src/install.fish
-        else
-          echo "fish.taskfile: fish_indent not on PATH — skipping format check (ocx fish package ships no fish_indent)" >&2
-        fi
+      - ocx run -g all fish -- fish --no-config --no-execute src/install.fish
+      - ocx run -g all fish -- sh scripts/fish-scan.sh
+      - ocx run -g all fish -- sh scripts/fish-indent.sh --check src/install.fish
 
   format:
-    desc: Format install.fish with fish_indent (requires a system fish_indent)
-    preconditions:
-      - sh: command -v fish_indent
-        msg: 'fish_indent not on PATH; install Fish to format (the ocx fish package ships no fish_indent)'
-    cmd: fish_indent -w src/install.fish
+    desc: Format install.fish with fish_indent (fish via ocx.toml)
+    cmd: ocx run -g all fish -- sh scripts/fish-indent.sh --write src/install.fish

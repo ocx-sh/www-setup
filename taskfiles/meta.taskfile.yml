@@ -6,38 +6,33 @@ version: '3'
 
 tasks:
   verify:
-    desc: Cross-cutting lint (workflows, markdown, license, links)
+    desc: Cross-cutting lint (workflows, license, links; markdownlint runs in CI and via meta:markdownlint)
     deps:
       - task: actionlint
       - task: hawkeye
-      - task: markdownlint
       - task: lychee
 
   actionlint:
-    desc: Lint GitHub Actions workflows (actionlint via ocx.toml)
-    cmd: ocx run actionlint -- actionlint -color
+    desc: Lint GitHub Actions workflows (actionlint + the ShellCheck profile, both via ocx.toml)
+    # actionlint exits 0 without ShellCheck and ignores .shellcheckrc, so the precheck and the
+    # optional checks travel on the command line; no severity floor.
+    cmd: ocx run shellcheck actionlint -- sh -c 'command -v shellcheck >/dev/null || exit 69; SHELLCHECK_OPTS="-o check-set-e-suppressed,deprecate-which" actionlint -oneline'
 
   hawkeye:
     desc: Verify license headers (hawkeye via ocx.toml)
     cmd: ocx run hawkeye -- hawkeye check
 
   markdownlint:
-    desc: Lint Markdown files
-    # markdownlint-cli2 is npm-only (no OCX package); CI uses the action. A
-    # local install is optional — skip with a warning instead of failing the
-    # whole verify gate when it is absent.
-    cmd: |
-      if command -v markdownlint-cli2 >/dev/null 2>&1; then
-        markdownlint-cli2 '**/*.md' '!CHANGELOG.md' '!node_modules' '!.git'
-      elif command -v markdownlint >/dev/null 2>&1; then
-        markdownlint --ignore CHANGELOG.md --ignore node_modules '**/*.md'
-      else
-        echo "meta.taskfile: markdownlint-cli2 not on PATH — skipping (CI is authoritative)" >&2
-      fi
+    desc: Lint Markdown files (markdownlint-cli2 is npm-only; CI runs it through the marketplace action)
+    preconditions:
+      - sh: command -v markdownlint-cli2
+        msg: 'markdownlint-cli2 not on PATH (npm i -g markdownlint-cli2); skipping would hide a red gate, so this task fails'
+    cmd: markdownlint-cli2 '**/*.md' '!CHANGELOG.md' '!node_modules' '!.git' '!external'
 
   lychee:
     desc: Link-check Markdown files (offline-friendly via --cache)
+    # The grim-installed rule directories hold deliberate broken-link fixtures, so they are not scanned.
     # CHANGELOG.md is deliberately NOT scanned (matches verify.yml): git-cliff
     # writes the release-tag URL for the version being prepared, which 404s
     # until that tag is pushed — it would fail `task release:prepare` every time.
-    cmd: ocx run lychee -- lychee --cache --no-progress README.md .claude/rules/
+    cmd: ocx run lychee -- lychee --cache --no-progress --exclude-path .claude/rules/code-docs/ --exclude-path .claude/rules/docs-quality/ --exclude-path .claude/rules/powershell-quality/ --exclude-path .claude/rules/shell-quality/ README.md .claude/rules/
