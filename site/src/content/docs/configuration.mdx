@@ -1,0 +1,76 @@
+---
+title: Configuration
+description: Every environment variable and flag the OCX installers read, with defaults, precedence and which shells support them.
+editUrl: https://github.com/ocx-sh/www-setup/blob/main/site/src/content/docs/configuration.mdx
+---
+{/* doc_type: reference */}
+
+The five installers read the same environment variables, so a setting works in every shell.
+The names are identical in all five installers.
+Set a variable in the environment of the shell that runs the installer, not on the `curl` command that downloads it.
+
+## Precedence {#precedence}
+
+A setting comes from the first of these that is present:
+
+1. The environment variable.
+2. A flag, where the installer parses flags (see [Flags](#flags)). In PowerShell the environment wins over the switches.
+3. The value embedded in a patched copy of the installer (see [Mirrors and proxies](/install/mirrors/#embedded-config)).
+4. The built-in default.
+
+A boolean variable is true for `1`, `true`, `yes`, `TRUE`, `YES`, `True` and `Yes`.
+Any other value, including `0` and the empty string, is false.
+
+## Shared OCX variables {#shared}
+
+These are shared with `ocx` itself or standard across tools.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `OCX_HOME` | `~/.ocx` | The OCX home directory. The installer requires an absolute path with no `..` segment and none of the characters `"` `$` `` ` `` `;` `&` `\|` `<` `>` `(` `)` `\`. Anything else exits with code 2. |
+| `OCX_NO_MODIFY_PATH` | false | When true, `ocx self setup` does not edit shell profiles. The flags `--no-modify-path` and `-NoModifyPath` do the same. It has no effect when `OCX_INSTALL_NO_SETUP` is true, because setup does not run. |
+| `OCX_MANAGED_CONFIG` | unset | A managed-configuration OCI reference. `ocx self setup` reads it. When set, it overrides the value embedded in a patched installer. |
+| `NO_COLOR` | unset | Disables colored output. |
+| `TMPDIR` | system default | Where the installer creates its work directory. The installer runs the downloaded `ocx` from there once as a smoke test. On a host that mounts `/tmp` with `noexec`, set `TMPDIR` to a directory under your home. |
+
+The installer also reads `GITHUB_PATH`, which GitHub Actions sets.
+When it is set, the installer appends the OCX bin directory to that file, so later steps find `ocx`.
+
+## Installer variables {#install-vars}
+
+These are read by the installers only.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `OCX_INSTALL_VERSION` | empty | The `ocx` version to install. Empty means the latest stable release. See [Pin a version](/install/versions/#pin-ocx). |
+| `OCX_INSTALL_REPO` | `ocx-sh/ocx` | The GitHub repository named in the "Available releases" link of a failed-download error. It does not choose where archives come from. The manifest does. |
+| `OCX_INSTALL_DIST_URL` | `https://setup.ocx.sh/dist.json` | The distribution manifest. A `dist/<sha256>.json` snapshot URL pins the manifest and is verified against its own digest. See [Freeze the whole manifest](/install/versions/#pin-manifest). |
+| `OCX_INSTALL_MIRROR_URL` | unset | An archive host. The installer rewrites each archive URL to `<MIRROR_URL>/<tag>/<filename>`. The manifest still supplies the digest. |
+| `OCX_INSTALL_NO_SETUP` | false | Places the `ocx` binary in the bin directory and skips `ocx self setup`. No shims and no profile changes are written. `ocx self update` does not manage such an install. |
+| `OCX_INSTALL_NO_SMOKETEST` | false | Skips running `ocx version` on the extracted binary before the hand-over. |
+| `OCX_INSTALL_FORCE` | false | Reinstalls when the requested version is already present. Without it the installer reports the installed version and exits 0. |
+| `OCX_INSTALL_QUIET` | false | Suppresses informational messages on stderr. Warnings and errors still print. |
+| `OCX_INSTALL_PRINT_PATH` | false | Prints the absolute OCX bin directory as the final line of stdout. See [the output contract](/install/reference/#output). |
+| `OCX_INSTALL_DOWNLOADER` | auto-detect | `curl` or `wget`. The POSIX installer only. The other installers use their own downloader. |
+| `OCX_INSTALL_CA_BUNDLE` | system trust store | A CA bundle trusted for every download: a PEM file path, or the PEM text itself. See [Trust a corporate CA](/install/mirrors/#ca-bundle). |
+
+The bin directory is `$OCX_HOME/symlinks/ocx.sh/ocx/cli/current/content/bin`.
+It is where `OCX_INSTALL_PRINT_PATH` points, where `OCX_INSTALL_NO_SETUP` places the binary, and where the installer looks for an existing install.
+
+## Flags {#flags}
+
+Only the installers that receive arguments parse flags.
+
+| Installer | Flags | Notes |
+|---|---|---|
+| POSIX (`sh`) | `--version <VERSION>`, `--version=<VERSION>`, `--no-modify-path`, `-h`, `--help` | Pass them after `sh -s --`. An unknown option exits with code 2. |
+| PowerShell (`pwsh`) | `-Version`, `-NoModifyPath`, `-Quiet`, `-Force`, `-PrintPath`, `-NoSetup`, `-NoSmoketest` | Run through `irm \| iex`, the parameters do not bind. Compile the script to a script block first, as in [Pin a version](/install/versions/#pin-ocx). PowerShell rejects an unknown parameter with exit code 1. |
+| fish | `--version`, `--no-modify-path`, `-h`, `--help` | Only when fish runs a saved copy of the script. fish has no `-s`, so a piped run takes no flags. |
+| Nushell, Elvish | none | Both are driven by the environment. Nushell and Elvish pass no arguments to a script. |
+
+## What the installer passes to `ocx self setup` {#handoff}
+
+The installer runs `ocx self setup <version>` and adds `--no-modify-path` when `OCX_NO_MODIFY_PATH` or the flag is true.
+It adds `--managed-config <REF>` only when a patched installer carries a managed-config reference and `OCX_MANAGED_CONFIG` is unset.
+When `OCX_INSTALL_CA_BUNDLE` is set, it also exports `OCX_EXTRA_CA_CERTS` and `SSL_CERT_FILE` to that process, unless they are already set.
+A non-zero exit from `ocx self setup` becomes exit code 6.

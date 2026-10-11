@@ -1,0 +1,132 @@
+---
+title: Install OCX
+description: Install the ocx command-line tool with one command in bash, PowerShell, Nushell, fish or Elvish, without root access.
+editUrl: https://github.com/ocx-sh/www-setup/blob/main/site/src/content/docs/index.mdx
+---
+{/* doc_type: how-to */}
+{/* doc_tier: first-steps */}
+
+import ShellSession from '@ocx-sh/theme/components/ShellSession.astro';
+import Tabs from '@ocx-sh/theme/components/Tabs.astro';
+import TabItem from '@ocx-sh/theme/components/TabItem.astro';
+import HubGrid from '@ocx-sh/theme/components/HubGrid.astro';
+
+Install `ocx` on Linux, macOS or Windows with one command in the shell you already use.
+No root access is needed.
+Pick your shell and paste the command.
+
+## Install in your shell {#install}
+
+<Tabs syncKey="shell">
+  <TabItem label="Shell" icon="shell">
+
+```sh
+curl -fsSL https://setup.ocx.sh/sh | sh
+```
+
+Works in bash, zsh, dash, ash and ksh on Linux and macOS.
+It needs `curl` or `wget`, and one of `sha256sum`, `shasum` or `openssl`.
+
+  </TabItem>
+  <TabItem label="PowerShell" icon="powershell">
+
+```powershell
+irm https://setup.ocx.sh/pwsh | iex
+```
+
+Works in Windows PowerShell 5.1 and PowerShell 7 on Windows, and in PowerShell 7 on Linux and macOS.
+On Linux and macOS it also needs `tar`.
+
+  </TabItem>
+  <TabItem label="Nushell" icon="nushell">
+
+From a POSIX shell:
+
+```sh
+nu -c "$(curl -fsSL https://setup.ocx.sh/nu || echo 'exit 3')"
+```
+
+From inside Nushell:
+
+```nu
+nu -c (http get https://setup.ocx.sh/nu)
+```
+
+Needs Nushell 0.105.1 or later. It works on Linux, macOS and Windows.
+A bare `curl https://setup.ocx.sh/nu | nu` installs nothing, because Nushell does not run a script from a pipe.
+
+  </TabItem>
+  <TabItem label="fish" icon="fish">
+
+```fish
+curl -fsSL https://setup.ocx.sh/fish | fish
+```
+
+Needs fish 3.6.0 or later on Linux or macOS. It does not run on Windows.
+
+  </TabItem>
+  <TabItem label="Elvish" icon="elvish">
+
+From a POSIX shell:
+
+```sh
+elvish -c "$(curl -fsSL https://setup.ocx.sh/elvish || echo 'exit 3')"
+```
+
+From inside Elvish:
+
+```sh
+elvish -c (e:curl -fsSL https://setup.ocx.sh/elvish | slurp)
+```
+
+Needs Elvish 0.20.1 or later. It works on Linux, macOS and Windows.
+A bare `curl https://setup.ocx.sh/elvish | elvish` installs nothing and exits 0, because Elvish reads the pipe as a terminal session.
+
+  </TabItem>
+</Tabs>
+
+The installer prints its progress to stderr and then hands over to `ocx self setup`.
+That command installs OCX into your OCX home directory, `~/.ocx` by default, and adds OCX to your shell profile.
+
+## See what the installer does {#session}
+
+This is the output of the POSIX installer on an x86-64 Linux machine, up to the hand-over.
+`ocx self setup` prints its own progress after the last line shown, then the installer ends with a short success message.
+
+<ShellSession title="Install the latest ocx">
+
+```sh
+curl -fsSL https://setup.ocx.sh/sh | sh
+```
+
+```log
+ocx-install: Resolving latest version...
+ocx-install: Installing ocx v0.6.5...
+ocx-install: Downloading ocx-x86_64-unknown-linux-gnu.tar.gz...
+ocx-install: Checksum verified.
+ocx-install: Running ocx self setup...
+```
+
+</ShellSession>
+
+The installer checked the archive against the SHA-256 digest in its manifest before it ran anything from the archive.
+Open a new terminal and run `ocx about` to confirm that `ocx` is on your path.
+
+## Install in CI {#ci}
+
+In CI, use the maintained integration for your provider.
+It installs `ocx` and, in a project with an `ocx.lock`, pulls the pinned toolchain.
+
+<HubGrid hub="integrations" category="ci" />
+
+For any other CI system, see the [generic CI wrapper](/install/examples/#ci-wrapper).
+Pin the installer and the version in CI, as [Pin a version](/install/versions/) describes.
+
+## Where to go next {#next}
+
+- [Pin a version](/install/versions/): install a fixed `ocx`, use the `next` channel, or freeze the whole manifest.
+- [Configuration](/install/configuration/): every environment variable and flag the installers read.
+- [Mirrors and proxies](/install/mirrors/): host one patched installer and trust a corporate CA.
+- [Examples](/install/examples/): a dev box, a Dockerfile, an air-gapped host and a generic CI job.
+- [Exit codes and contract](/install/reference/): what each exit code means and what the installers print.
+- [OCX documentation](https://ocx.sh/docs/): what to do with `ocx` once it is installed.
