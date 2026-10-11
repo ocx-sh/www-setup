@@ -5,8 +5,9 @@
 # curl stand-in for the install casts: a setup.ocx.sh installer URL is read from the repository tree instead.
 # Kind: TOOL (bash). Exit: curl's own status.
 # The casts type the documented command (`curl -fsSL https://setup.ocx.sh/sh | sh`), so the cast shows the installer
-# this tree would publish, not the one last released. Only the installer URLs are redirected (the bare per-shell URL,
-# a pinned /<shell>/<VERSION> and archive/<VERSION>/install.<ext>); dist.json, archives and every other URL go to the real curl.
+# this tree would publish, not the one last released. Only the rolling URLs are redirected (/<shell> and /<shell>/next).
+# A pinned URL (/<shell>/<VERSION>, archive/<VERSION>/...) promises immutable published bytes, so it goes to the real curl
+# like dist.json, archives and every other URL.
 # env: CAST_TREE (the repository root, default /cast/tree).
 set -euo pipefail
 
@@ -14,11 +15,11 @@ tree=${CAST_TREE:-/cast/tree}
 args=()
 for a in "$@"; do
     case $a in
-        https://setup.ocx.sh/sh | https://setup.ocx.sh/sh/[0-9]* | https://setup.ocx.sh/archive/*/install.sh) a=file://$tree/src/install.sh ;;
-        https://setup.ocx.sh/pwsh | https://setup.ocx.sh/pwsh/[0-9]* | https://setup.ocx.sh/archive/*/install.ps1) a=file://$tree/src/install.ps1 ;;
-        https://setup.ocx.sh/nu | https://setup.ocx.sh/nu/[0-9]* | https://setup.ocx.sh/archive/*/install.nu) a=file://$tree/src/install.nu ;;
-        https://setup.ocx.sh/fish | https://setup.ocx.sh/fish/[0-9]* | https://setup.ocx.sh/archive/*/install.fish) a=file://$tree/src/install.fish ;;
-        https://setup.ocx.sh/elvish | https://setup.ocx.sh/elvish/[0-9]* | https://setup.ocx.sh/archive/*/install.elv) a=file://$tree/src/install.elv ;;
+        https://setup.ocx.sh/sh | https://setup.ocx.sh/sh/next) a=file://$tree/src/install.sh ;;
+        https://setup.ocx.sh/pwsh | https://setup.ocx.sh/pwsh/next) a=file://$tree/src/install.ps1 ;;
+        https://setup.ocx.sh/nu | https://setup.ocx.sh/nu/next) a=file://$tree/src/install.nu ;;
+        https://setup.ocx.sh/fish | https://setup.ocx.sh/fish/next) a=file://$tree/src/install.fish ;;
+        https://setup.ocx.sh/elvish | https://setup.ocx.sh/elvish/next) a=file://$tree/src/install.elv ;;
     esac
     args+=("$a")
 done

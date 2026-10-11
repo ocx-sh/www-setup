@@ -22,11 +22,11 @@ then run `task site:test`, whose `session-casts.test.mjs` fails when a page sess
 Every cast is a real run, so recording needs network and docker. The installer it runs is the one in this tree, not the
 last release: the site deploys on the same `v*` tag that publishes the installers, so the casts must show what that tag ships.
 The container mounts the repository read-only at `/cast/tree`, and `casts/shim/curl` (first on `PATH`) serves
-`src/install.<ext>` for the installer URLs (`https://setup.ocx.sh/<shell>`, a pinned `/<shell>/<VERSION>` and
-`archive/<VERSION>/install.<ext>`); PowerShell gets the same through an `irm` function in the `# eval` line.
+`src/install.<ext>` for the rolling installer URLs, `https://setup.ocx.sh/<shell>` and `/<shell>/next`; PowerShell gets the
+same through an `irm` function in the `# eval` line. A pinned URL (`/<shell>/<VERSION>`, `archive/<VERSION>/install.<ext>`)
+promises immutable published bytes, so it goes to the live host, as does the Dockerfile cast's build.
 The typed command line stays the documented `curl ... https://setup.ocx.sh/<shell> | ...`. `dist.json`, the archive and
-the `ocx` binary still come live from `setup.ocx.sh` and GitHub. A pinned URL is served from the tree too, so bump the
-pinned version on the pages and re-record when a release changes it. The Dockerfile cast builds from the live pinned URL.
+the `ocx` binary come live from `setup.ocx.sh` and GitHub.
 The recorder builds `casts/Dockerfile` (Ubuntu with every installer's shell, from `tests/docker/install-shells.sh`, and a
 user `runner`), then runs each script's driver in a fresh container under `asciinema rec` (`scripts/run-cast-script.sh`).
 Only the typed command line is simulated. `examples/dockerfile` is the exception: it drives docker itself, so
