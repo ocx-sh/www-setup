@@ -40,14 +40,14 @@ setup() {
     unset __OCX_TESTING_INSTALL_BINARY
 }
 
-# These tests use `run --separate-stderr` so $stdout and $stderr are split.
+# These tests use `run --separate-stderr` so $output (stdout) and $stderr are split. There is no `$stdout`: bats never sets it, so a `[ -z "$stdout" ]` is always true.
 # Under a plain `run`, bats merges both into $output and leaves $stderr empty,
 # which would let stderr leaks pass silently.
 
 @test "stdout is empty on default success" {
     run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
-    [ -z "$stdout" ]
+    [ -z "$output" ]
     # ...and the installer was not silent: its banner went to stderr.
     [ -n "$stderr" ]
 }
@@ -62,7 +62,7 @@ setup() {
     OCX_INSTALL_PRINT_PATH=1 run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
     [ "$status" -eq 0 ]
     echo "$stderr" | grep -q 'Installing\|Detected\|Downloading\|Verified\|self setup\|installed'
-    if echo "$stdout" | grep -q 'Installing\|Detected\|Downloading\|Verified'; then
+    if echo "$output" | grep -q 'Installing\|Detected\|Downloading\|Verified'; then
         false
     fi
 }
@@ -78,7 +78,7 @@ setup() {
 @test "error messages always go to stderr (exit 2 path)" {
     run --separate-stderr sh "$INSTALL_SH" --bogus
     [ "$status" -eq 2 ]
-    [ -z "$stdout" ]
+    [ -z "$output" ]
     echo "$stderr" | grep -qi 'unknown\|invalid\|usage'
 }
 
@@ -99,6 +99,32 @@ setup() {
     __OCX_TESTING_INSTALL_BINARY="$_localbin" \
         run --separate-stderr sh "$INSTALL_SH"
     [ "$status" -eq 0 ]
-    [ -z "$stdout" ]
+    [ -z "$output" ]
     [ -n "$stderr" ]
+}
+
+@test "ocx self setup output goes to stderr, stdout stays silent" {
+    run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    echo "$stderr" | grep -qF 'ocx-stub: self setup result'
+}
+
+@test "with PRINT_PATH stdout is exactly the bin dir, self setup output on stderr" {
+    OCX_INSTALL_PRINT_PATH=1 run --separate-stderr sh "$INSTALL_SH" --version 0.0.0
+    [ "$status" -eq 0 ]
+    [ "$output" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+    [ "${#lines[@]}" -eq 1 ]
+    echo "$stderr" | grep -qF 'ocx-stub: self setup result'
+}
+
+@test "__OCX_TESTING_INSTALL_BINARY mode keeps ocx self setup output off stdout" {
+    local _localbin="${BATS_TEST_TMPDIR}/local-ocx"
+    server_stub_body >"$_localbin"
+    chmod +x "$_localbin"
+    __OCX_TESTING_INSTALL_BINARY="$_localbin" OCX_INSTALL_PRINT_PATH=1 \
+        run --separate-stderr sh "$INSTALL_SH"
+    [ "$status" -eq 0 ]
+    [ "$output" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+    echo "$stderr" | grep -qF 'ocx-stub: self setup result'
 }

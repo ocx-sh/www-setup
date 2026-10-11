@@ -206,7 +206,7 @@ Three things worth knowing:
 ## Stdout / stderr contract
 
 - All informational, warning, and error output goes to **stderr**.
-- **Stdout is silent on success** unless `OCX_INSTALL_PRINT_PATH` is truthy (or `-PrintPath`), in which case the final stdout line is the absolute OCX bin dir.
+- **Stdout is silent on success** unless `OCX_INSTALL_PRINT_PATH` is truthy (or `-PrintPath`), in which case the final stdout line is the absolute OCX bin dir. The output of `ocx self setup` goes to stderr, so it never reaches stdout.
 
 This contract lets downstream callers do:
 

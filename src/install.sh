@@ -653,7 +653,8 @@ run_self_setup() {
     shift
 
     say "Running ocx self setup..."
-    if ! "$_bin" "$@"; then
+    # Its result table goes to stderr: stdout is reserved for OCX_INSTALL_PRINT_PATH.
+    if ! "$_bin" "$@" >&2; then
         err "'ocx self setup' failed - see the output above for details" 6
     fi
 }

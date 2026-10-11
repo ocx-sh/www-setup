@@ -414,7 +414,9 @@ fn ocx-field {|row key|
 
 fn ocx-run-self-setup {|bin pre post|
     ocx-say "Running ocx self setup..."
-    if (not ?((external $bin) $@pre self setup $@post)) {
+    # Its result table goes to stderr: stdout is reserved for OCX_INSTALL_PRINT_PATH
+    # (and an unredirected one is swallowed by the enclosing capture).
+    if (not ?((external $bin) $@pre self setup $@post >&2)) {
         ocx-err "'ocx self setup' failed - see the output above for details" 6
     }
 }

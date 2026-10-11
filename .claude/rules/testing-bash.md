@@ -146,6 +146,8 @@ The stub packed into the fixture archive (`server_stub_body`):
 
 - answers `version` (`0.0.0`) and `about` (a plausible banner),
 - answers the `ocx self setup [...]` and `--offline self setup [...]` hand-off by
+  printing the marker line `ocx-stub: self setup result` on **stdout** (like the real
+  result table; the suites assert it lands on the installer's stderr) and
   exiting **0** (the thin installer hands off to `ocx self setup`; the stub no
   longer emits shims or completion — `ocx self setup` owns that),
 - **records its full argv** (one line per invocation) to `$OCX_STUB_ARGV` when set, and one argument per line to `$OCX_STUB_ARGV_LINES` (so a test can tell `"a b"` from `"a" "b"`),
@@ -269,6 +271,9 @@ matters only on the macOS leg and in `task test:bats`.
 
 `bats-ci.sh` does not lint: `scripts/bats-lint.sh` and `scripts/bats-runner-list.sh`
 are separate (`task test:bats:lint`).
+
+Under `run --separate-stderr` stdout is `$output` and stderr is `$stderr`; bats
+sets no `$stdout`, so `[ -z "$stdout" ]` is always true (bats-lint does not catch it: use `$output`).
 
 `scripts/bats-lint.sh` flags vacuous forms, one finding per line: L1 a bare `!`
 statement, L2 `|| true` after an assertion, L3 a `[[ ]]`/`(( ))` followed by

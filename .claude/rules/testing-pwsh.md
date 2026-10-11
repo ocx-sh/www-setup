@@ -113,7 +113,7 @@ no-setup knob is **`OCX_INSTALL_NO_SETUP`** / `-NoSetup`; the smoketest knob is
 ## Stub `self setup` hand-off + `__OCX_TESTING_INSTALL_BINARY`
 
 The stub answers `version` (`0.0.0`), `about`, and the `ocx self setup [...]` /
-`--offline self setup [...]` hand-off (exits 0; records argv, and records
+`--offline self setup [...]` hand-off (prints `ocx-stub: self setup result` on stdout, exits 0; records argv, and records
 `SSL_CERT_FILE` + `OCX_EXTRA_CA_CERTS` to `$OCX_STUB_ENV` so the CA scenarios can assert the hand-down). It no longer emits
 shims or completion sentinels — `ocx self setup` owns that. The argv is recorded
 so the hand-off assertion (`self setup 0.0.0 --no-modify-path` on the default

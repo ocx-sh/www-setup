@@ -68,7 +68,22 @@ setup() {
 @test "elvish: stdout silent on success without PRINT_PATH" {
     run --separate-stderr elvish "$INSTALL_ELV" --version 0.0.0
     [ "$status" -eq 0 ]
-    [ -z "$stdout" ]
+    [ -z "$output" ]
+}
+
+@test "elvish: ocx self setup output goes to stderr, stdout stays silent" {
+    run --separate-stderr elvish "$INSTALL_ELV" --version 0.0.0
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    echo "$stderr" | grep -qF 'ocx-stub: self setup result'
+}
+
+@test "elvish: with PRINT_PATH stdout is exactly the bin dir, self setup output on stderr" {
+    OCX_INSTALL_PRINT_PATH=1 run --separate-stderr elvish "$INSTALL_ELV" --version 0.0.0
+    [ "$status" -eq 0 ]
+    [ "$output" = "${OCX_HOME}/${BIN_SUBPATH}" ]
+    [ "${#lines[@]}" -eq 1 ]
+    echo "$stderr" | grep -qF 'ocx-stub: self setup result'
 }
 
 @test "elvish: no row for the version → exit 3" {
