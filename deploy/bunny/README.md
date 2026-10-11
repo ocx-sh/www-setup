@@ -41,6 +41,7 @@ task zone:apply      # push the differing settings + purge (needs BUNNY_API_KEY)
 
 | Rule | Effect |
 |---|---|
+| `/` (exact) | → 302 `https://ocx.sh/install/` |
 | `/dist`, `/releases` | → `dist.json` |
 | `/<shell>` | → `latest/%{Path.0}` |
 | `/<shell>/next`, `/<shell>/canary` | → `next/%{Path.0}` |
@@ -49,8 +50,8 @@ task zone:apply      # push the differing settings + purge (needs BUNNY_API_KEY)
 | `/archive/*`, `/dist/*` | cache 1 year (edge + browser) |
 | everything else | `Content-Type: text/plain; charset=utf-8` |
 
-Nine rules of a 20 budget. `rules:verify` currently passes 26/26 against
-`setup.ocx.sh`.
+Ten rules of a 20 budget. `rules:verify` probes the root redirect (not
+followed, expects `Location: https://ocx.sh/install/`) plus every route above.
 
 ### Bunny behaviours that bite
 

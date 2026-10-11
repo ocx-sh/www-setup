@@ -32,6 +32,7 @@ setup.ocx.sh/<shell>/next       # → next/<shell>                 (alias: /<she
 setup.ocx.sh/<shell>/<VERSION>  # → archive/<VERSION>/<shell>    (optional trailing /install.<ext>)
 setup.ocx.sh/dist               # → dist.json
 setup.ocx.sh/releases           # legacy alias → dist.json
+setup.ocx.sh/                   # root only → 302 https://ocx.sh/install/
 ```
 
 `/dist` is matched EXACTLY (not as a prefix), so `/dist/<sha256>.json` is not shadowed by it — the snapshot is served straight from storage.
