@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2](https://github.com/ocx-sh/www-setup/releases/tag/v0.2.2) — 2026-10-11
+
+### Documentation
+
+- Sync README, CONTRIBUTING, CLAUDE.md and the rules with the quality gates by @michael-herwig ([a71822b](https://github.com/ocx-sh/www-setup/commit/a71822bd3cfebdb861fecc0c17d4e5cbdffb5f31))
+
+### Fixed
+
+- **dist:** Widen gen-dist curl retries to survive a release-CDN 500 by @michael-herwig ([bee4f23](https://github.com/ocx-sh/www-setup/commit/bee4f2315008d038eb00285e2998412d0e80cb6f))
+- **dist:** Retry manifest generation as a whole on a release-CDN blip by @michael-herwig ([a251c36](https://github.com/ocx-sh/www-setup/commit/a251c3631047ac5bce922aeab6c87d6c4c468a1e))
+- **install:** Keep the PowerShell session alive when install.ps1 fails under irm | iex by @michael-herwig ([cdaeb03](https://github.com/ocx-sh/www-setup/commit/cdaeb03b9724564a920aa6346d7cc31eeca6276a))
+- **install:** Harden install.sh (fail-closed integrity, signals, probed downloader flags) by @michael-herwig ([3d3aa3c](https://github.com/ocx-sh/www-setup/commit/3d3aa3c534e40b19c577ef81ec3ab091c494ef23))
+- **install:** Harden install.ps1 against irm | iex leaks and unverified downloads by @michael-herwig ([f9fcdc7](https://github.com/ocx-sh/www-setup/commit/f9fcdc73e88ea25edb00ce6166f738d2015380c2))
+- **install:** Harden install.nu for nu 0.105.1..0.116.1 by @michael-herwig ([9024d69](https://github.com/ocx-sh/www-setup/commit/9024d69419e65a5da6eeec2b08d5804980c33935))
+- **install:** Harden install.fish (transport, integrity, signals, cleanup) by @michael-herwig ([db75500](https://github.com/ocx-sh/www-setup/commit/db75500ab8833e90f6628c78a8d51ab2598d5720))
+- **install:** Harden install.elv (fail-closed integrity, https-only, cleanup, libc) by @michael-herwig ([00a78f5](https://github.com/ocx-sh/www-setup/commit/00a78f5b57bb07da7f76f2615c9c1650ce844f17))
+- **scripts:** Keep publish credentials off argv and stop on a signal by @michael-herwig ([ab4bd92](https://github.com/ocx-sh/www-setup/commit/ab4bd92cc75bea0a7a4bb1c5f40dbf379225d2d9))
+- **docker:** Fail the matrix cell when a shell is missing or a download fails by @michael-herwig ([97952a8](https://github.com/ocx-sh/www-setup/commit/97952a8a9f025154a40c53bd3f98623e0149999b))
 ## [0.2.1](https://github.com/ocx-sh/www-setup/releases/tag/v0.2.1) — 2026-09-15
 
 ### Added
