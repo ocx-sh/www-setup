@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0](https://github.com/ocx-sh/www-setup/releases/tag/v0.3.0) — 2026-10-12
+
+### Added
+
+- **bunny:** Redirect the setup.ocx.sh root to ocx.sh/install/ by @michael-herwig ([39f44d0](https://github.com/ocx-sh/www-setup/commit/39f44d0c7cf39607fe90d57dc1e01b8139156b1e))
+
+### Documentation
+
+- **site:** Add install, versions, configuration, mirrors, reference and examples pages by @michael-herwig ([03c809d](https://github.com/ocx-sh/www-setup/commit/03c809dc9f3d7fe35ba142eb61741c92d363e668))
+- Point README at the install site and sync CLAUDE.md, CONTRIBUTING and rules by @michael-herwig ([1785042](https://github.com/ocx-sh/www-setup/commit/17850421aea9c33a702c8cb705d8b3a7b6fc4318))
+- **site:** Note the setup.ocx.sh root redirect in the URL layout by @michael-herwig ([4c4f606](https://github.com/ocx-sh/www-setup/commit/4c4f606bca8815e9ccfed2ca195383c81333f588))
+- **site:** Move the installer output to the examples page by @michael-herwig ([1fb77fb](https://github.com/ocx-sh/www-setup/commit/1fb77fbd6a0342bcc42247e62b2e54dbe2ec957b))
+- **site:** Show real captured output in install sessions by @michael-herwig ([d5003d0](https://github.com/ocx-sh/www-setup/commit/d5003d0f3a7a73b99bd15490ddfa25268e269da1))
+- **site:** Put the installer output and dev-box casts on their own page by @michael-herwig ([2491472](https://github.com/ocx-sh/www-setup/commit/24914720575a52c7f6b96a8396ecfce71e528c3b))
+- **site:** Keep the CI example prose within the prose gate by @michael-herwig ([858bc81](https://github.com/ocx-sh/www-setup/commit/858bc8137a9e6ad140a1b5a737ed6578f08a19b7))
+- **site:** Correct precedence, OCX_HOME characters, fish signals and next channel by @michael-herwig ([bd34a95](https://github.com/ocx-sh/www-setup/commit/bd34a954b7bc839ea1d99ff81cab71b2a9badac3))
+- **site:** List the Elvish flags and word reruns and the CI example truthfully by @michael-herwig ([b2a37f9](https://github.com/ocx-sh/www-setup/commit/b2a37f9190cdc64549c715cf4347bf72ab39db03))
+
+### Fixed
+
+- **install:** Keep ocx self setup output off stdout by @michael-herwig ([a5eb40d](https://github.com/ocx-sh/www-setup/commit/a5eb40d086f1c9523d265654655de7f0974dcd8d))
+- **install:** Print the success banner in fish, nu and elvish by @michael-herwig ([40c26c9](https://github.com/ocx-sh/www-setup/commit/40c26c9c61d9263b1696c00a1f6373989ef967e9))
+- **site:** Guard the recorder's cleanup and the session test's pattern by @michael-herwig ([2dcdb93](https://github.com/ocx-sh/www-setup/commit/2dcdb93d0c35a12584d02978c27882355c5309a3))
+- **install:** Elvish prints the OCX_INSTALL_REPO releases link on a failed download by @michael-herwig ([27f1785](https://github.com/ocx-sh/www-setup/commit/27f1785d1a2bacca4d75bd9824d5c1b6d1265fc8))
 ## [0.2.2](https://github.com/ocx-sh/www-setup/releases/tag/v0.2.2) — 2026-10-11
 
 ### Documentation
