@@ -71,14 +71,15 @@ It is where `OCX_INSTALL_PRINT_PATH` points, where `OCX_INSTALL_NO_SETUP` places
 
 ## Flags {#flags}
 
-Only the installers that receive arguments parse flags.
+Only the installers that can receive arguments parse flags.
 
 | Installer | Flags | Notes |
 |---|---|---|
 | POSIX (`sh`) | `--version <VERSION>`, `--version=<VERSION>`, `--no-modify-path`, `-h`, `--help` | Pass them after `sh -s --`. An unknown option exits with code 2. |
 | PowerShell (`pwsh`) | `-Version`, `-NoModifyPath`, `-Quiet`, `-Force`, `-PrintPath`, `-NoSetup`, `-NoSmoketest` | Run through `irm \| iex`, the parameters do not bind. Compile the script to a script block first, as in [Pin a version](/install/versions/#pin-ocx). PowerShell rejects an unknown parameter with exit code 1. |
 | fish | `--version`, `--no-modify-path`, `-h`, `--help` | Only when fish runs a saved copy of the script. fish has no `-s`, so a piped run takes no flags. |
-| Nushell, Elvish | none | Both are driven by the environment. Nushell and Elvish pass no arguments to a script. |
+| Elvish | `--version <VERSION>`, `--version=<VERSION>`, `--no-modify-path` | Only when Elvish runs a saved copy of the script, as with fish. It ignores any other argument. |
+| Nushell | none | Nushell is driven by the environment. It passes no arguments to a script. |
 
 ## What the installer passes to `ocx self setup` {#handoff}
 
