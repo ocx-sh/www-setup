@@ -65,7 +65,9 @@ Session PATH  /home/runner/.config/environment.d/ocx.conf (written)
 
 </ShellSession>
 
-Run the same command again later, and the installer reports the version it finds and exits 0 unless you set `OCX_INSTALL_FORCE`.
+Run the same command again, and the installer exits 0 with the version it finds when it would install that same version.
+`OCX_INSTALL_FORCE` reinstalls anyway.
+An unpinned rerun after a release upgrades to that release.
 
 ## Watch the install in each shell {#dev-box}
 
