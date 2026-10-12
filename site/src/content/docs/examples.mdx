@@ -26,7 +26,7 @@ RUN apt-get update \
  && apt-get install --yes --no-install-recommends ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 ENV OCX_HOME=/opt/ocx
-RUN curl -fsSL https://setup.ocx.sh/sh/0.2.2 | OCX_INSTALL_VERSION=0.6.5 OCX_NO_MODIFY_PATH=1 sh
+RUN curl -fsSL https://setup.ocx.sh/sh/0.3.0 | OCX_INSTALL_VERSION=0.6.5 OCX_NO_MODIFY_PATH=1 sh
 ENV PATH="${OCX_HOME}/symlinks/ocx.sh/ocx/cli/current/content/bin:${PATH}"
 ```
 
@@ -52,7 +52,7 @@ docker run --rm ocx-box ocx version
 A host with no route to the OCX registry cannot run `ocx self setup`, which pulls the package store from the registry.
 Set `OCX_INSTALL_NO_SETUP` to place the `ocx` binary in the bin directory and skip that step.
 Point the installer at your internal [mirror](/install/mirrors/) for the manifest and the archive.
-Copy the installer script to the host first, for example from `https://setup.ocx.sh/archive/0.2.2/install.sh`.
+Copy the installer script to the host first, for example from `https://setup.ocx.sh/archive/0.3.0/install.sh`.
 
 ```sh
 export OCX_HOME=/opt/ocx
@@ -83,8 +83,9 @@ Run the installer again with a new version to update it.
 ## Install in a generic CI job {#ci-wrapper}
 
 For a CI system with no maintained integration, call the installer in the job and put the bin directory on the path.
-With `OCX_INSTALL_PRINT_PATH` set, the bin directory is the last line of stdout, so `tail -n1` captures it.
-The recording also shows the progress lines of `ocx self setup`. The session below leaves them out.
+With `OCX_INSTALL_PRINT_PATH` set, stdout carries only the bin directory, so `tail -n1` captures it.
+Everything `ocx self setup` prints goes to stderr.
+The recording shows it. The session below leaves it out.
 
 A pipeline in a POSIX shell reports the status of its last command, so check that the binary exists.
 Without the check, a failed download leaves `BIN_DIR` empty and the job continues.
@@ -92,7 +93,7 @@ Without the check, a failed download leaves `BIN_DIR` empty and the job continue
 <ShellSession title="Capture the bin directory in CI">
 
 ```sh
-BIN_DIR=$(curl -fsSL https://setup.ocx.sh/sh/0.2.2 | OCX_INSTALL_VERSION=0.6.5 OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 sh | tail -n1)
+BIN_DIR=$(curl -fsSL https://setup.ocx.sh/sh/0.3.0 | OCX_INSTALL_VERSION=0.6.5 OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 sh | tail -n1)
 test -x "$BIN_DIR/ocx" || {
     echo "ocx install failed" >&2
     exit 1

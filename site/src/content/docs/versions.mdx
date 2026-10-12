@@ -25,7 +25,7 @@ Here `<shell>` is one of `sh`, `pwsh`, `nu`, `fish` or `elvish`.
 | `https://setup.ocx.sh/<shell>/<VERSION>` | Exactly that installer release | Never |
 
 `/<shell>/canary` is an alias for `/<shell>/next`.
-`<VERSION>` is the version of the installer script without a leading `v`, for example `0.2.2`.
+`<VERSION>` is the version of the installer script without a leading `v`, for example `0.3.0`.
 It is not the version of `ocx` the script installs.
 The same bytes also sit at `https://setup.ocx.sh/archive/<VERSION>/install.<ext>`, where `<ext>` is `sh`, `ps1`, `nu`, `fish` or `elv`.
 
@@ -114,7 +114,7 @@ For CI, pin both versions.
 A later installer release then cannot change what your job runs, and a later `ocx` release cannot change what it installs.
 
 ```sh
-curl -fsSL https://setup.ocx.sh/sh/0.2.2 | OCX_INSTALL_VERSION=0.6.5 sh
+curl -fsSL https://setup.ocx.sh/sh/0.3.0 | OCX_INSTALL_VERSION=0.6.5 sh
 ```
 
 ## Freeze the whole manifest {#pin-manifest}
