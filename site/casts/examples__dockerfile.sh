@@ -19,7 +19,7 @@ RUN apt-get update \
  && apt-get install --yes --no-install-recommends ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 ENV OCX_HOME=/opt/ocx
-RUN curl -fsSL https://setup.ocx.sh/sh/0.2.2 | OCX_INSTALL_VERSION=0.6.5 OCX_NO_MODIFY_PATH=1 sh
+RUN curl -fsSL https://setup.ocx.sh/sh/0.3.0 | OCX_INSTALL_VERSION=0.6.5 OCX_NO_MODIFY_PATH=1 sh
 ENV PATH="${OCX_HOME}/symlinks/ocx.sh/ocx/cli/current/content/bin:${PATH}"
 DOCKERFILE
 docker pull --quiet debian:12-slim

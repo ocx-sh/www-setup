@@ -11,7 +11,7 @@
 set -euo pipefail
 
 # region cast
-BIN_DIR=$(curl -fsSL https://setup.ocx.sh/sh/0.2.2 | OCX_INSTALL_VERSION=0.6.5 OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 sh | tail -n1)
+BIN_DIR=$(curl -fsSL https://setup.ocx.sh/sh/0.3.0 | OCX_INSTALL_VERSION=0.6.5 OCX_INSTALL_PRINT_PATH=1 OCX_INSTALL_QUIET=1 sh | tail -n1)
 test -x "$BIN_DIR/ocx" || {
     echo "ocx install failed" >&2
     exit 1

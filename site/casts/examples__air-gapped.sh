@@ -13,7 +13,7 @@ set -euo pipefail
 # region setup
 export OCX_HOME=/opt/ocx
 export OCX_INSTALL_VERSION=0.6.5
-curl -fsSL https://setup.ocx.sh/archive/0.2.2/install.sh -o install.sh
+curl -fsSL https://setup.ocx.sh/archive/0.3.0/install.sh -o install.sh
 # endregion setup
 
 # region cast
