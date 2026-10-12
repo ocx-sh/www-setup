@@ -1,7 +1,7 @@
 name: site
 
 # The /install/ section of ocx.sh (site/). Built and checked on every PR that touches it; deployed
-# to ocx.sh on a v* tag. src/install.* is a trigger because the drift guard (site/scripts/contract.test.mjs)
+# to ocx.sh on a stable v* tag. src/install.* is a trigger because the drift guard (site/scripts/contract.test.mjs)
 # compares the installers' knobs and exit codes with the pages.
 on:
   pull_request:
@@ -16,8 +16,8 @@ on:
       - 'taskfile.yml'
       - 'taskfiles/site.taskfile.yml'
       - '.github/workflows/site.yml'
-  # The docs go live with the installers they describe: a v* tag (release.yml publishes the same tag),
-  # never a push to main. The `ocx.sh` environment needs a deployment rule that admits v* tags (owner setting).
+  # The docs go live with the installers they describe: a stable v* tag (release.yml publishes the same tag),
+  # never a push to main. A prerelease tag (v0.3.0-rc.1) builds and checks only: it is the next channel, not production. The `ocx.sh` environment needs a deployment rule that admits v* tags (owner setting).
   push:
     tags: ['v*']
   workflow_dispatch:
@@ -84,8 +84,8 @@ jobs:
     name: Deploy
     needs: [build, lighthouse]
     # Off until the ocx.sh environment and the BUNNY_DEPLOY variable exist on this repo.
-    # A tag only: a dispatch from a branch builds and checks but never deploys.
-    if: vars.BUNNY_DEPLOY == 'true' && github.event_name != 'pull_request' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    # A stable tag only: a dispatch from a branch, or a prerelease tag, builds and checks but never deploys.
+    if: vars.BUNNY_DEPLOY == 'true' && github.event_name != 'pull_request' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && !contains(github.ref_name, '-')
     runs-on: ubuntu-latest
     # The ocx.sh environment holds a BUNNY_STORAGE_KEY scoped to the ocx.sh storage zone. The
     # setup.ocx.sh environment holds a secret of the same name for another zone; the two never meet.
