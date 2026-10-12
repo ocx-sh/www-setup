@@ -206,6 +206,13 @@ setup() {
     grep -qxF -- "self setup 0.0.0 --no-modify-path" "$OCX_STUB_ARGV"
 }
 
+@test "elvish: a failed archive download names the OCX_INSTALL_REPO releases page → exit 3" {
+    OCX_INSTALL_REPO=my-org/ocx OCX_INSTALL_MIRROR_URL="${FIXTURE_URL}/flaky/99/releases/download" \
+        run --separate-stderr elvish "$INSTALL_ELV"
+    [ "$status" -eq 3 ]
+    [[ "$stderr" == *"https://github.com/my-org/ocx/releases"* ]] || false
+}
+
 # --- Embedded configuration block (corporate mirrors) -----------------------
 
 @test "elvish: a sed-ed dist URL is used when the env is unset" {

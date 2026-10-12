@@ -621,7 +621,7 @@ fn ocx-main {|@args|
     ocx-track $tmpdir
     var archive = $tmpdir"/"$filename
     if (not (ocx-download-file $url $archive)) {
-        ocx-err "failed to download "$url" - ensure v"$version" is a valid release for "$target 3
+        ocx-err "failed to download "$url"\n  Ensure v"$version" is a valid release with a binary for "$target".\n  Available releases: https://github.com/"$repo"/releases" 3
     }
 
     ocx-verify-checksum $archive $sha
