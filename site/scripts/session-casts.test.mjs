@@ -23,7 +23,16 @@ export function sessions(name) {
   });
 }
 
-for (const name of ['examples', 'examples/dev-box']) {
+const PAGES = ['examples', 'examples/dev-box'];
+const SESSIONS = 4; // examples: dockerfile, air-gapped, CI; dev-box: the installer output
+
+// A changed opening tag would make the loop below find nothing and pass; the count turns that into a failure.
+test('the pages hold the sessions this test checks', () => {
+  assert.equal(PAGES.flatMap((name) => sessions(name)).length, SESSIONS);
+  for (const name of PAGES) assert.equal(sessions(name).length, (page(name).match(/<ShellSession\b/g) ?? []).length, `${name}: a ShellSession the pattern misses`);
+});
+
+for (const name of PAGES) {
   for (const s of sessions(name)) {
     test(`${name}: "${s.title}" matches its recorded run`, () => {
       assert.ok(s.cast, 'no cast follows this session');

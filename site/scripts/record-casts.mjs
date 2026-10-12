@@ -142,10 +142,14 @@ if (process.argv[1] && import.meta.url === new URL(process.argv[1], 'file:').hre
   const dir = join(SITE, 'casts');
   const files = readdirSync(dir).filter((f) => f.endsWith('.sh')).sort()
     .filter((f) => !only || f.startsWith(only.replace(/\//g, '__')));
+  if (!files.length) {
+    console.error(`record-casts: no cast script in casts/ matches --only ${only}`);
+    process.exit(1);
+  }
   // The image holds every installer's shell; the build context is the repository, which owns tests/docker/install-shells.sh.
   const built = await run('docker', ['build', '--quiet', '--file', join(dir, 'Dockerfile'), '--tag', IMAGE, join(SITE, '..')], process.env);
   if (built !== 0) process.exit(built);
-  if (!only && outDir.endsWith('casts')) rmSync(outDir, { recursive: true, force: true }); // a cast whose script is gone must not ship
+  if (!only && outDir === join(SITE, 'public/casts')) rmSync(outDir, { recursive: true, force: true }); // a cast whose script is gone must not ship
   const failed = [];
   let next = 0;
   await Promise.all(Array.from({ length: Math.max(1, jobs) }, async () => {
