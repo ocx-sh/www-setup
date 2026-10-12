@@ -213,6 +213,25 @@ Describe 'install.ps1 exit codes' {
         }
     }
 
+    It 'exit 3: a failed archive download names the OCX_INSTALL_REPO releases page' {
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) "ocx-ec-rl-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+        $fx = New-OcxFixture -Root $root -ArgvLog 'on'
+        $srv = Start-FixtureServer -SrvRoot $fx.SrvRoot
+        try {
+            $env:OCX_INSTALL_DIST_URL = $srv.DistUrl
+            $env:OCX_INSTALL_MIRROR_URL = "https://127.0.0.1:$($srv.Port)/flaky/99/releases/download"
+            $env:OCX_INSTALL_REPO = 'my-org/ocx'
+            $out = & pwsh -NoProfile -File $RunInstaller $InstallPs1 -Version '0.0.0' 2>&1 | Out-String
+            $LASTEXITCODE | Should -Be 3
+            $out | Should -Match ([regex]::Escape('https://github.com/my-org/ocx/releases'))
+        }
+        finally {
+            Remove-Item Env:OCX_INSTALL_REPO -ErrorAction SilentlyContinue
+            Stop-FixtureServer -Server $srv
+            Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+        }
+    }
+
     # --- Refusals: input the installer must reject before it trusts it ---
 
     It 'exit 3: a non-https manifest URL is refused before any request' {

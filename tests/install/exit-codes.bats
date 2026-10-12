@@ -118,6 +118,13 @@ STUB
     run ! grep -q -- "--remote package install" "$OCX_STUB_ARGV"
 }
 
+@test "exit 3: a failed archive download names the OCX_INSTALL_REPO releases page" {
+    OCX_INSTALL_REPO=my-org/ocx OCX_INSTALL_MIRROR_URL="${FIXTURE_URL}/flaky/99/releases/download" \
+        run --separate-stderr sh "$INSTALL_SH"
+    [ "$status" -eq 3 ]
+    [[ "$stderr" == *"https://github.com/my-org/ocx/releases"* ]] || false
+}
+
 @test "exit 3: latest-version resolution fails when the manifest URL is dead" {
     OCX_INSTALL_DIST_URL="https://127.0.0.1:1/dist.json" \
         run sh "$INSTALL_SH"
