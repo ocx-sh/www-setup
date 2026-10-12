@@ -84,7 +84,7 @@ Run the installer again with a new version to update it.
 
 For a CI system with no maintained integration, call the installer in the job and put the bin directory on the path.
 Stdout carries only the bin directory when `OCX_INSTALL_PRINT_PATH` is set, so `tail -n1` captures it.
-The progress of `ocx self setup` goes to stderr.
+Everything `ocx self setup` prints goes to stderr.
 The recording shows it. The session below leaves it out.
 
 A pipeline in a POSIX shell reports the status of its last command, so check that the binary exists.

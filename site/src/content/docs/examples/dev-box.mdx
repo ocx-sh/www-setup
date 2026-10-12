@@ -15,8 +15,8 @@ import Cast from '../../../components/Cast.astro';
 
 On a developer machine, run the one-liner for your shell from [Install OCX](/install/#install).
 This is the whole output of the POSIX installer, recorded on a fresh x86-64 Linux user.
-The installer prints the first six lines.
-`ocx self setup` prints the rest: its progress, a table of what it changed and the closing message.
+The installer prints the first six lines and the closing message.
+`ocx self setup` prints what lies between: its progress and a table of what it changed.
 The version is the release that was current when the recording was made.
 
 <ShellSession title="Install the latest ocx">
@@ -102,4 +102,4 @@ On Windows the installer downloads a `.zip` for `x86_64-pc-windows-msvc`.
 </Tabs>
 
 The Nushell and Elvish recordings use the form for a POSIX shell, as [Install OCX](/install/#install) shows.
-Only the POSIX and PowerShell installers end with a closing message.
+Each installer ends with a closing message.
