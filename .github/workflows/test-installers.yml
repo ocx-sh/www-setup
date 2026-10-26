@@ -45,7 +45,7 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
-      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+      - uses: ocx-sh/setup-ocx@25fa771f8572572dc64528db89560de68a163a0e # v1.4.0
       # The sh suite also runs the installer under dash, busybox ash, ksh and zsh; the runner lacks ksh and zsh.
       - name: Install the POSIX shells the sh suite runs under
         run: |
@@ -84,7 +84,7 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
-      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+      - uses: ocx-sh/setup-ocx@25fa771f8572572dc64528db89560de68a163a0e # v1.4.0
         with:
           groups: default,nurange
       - name: Run the nu suite on the ${{ matrix.end }} nu
@@ -143,7 +143,7 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
-      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+      - uses: ocx-sh/setup-ocx@25fa771f8572572dc64528db89560de68a163a0e # v1.4.0
         with:
           # Pre-warm default + unix only. pwsh lives in [group.linux]
           # (ocx.sh/powershell/powershell ships linux-glibc leaves only); a
@@ -190,7 +190,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+      - uses: ocx-sh/setup-ocx@25fa771f8572572dc64528db89560de68a163a0e # v1.4.0
         with:
           # Pre-warm only the default [tools] group. fish ([group.unix]) and
           # pwsh ([group.linux]) ship no windows leaf; pulling/resolving either
