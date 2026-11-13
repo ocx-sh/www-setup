@@ -104,7 +104,7 @@ jobs:
           path: dist
       - name: Deploy
         id: deploy
-        uses: ocx-sh/website/.github/actions/deploy@e86b83014538975c186912e5038567c69b2f2f2c # v0.3.0
+        uses: ocx-sh/website/.github/actions/deploy@ac3359ef23cf0587f43d511a18fe8c71add702ad # v0.5.0
         with:
           dist: dist
           storage-key: ${{ secrets.BUNNY_STORAGE_KEY }}
