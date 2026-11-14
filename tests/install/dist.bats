@@ -110,6 +110,19 @@ PY
     [ "$status" -eq 0 ]
 }
 
+@test "a gnullvm-named windows asset yields a gnullvm row" {
+    printf '%s  ocx-x86_64-pc-windows-gnullvm.zip\n' "$(printf 'a%.0s' $(seq 64))" >"$CKS/v0.9.0/sha256.sum"
+    run_gen
+    run python3 - "$output" <<'PY'
+import json, sys
+d = json.loads(sys.argv[1])
+rows = [r for r in d["releases"] if r["version"] == "0.9.0"]
+assert [r["target"] for r in rows] == ["x86_64-pc-windows-gnullvm"], rows
+assert rows[0]["filename"] == "ocx-x86_64-pc-windows-gnullvm.zip", rows
+PY
+    [ "$status" -eq 0 ]
+}
+
 @test "inline sha256 + url per row" {
     run_gen
     [ "$status" -eq 0 ]

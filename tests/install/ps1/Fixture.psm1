@@ -15,7 +15,7 @@
 # (mirror rewrites url -> <MirrorUrl>/<tag>/<filename>).
 #
 # Cross-platform: install.ps1 is now a cross-platform installer. Detect-Architecture
-# returns the real host target (*-pc-windows-msvc on Windows, *-unknown-linux-{gnu,musl}
+# returns the real host target (*-pc-windows-gnullvm on Windows, *-unknown-linux-{gnu,musl}
 # on Linux, *-apple-darwin on macOS) and the binary is ocx.exe on Windows / ocx on
 # Unix. The fixture mirrors that: on Windows it builds a FLAT .zip with ocx.exe at
 # the root; on Unix it builds a FLAT .tar.gz with an executable `ocx` at the root
@@ -38,8 +38,8 @@ function Test-FixtureIsWindows {
 function Resolve-FixtureTarget {
     if (Test-FixtureIsWindows) {
         switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
-            'X64'   { return 'x86_64-pc-windows-msvc' }
-            'Arm64' { return 'aarch64-pc-windows-msvc' }
+            'X64'   { return 'x86_64-pc-windows-gnullvm' }
+            'Arm64' { return 'aarch64-pc-windows-gnullvm' }
             default { throw "unsupported test host architecture" }
         }
     }
