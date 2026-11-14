@@ -154,7 +154,7 @@ def __ocx-detect-target []: nothing -> string {
     } else if $os == 'macos' {
         $"($arch)-apple-darwin"
     } else if $os == 'windows' {
-        $"($arch)-pc-windows-msvc"
+        $"($arch)-pc-windows-gnullvm"
     } else {
         __ocx-err $"unsupported operating system: ($os)" 7
     }
@@ -352,7 +352,14 @@ def __ocx-dist-latest [dist: record]: nothing -> string {
 # Find the (version,target) row, or null.
 def __ocx-dist-row [dist: record, version: string, target: string]: nothing -> any {
     let rows = ($dist.releases | where version == $version and target == $target)
-    if ($rows | length) == 0 { null } else { $rows | first }
+    if ($rows | length) > 0 {
+        $rows | first
+    } else if ($target | str ends-with '-pc-windows-gnullvm') {
+        # Releases before the gnullvm rename publish the msvc spelling.
+        __ocx-dist-row $dist $version ($target | str replace --regex 'gnullvm$' 'msvc')
+    } else {
+        null
+    }
 }
 
 # --- Hand off to `ocx self setup` -------------------------------------------
@@ -536,6 +543,7 @@ def __ocx-main [work: string] {
     if ($row == null) {
         __ocx-err $"no published artifact for ocx v($version) on ($target) in the manifest at ($dist_url)" 3
     }
+    let target = $row.target
     let sha = ($row.sha256? | default '' | into string)
     let filename = ($row.filename? | default '' | into string)
     let tag = ($row.tag? | default '' | into string)

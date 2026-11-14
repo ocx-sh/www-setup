@@ -100,3 +100,36 @@ Describe 'install.ps1 Linux libc detection' {
         Get-UnixTarget | Should -Match $expected
     }
 }
+
+Describe 'install.ps1 Windows target row resolution' {
+    BeforeAll {
+        $installPs1 = Join-Path $PSScriptRoot '..\..\..\src\install.ps1'
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($installPs1, [ref]$null, [ref]$null)
+        $defs = $ast.FindAll({ param($n) ($n -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and ($n.Name -in 'Resolve-DistRow', 'Resolve-DistRowAny') }, $true)
+        foreach ($def in $defs) { . ([scriptblock]::Create($def.Extent.Text)) }
+
+        function New-Dist {
+            param([string[]]$Targets)
+            $rows = foreach ($t in $Targets) { [pscustomobject]@{ version = "1.0.0"; target = $t; filename = "ocx-$t.zip" } }
+            return ([pscustomobject]@{ releases = @($rows) })
+        }
+        $script:G = 'x86_64-pc-windows-gnullvm'
+        $script:M = 'x86_64-pc-windows-msvc'
+    }
+
+    It 'a gnullvm-only release resolves the gnullvm row' {
+        (Resolve-DistRowAny -Dist (New-Dist $script:G) -Ver '1.0.0' -Target $script:G).target | Should -Be $script:G
+    }
+    It 'an msvc-only release falls back to the msvc row' {
+        (Resolve-DistRowAny -Dist (New-Dist $script:M) -Ver '1.0.0' -Target $script:G).target | Should -Be $script:M
+    }
+    It 'a release with both rows picks gnullvm' {
+        (Resolve-DistRowAny -Dist (New-Dist $script:M, $script:G) -Ver '1.0.0' -Target $script:G).target | Should -Be $script:G
+    }
+    It 'no matching row resolves to nothing' {
+        Resolve-DistRowAny -Dist (New-Dist 'x86_64-apple-darwin') -Ver '1.0.0' -Target $script:G | Should -BeNullOrEmpty
+    }
+    It 'a non-Windows target never falls back' {
+        Resolve-DistRowAny -Dist (New-Dist $script:M) -Ver '1.0.0' -Target 'x86_64-unknown-linux-gnu' | Should -BeNullOrEmpty
+    }
+}
