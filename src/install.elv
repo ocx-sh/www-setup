@@ -193,7 +193,7 @@ fn ocx-detect-target {
     } elif (eq $os darwin) {
         put $arch"-apple-darwin"
     } elif (eq $os windows) {
-        put $arch"-pc-windows-msvc"
+        put $arch"-pc-windows-gnullvm"
     } else {
         ocx-err "unsupported operating system: "$os 7
     }
@@ -403,6 +403,11 @@ fn ocx-dist-row {|dist version target|
             return
         }
     }
+    # Releases before the gnullvm rename publish the msvc spelling.
+    if (str:has-suffix $target -pc-windows-gnullvm) {
+        ocx-dist-row $dist $version (str:replace -pc-windows-gnullvm -pc-windows-msvc $target)
+        return
+    }
     put $false
 }
 
@@ -602,6 +607,7 @@ fn ocx-main {|@args|
     if (eq $row $false) {
         ocx-err "no published artifact for ocx v"$version" on "$target" in the manifest at "$dist_url 3
     }
+    set target = $row[target]
     var sha = (ocx-field $row sha256)
     var filename = (ocx-field $row filename)
     var tag = (ocx-field $row tag)

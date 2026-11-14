@@ -7,7 +7,7 @@
 # https://ocx.sh
 #
 # Cross-platform PowerShell installer. On Windows it targets Windows PowerShell
-# 5.1+ and PowerShell 7+ (release target *-pc-windows-msvc, binary ocx.exe). On
+# 5.1+ and PowerShell 7+ (release target *-pc-windows-gnullvm, older releases *-pc-windows-msvc, binary ocx.exe). On
 # Linux/macOS it requires PowerShell 7+ (5.1 is Windows-only) and mirrors the
 # POSIX installer's targets (*-unknown-linux-{gnu,musl}, *-apple-darwin; binary
 # ocx). The Unix download path needs `tar` for archive extraction.
@@ -230,8 +230,8 @@ function Detect-Architecture {
     try {
         $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
         switch ($arch) {
-            'X64'   { return 'x86_64-pc-windows-msvc' }
-            'Arm64' { return 'aarch64-pc-windows-msvc' }
+            'X64'   { return 'x86_64-pc-windows-gnullvm' }
+            'Arm64' { return 'aarch64-pc-windows-gnullvm' }
             'X86'   { Err '32-bit Windows is not supported. OCX requires a 64-bit system.' 7 }
             'Arm'   { Err '32-bit ARM Windows is not supported. OCX requires a 64-bit system.' 7 }
             default { Err "Unsupported architecture: $arch" 7 }
@@ -244,8 +244,8 @@ function Detect-Architecture {
 
     $procArch = $env:PROCESSOR_ARCHITECTURE
     switch ($procArch) {
-        'AMD64' { return 'x86_64-pc-windows-msvc' }
-        'ARM64' { return 'aarch64-pc-windows-msvc' }
+        'AMD64' { return 'x86_64-pc-windows-gnullvm' }
+        'ARM64' { return 'aarch64-pc-windows-gnullvm' }
         'x86'   { Err '32-bit Windows is not supported. OCX requires a 64-bit system.' 7 }
         default { Err "Unsupported architecture: $procArch" 7 }
     }
@@ -691,6 +691,17 @@ function Resolve-DistRow {
     return $null
 }
 
+# Resolve-DistRow, trying the msvc spelling when a Windows gnullvm target has no
+# row (releases before the gnullvm rename). The row's own target is the match.
+function Resolve-DistRowAny {
+    param($Dist, [string]$Ver, [string]$Target)
+    $row = Resolve-DistRow -Dist $Dist -Ver $Ver -Target $Target
+    if (-not $row -and $Target.EndsWith('-pc-windows-gnullvm')) {
+        $row = Resolve-DistRow -Dist $Dist -Ver $Ver -Target ($Target -replace 'gnullvm$', 'msvc')
+    }
+    return $row
+}
+
 # --- Hand off to `ocx self setup` ---
 
 # Run the downloaded binary's `ocx self setup`. Global pre-flags (e.g. --offline)
@@ -922,10 +933,11 @@ function Main {
     }
 
     # Resolve the (version,target) row -> inline sha256 + download URL.
-    $row = Resolve-DistRow -Dist $dist -Ver $requestedVersion -Target $target
+    $row = Resolve-DistRowAny -Dist $dist -Ver $requestedVersion -Target $target
     if (-not $row) {
         Err "No published artifact for ocx v$requestedVersion on $target in the manifest ($OcxInstallDistUrl)." 3
     }
+    $target = [string]$row.target
     $sha = if ($row.PSObject.Properties.Match('sha256').Count -gt 0) { [string]$row.sha256 } else { '' }
     $url = if ($row.PSObject.Properties.Match('url').Count -gt 0) { [string]$row.url } else { '' }
     $filename = if ($row.PSObject.Properties.Match('filename').Count -gt 0) { [string]$row.filename } else { '' }
