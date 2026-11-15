@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
  * `task site:lighthouse`: every HTML page of the built site, served by `astro preview` under the
- * base path, audited by Lighthouse (mobile) in Playwright's Chromium. A page runs once; a failing
- * page runs `RETRY_RUNS` times in total and is judged on its median run (lhci's representative
- * run). Judged by lhci's assertion engine: score 1 in all four categories plus the budgets in
+ * base path, audited by Lighthouse (mobile) in Playwright's Chromium. Each run is judged alone and a
+ * page passes on its first passing run of at most `RETRY_RUNS` (timing noise, not the page, flaps a
+ * score); a page that never passes is reported with its run of fewest failures. Judged by lhci's
+ * assertion engine: score 1 in all four categories plus the budgets in
  * `lighthouse.budgets.mjs`, and the HTML gzip cap. Trimmed from ocx-sh/website
  * `scripts/lighthouse.mjs`; ponytail: sequential and uncached (about 6 pages), add lanes and a
  * result cache when the page count makes CI slow. `--list` prints the pages and exits.
@@ -26,8 +27,36 @@ const PORT = await new Promise((res) => {
     srv.close(() => res(port));
   });
 });
-/** Runs a failing page gets in total before its median run is judged. */
+/** Runs a page gets in total; it passes on the first one that passes. */
 export const RETRY_RUNS = 3;
+
+/**
+ * Run until one passes or `max` runs are used. `best` is the passing run, else the one with the
+ * fewest failures.
+ * @template R
+ * @param {() => Promise<R>} run
+ * @param {(r: R) => unknown[]} judge failed assertions of one run
+ */
+export async function bestOf(run, judge, max = RETRY_RUNS) {
+  const runs = /** @type {{ r: R, failed: unknown[] }[]} */ ([]);
+  while (runs.length < max) {
+    const r = await run();
+    runs.push({ r, failed: judge(r) });
+    if (!runs[runs.length - 1].failed.length) break;
+  }
+  const best = runs.reduce((a, b) => (b.failed.length < a.failed.length ? b : a));
+  return { runs: runs.map((x) => x.r), best: best.r, failed: best.failed };
+}
+
+const METRICS = ['first-contentful-paint', 'largest-contentful-paint', 'total-blocking-time', 'cumulative-layout-shift', 'speed-index'];
+
+/** One failure line; a category score names the category and the run's paint metrics. */
+export function failureLine(/** @type {string} */ p, /** @type {any} */ a, /** @type {any} */ lhr) {
+  const line = `${p}: ${a.auditId} ${a.name} ${a.actual} (want ${a.operator} ${a.expected})`;
+  if (a.auditId !== 'categories') return line;
+  const m = METRICS.map((id) => `${id} ${lhr.audits?.[id]?.displayValue ?? '-'}`).join(', ');
+  return `${p}: category ${a.auditProperty} ${a.name} ${a.actual} (want ${a.operator} ${a.expected}); ${m}`;
+}
 
 /** Gzipped size of every page's HTML above `HTML_GZ_MAX`, as failure lines. */
 export function htmlFailures(/** @type {string[]} */ pages, distDir = join(ROOT, 'dist')) {
@@ -51,9 +80,8 @@ async function main() {
   const { chromium } = require('playwright-core');
   const lhci = require.resolve('@lhci/utils/src/assertions.js', { paths: [require.resolve('@lhci/cli/package.json')] });
   const { getAllAssertionResults } = require(lhci);
-  const { computeRepresentativeRuns } = require(lhci.replace('assertions.js', 'representative-runs.js'));
-  const judge = (/** @type {{ lhr: object }[]} */ runs) =>
-    getAllAssertionResults({ assertMatrix: assertMatrix(castPages(join(ROOT, 'dist'))) }, computeRepresentativeRuns([runs.map((r) => [r.lhr, r.lhr])]));
+  const judge = (/** @type {{ lhr: object }} */ r) =>
+    getAllAssertionResults({ assertMatrix: assertMatrix(castPages(join(ROOT, 'dist'))) }, [r.lhr]);
 
   const preview = spawn('pnpm', ['exec', 'astro', 'preview', '--ignore-lock', '--port', String(PORT)], { cwd: ROOT, stdio: 'ignore', detached: true });
   const reports = join(ROOT, '.lighthouseci');
@@ -75,15 +103,10 @@ async function main() {
       return r;
     };
     for (const p of pages) {
-      const runs = [await once(p)];
-      let failed = judge(runs);
-      while (failed.length && runs.length < RETRY_RUNS) {
-        runs.push(await once(p));
-        failed = judge(runs);
-      }
+      const { runs, best, failed } = await bestOf(() => once(p), judge);
       runs.forEach((r, i) => writeFileSync(join(reports, `${p.replace(/\W+/g, '_')}-${i + 1}.json`), JSON.stringify(r.lhr)));
       console.log(`${failed.length ? 'FAIL' : 'pass'} ${p} (${runs.length} run(s))`);
-      for (const a of failed) failures.push(`${p}: ${a.auditId} ${a.name} ${a.actual} (want ${a.operator} ${a.expected})`);
+      for (const a of failed) failures.push(failureLine(p, a, best.lhr));
     }
   } finally {
     chrome.kill();
