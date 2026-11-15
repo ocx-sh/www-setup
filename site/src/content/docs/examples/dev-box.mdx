@@ -6,8 +6,6 @@ editUrl: https://github.com/ocx-sh/www-setup/blob/main/site/src/content/docs/exa
 {/* doc_type: how-to */}
 {/* doc_tier: everyday */}
 
-import Tabs from '@ocx-sh/theme/components/Tabs.astro';
-import TabItem from '@ocx-sh/theme/components/TabItem.astro';
 import ShellSession from '@ocx-sh/theme/components/ShellSession.astro';
 import Cast from '../../../components/Cast.astro';
 
@@ -72,36 +70,31 @@ An unpinned rerun after a release upgrades to that release.
 ## Watch the install in each shell {#dev-box}
 
 Each recording below runs the one-liner for that shell on a fresh Linux user and plays back what it printed.
-The PowerShell recording ran PowerShell 7 on Linux, so it downloads the Linux archive.
-On Windows the installer downloads a `.zip` for `x86_64-pc-windows-gnullvm` (releases before the rename publish `x86_64-pc-windows-msvc`, which it falls back to).
+Each installer ends with a closing message.
 
-<Tabs syncKey="shell">
-  <TabItem label="Shell" icon="shell">
+### POSIX shell {#dev-box-sh}
 
 <Cast name="examples/dev-box-sh" title="Install OCX in a POSIX shell" />
 
-  </TabItem>
-  <TabItem label="PowerShell" icon="powershell">
+### PowerShell {#dev-box-pwsh}
+
+The recording ran PowerShell 7 on Linux, so it downloads the Linux archive.
+On Windows the installer downloads a `.zip` for `x86_64-pc-windows-gnullvm` (releases before the rename publish `x86_64-pc-windows-msvc`, which it falls back to).
 
 <Cast name="examples/dev-box-pwsh" title="Install OCX in PowerShell" />
 
-  </TabItem>
-  <TabItem label="Nushell" icon="nushell">
+### Nushell {#dev-box-nu}
+
+Nushell and Elvish use the form for a POSIX shell, as [Install OCX](/install/#install) shows.
 
 <Cast name="examples/dev-box-nu" title="Install OCX in Nushell" />
 
-  </TabItem>
-  <TabItem label="fish" icon="fish">
+### fish {#dev-box-fish}
 
 <Cast name="examples/dev-box-fish" title="Install OCX in fish" />
 
-  </TabItem>
-  <TabItem label="Elvish" icon="elvish">
+### Elvish {#dev-box-elvish}
+
+The recording uses the form for a POSIX shell, as for Nushell.
 
 <Cast name="examples/dev-box-elvish" title="Install OCX in Elvish" />
-
-  </TabItem>
-</Tabs>
-
-The Nushell and Elvish recordings use the form for a POSIX shell, as [Install OCX](/install/#install) shows.
-Each installer ends with a closing message.
