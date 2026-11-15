@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2](https://github.com/ocx-sh/www-setup/releases/tag/v0.3.2) — 2026-11-15
+
+### Fixed
+
+- **install:** Windows installs resolve the gnullvm archive and fall back to msvc by @michael-herwig ([67b2c62](https://github.com/ocx-sh/www-setup/commit/67b2c6268f5f2bcdc6293adfcadde7764c9ec2c8))
 ## [0.3.0](https://github.com/ocx-sh/www-setup/releases/tag/v0.3.0) — 2026-10-12
 
 ### Added
