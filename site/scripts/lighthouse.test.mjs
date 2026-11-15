@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { ASSERT_MATRIX, assertMatrix, BASE, BUDGET, CATEGORIES, HTML_GZ_MAX, TERMINAL_JS, castPages, sitePages } from '../lighthouse.budgets.mjs';
-import { htmlFailures } from './lighthouse.mjs';
+import { bestOf, failureLine, htmlFailures } from './lighthouse.mjs';
 
 const KB = 1024;
 test('budgets stay within the website content class', () => {
@@ -49,4 +49,29 @@ test('a cast page gets the script allowance, the others the content budget', () 
   assert.ok(re(rest).test(`http://x${BASE}`) && !re(cast).test(`http://x${BASE}`));
   assert.equal(cast.assertions['resource-summary:script:size'][1].maxNumericValue, BUDGET.jsBytes + TERMINAL_JS);
   assert.equal(rest.assertions['resource-summary:script:size'][1].maxNumericValue, BUDGET.jsBytes);
+});
+
+/** `bestOf` over scripted runs: each entry is that run's failed-assertion count. */
+async function script(/** @type {number[]} */ counts) {
+  let n = 0;
+  const res = await bestOf(async () => counts[n++], (c) => Array.from({ length: c }, (_, i) => `f${i}`));
+  return { ...res, used: n };
+}
+
+test('a page passes on its first passing run', async () => {
+  assert.deepEqual(await script([1, 1, 0]).then((r) => [r.failed.length, r.used]), [0, 3]);
+  assert.deepEqual(await script([0, 1, 1]).then((r) => [r.failed.length, r.used]), [0, 1]);
+  assert.deepEqual(await script([1, 0]).then((r) => [r.failed.length, r.used]), [0, 2]);
+});
+
+test('a page that never passes reports its run of fewest failures', async () => {
+  const r = await script([3, 1, 2]);
+  assert.deepEqual([r.used, r.best, r.failed.length], [3, 1, 1]);
+});
+
+test('a category failure names the category and the paint metrics', () => {
+  const a = { auditId: 'categories', auditProperty: 'performance', name: 'minScore', actual: 0.99, operator: '>=', expected: 1 };
+  const lhr = { audits: { 'first-contentful-paint': { displayValue: '1.2 s' } } };
+  assert.match(failureLine('/p/', a, lhr), /category performance minScore 0\.99.*first-contentful-paint 1\.2 s.*speed-index -/);
+  assert.equal(failureLine('/p/', { ...a, auditId: 'dom-size' }, lhr), '/p/: dom-size minScore 0.99 (want >= 1)');
 });
