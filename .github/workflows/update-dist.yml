@@ -39,4 +39,16 @@ jobs:
           BUNNY_STORAGE_KEY: ${{ secrets.BUNNY_STORAGE_KEY }}
           BUNNY_STORAGE_ZONE: ${{ secrets.BUNNY_STORAGE_ZONE }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIST_COPY: ${{ runner.temp }}/dist.json
         run: scripts/publish-dist.sh
+
+      # Runs only after the publish step succeeded (default success() gate), on
+      # every trigger of this workflow; PR builds never reach it. Always fires
+      # because the receivers are idempotent. A failure only warns.
+      - name: Notify dist-updated receivers
+        env:
+          OCX_ANNOUNCE_TOKEN: ${{ secrets.OCX_ANNOUNCE_TOKEN }}
+          # Space-separated owner/repo list; add a sibling here.
+          DIST_RECEIVERS: ocx-sh/devcontainer-features
+          DIST_FILE: ${{ runner.temp }}/dist.json
+        run: scripts/dispatch-dist-updated.sh "$DIST_FILE"
