@@ -157,6 +157,7 @@ Scopes are optional: `feat(install): add OCX_INSTALL_MIRROR_URL`.
 | `BUNNY_STORAGE_KEY` | Bunny Storage Zone password for `sh-ocx-setup`, used by `publish-installers` + `update-dist`. Write access to the installer docroot — treat as high value |
 | `BUNNY_STORAGE_ZONE` | Storage zone name (`sh-ocx-setup`) |
 | `SETUP_OCX_DISPATCH_TOKEN` | Lives in **`ocx-sh/ocx`** (not this repo): a token scoped to setup.ocx.sh (fine-grained PAT `contents:read` + `actions:write`, or classic `repo`) that `ocx-sh/ocx` uses to fire the `repository_dispatch(ocx-released)` that rebuilds `dist.json`. See `deploy/github/ocx-release-dispatch.yml.example`. |
+| `OCX_ANNOUNCE_TOKEN` | Organisation secret. `update-dist.yml` uses it to send the `dist-updated` dispatch (`scripts/dispatch-dist-updated.sh`, receivers in the workflow's `DIST_RECEIVERS`) after a publish; missing or failing only warns. Its scope must include every receiver repo. |
 
 ## Deep context
 

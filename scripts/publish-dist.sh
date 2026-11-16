@@ -37,7 +37,8 @@
 # first and only upload that file.
 #
 # Required env: BUNNY_STORAGE_ZONE, BUNNY_STORAGE_KEY (or BUNNY_STORAGE_KEY_FILE).
-# Optional env: BUNNY_STORAGE_HOST, DRY_RUN=1, OCX_RELEASES_REPO, GITHUB_TOKEN.
+# Optional env: BUNNY_STORAGE_HOST, DRY_RUN=1, OCX_RELEASES_REPO, GITHUB_TOKEN,
+# DIST_COPY (path: receives a copy of the published bytes, for the dispatch step).
 
 set -eu
 
@@ -128,5 +129,6 @@ printf '%s  dist.json\n' "$DIST_SHA" >"$STAGE/dist.json.sha256"
 bn_put_new "dist/${DIST_SHA}.json" "$STAGE/${DIST_SHA}.json"
 bn_put "dist.json.sha256" "$STAGE/dist.json.sha256"
 bn_put "dist.json" "$DIST_TMP"
+[ -z "${DIST_COPY:-}" ] || cp "$DIST_TMP" "$DIST_COPY"
 
 echo "publish-dist: done"
