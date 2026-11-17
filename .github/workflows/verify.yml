@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+      - uses: ocx-sh/setup-ocx@25fa771f8572572dc64528db89560de68a163a0e # v1.4.0
         with:
           groups: default
       - run: ocx lock --check
@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+      - uses: ocx-sh/setup-ocx@25fa771f8572572dc64528db89560de68a163a0e # v1.4.0
         with:
           groups: default,unix
       - run: task shell:verify
@@ -69,7 +69,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+      - uses: ocx-sh/setup-ocx@25fa771f8572572dc64528db89560de68a163a0e # v1.4.0
         with:
           groups: default
       - run: task ci:verify
@@ -117,7 +117,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+      - uses: ocx-sh/setup-ocx@25fa771f8572572dc64528db89560de68a163a0e # v1.4.0
         with:
           groups: default,linux
       - run: task pwsh:verify
@@ -132,7 +132,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+      - uses: ocx-sh/setup-ocx@25fa771f8572572dc64528db89560de68a163a0e # v1.4.0
         with:
           groups: default,nurange
       - run: task nu:verify
@@ -146,7 +146,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+      - uses: ocx-sh/setup-ocx@25fa771f8572572dc64528db89560de68a163a0e # v1.4.0
         with:
           groups: default,unix
       - run: task fish:verify
@@ -160,7 +160,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+      - uses: ocx-sh/setup-ocx@25fa771f8572572dc64528db89560de68a163a0e # v1.4.0
         with:
           groups: default
       - run: task elvish:verify
@@ -174,7 +174,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b # v1.3.0
+      - uses: ocx-sh/setup-ocx@25fa771f8572572dc64528db89560de68a163a0e # v1.4.0
         with:
           groups: default
       - run: task meta:actionlint
