@@ -13,6 +13,7 @@ import HubGrid from '@ocx-sh/theme/components/HubGrid.astro';
 Install `ocx` on Linux, macOS or Windows with one command in the shell you already use.
 No root access is needed.
 Pick your shell and paste the command.
+On Windows, use the PowerShell command or the shell command in Git Bash, MSYS2 or Cygwin.
 
 ## Install in your shell {#install}
 
@@ -23,7 +24,10 @@ Pick your shell and paste the command.
 curl -fsSL https://setup.ocx.sh/sh | sh
 ```
 
-Works in bash, zsh, dash, ash and ksh on Linux and macOS.
+Works in bash, zsh, dash, ash and ksh on Linux and macOS, and in Git Bash, MSYS2 and Cygwin on Windows.
+Cygwin ships `cygpath` and needs `curl` or `wget`, from Cygwin or Windows' own `curl.exe`.
+On Windows the installer downloads a `.zip` and extracts it with `bsdtar` or the `tar.exe` that ships with Windows.
+A Git Bash on Windows arm64 that reports `x86_64` installs the x86_64 build, which runs under emulation.
 It needs `curl` or `wget`, and one of `sha256sum`, `shasum` or `openssl`.
 
   </TabItem>
@@ -61,7 +65,9 @@ A bare `curl https://setup.ocx.sh/nu | nu` installs nothing, because Nushell doe
 curl -fsSL https://setup.ocx.sh/fish | fish
 ```
 
-Needs fish 3.6.0 or later on Linux or macOS. It does not run on Windows.
+Needs fish 3.6.0 or later on Linux or macOS.
+fish on Windows is an MSYS2 or Cygwin program.
+Install it with the shell command above.
 
   </TabItem>
   <TabItem label="Elvish" icon="elvish">

@@ -11,7 +11,7 @@ Canonical hosting for the [OCX](https://ocx.sh) installer scripts.
 `setup.ocx.sh` serves a thin installer for **every supported shell** under bare, friendly paths — each one a one-liner in that shell's own language:
 
 ```
-https://setup.ocx.sh/sh             # POSIX: bash / zsh / ash / ksh / dash (Linux + macOS)
+https://setup.ocx.sh/sh             # POSIX: bash / zsh / ash / ksh / dash (Linux + macOS + Windows Git Bash / MSYS2 / Cygwin)
 https://setup.ocx.sh/pwsh           # PowerShell 5.1+ (Windows + cross-platform pwsh)
 https://setup.ocx.sh/nu             # Nushell (Linux + macOS + Windows)
 https://setup.ocx.sh/fish           # fish (Linux + macOS)
@@ -36,7 +36,7 @@ The GitHub Action and GitLab Function listings live in **separate repositories**
 ## Quick start
 
 ```sh
-# POSIX (Linux / macOS):
+# POSIX (Linux / macOS; Git Bash, MSYS2 or Cygwin on Windows):
 curl -fsSL https://setup.ocx.sh/sh | sh
 
 # fish:
@@ -60,7 +60,11 @@ Under `irm | iex`, a failed PowerShell install prints the error and throws inste
 
 Nushell and Elvish do not run a script from a pipe. A bare `curl … | nu` exits 1, because nu starts a REPL and refuses a non-terminal stdin. `curl … | elvish` reads stdin as a REPL, prints parse errors and exits 0 with nothing installed. The forms above pass the script as `-c` text instead. The installer's exit code is kept, and a cut-off download fails to parse and runs nothing. In the POSIX-shell form, `|| echo 'exit 3'` turns a failed download into exit 3. They need nu 0.105.1 or newer and Elvish 0.20.1 or newer.
 
-On Linux/macOS the PowerShell installer needs `tar` on `PATH` for archive extraction (xz-utils only for releases older than the .tar.gz switch). Most systems already have both. For a shell-native install there, use the POSIX `https://setup.ocx.sh/sh` one-liner.
+On Linux/macOS the PowerShell installer needs `tar` on `PATH` for archive extraction (xz-utils only for releases older than the .tar.gz switch). Most systems already have both.
+
+On Windows, either this installer in PowerShell or the POSIX one-liner in Git Bash, MSYS2 or Cygwin works. Cygwin needs `curl` or `wget`, from Cygwin or Windows' own `curl.exe`. `cygpath` ships with Cygwin. fish on Windows installs through the POSIX one-liner.
+
+For a shell-native install on Linux/macOS, use the POSIX `https://setup.ocx.sh/sh` one-liner.
 
 ## Documentation
 

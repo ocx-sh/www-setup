@@ -193,6 +193,7 @@ fi
 if [ -n "${OCX_STUB_ENV:-}" ]; then
     printf 'SSL_CERT_FILE=%s\n' "${SSL_CERT_FILE:-}" >>"$OCX_STUB_ENV"
     printf 'OCX_EXTRA_CA_CERTS=%s\n' "${OCX_EXTRA_CA_CERTS:-}" >>"$OCX_STUB_ENV"
+    printf 'OCX_HOME=%s\n' "${OCX_HOME:-}" >>"$OCX_STUB_ENV"
 fi
 # The real `ocx self setup` prints its result table on STDOUT; the stub does the
 # same (marker line below) so the suites can prove the installers keep it off
@@ -331,6 +332,44 @@ server_build_fixture() {
     server_write_dist "$_srv" "$_target" "$_sum" "$_file"
 
     echo "$_target"
+}
+
+# server_build_zip_fixture ROOT TARGET [EXTRA_MEMBER]
+#
+# Write a release fixture whose archive is a .zip holding the stub as ocx.exe (a
+# Windows release), plus the dist.json row for TARGET. EXTRA_MEMBER, when given,
+# is added as a second zip member under exactly that name (e.g. ../evil). Env:
+# FIXTURE_ZIP_NESTED=1 puts ocx.exe under ocx-<target>/ instead of the root;
+# FIXTURE_ZIP_LINK=<target> adds a symlink member "lnk" pointing there. Built
+# with python3's zipfile so no zip(1) is needed; reading it back needs bsdtar.
+server_build_zip_fixture() {
+    local _root="$1" _target="$2" _extra="${3:-}" _file _archive _stub _sum
+    _file="ocx-${_target}.zip"
+    mkdir -p "$_root/releases/download/v0.0.0"
+    _archive="$_root/releases/download/v0.0.0/${_file}"
+    _stub="${BATS_FILE_TMPDIR}/zip-stub.sh"
+    server_stub_body >"$_stub"
+    ZIP_OUT="$_archive" ZIP_STUB="$_stub" ZIP_EXTRA="$_extra" ZIP_DIR="ocx-${_target}" \
+        ZIP_NESTED="${FIXTURE_ZIP_NESTED:-}" ZIP_LINK="${FIXTURE_ZIP_LINK:-}" python3 -I - <<'PY'
+import os, zipfile
+with open(os.environ["ZIP_STUB"], "rb") as f:
+    body = f.read()
+with zipfile.ZipFile(os.environ["ZIP_OUT"], "w", zipfile.ZIP_DEFLATED) as z:
+    name = "ocx.exe"
+    if os.environ["ZIP_NESTED"]:
+        name = os.environ["ZIP_DIR"] + "/ocx.exe"
+    info = zipfile.ZipInfo(name)
+    info.external_attr = 0o755 << 16
+    z.writestr(info, body)
+    if os.environ["ZIP_LINK"]:
+        link = zipfile.ZipInfo("lnk")
+        link.external_attr = 0o120777 << 16
+        z.writestr(link, os.environ["ZIP_LINK"])
+    if os.environ["ZIP_EXTRA"]:
+        z.writestr(zipfile.ZipInfo(os.environ["ZIP_EXTRA"]), b"evil\n")
+PY
+    _sum=$(server_sha256 "$_archive")
+    server_write_dist "$_root" "$_target" "$_sum" "$_file"
 }
 
 # server_embed_config <src-installer> <dest> [TOKEN=VALUE ...]
@@ -501,9 +540,15 @@ FAKE
 # server_fake_platform DIR OS ARCH [LDD_TEXT [SYSCTL_ARM64]]
 #
 # Write DIR/uname (answering -s/-m with OS/ARCH), DIR/ldd (printing LDD_TEXT and
-# exiting 1, as musl's does) and, with SYSCTL_ARM64, DIR/sysctl (answering
-# hw.optional.arm64) so platform detection can be driven on any host. Everything
-# else on PATH stays real.
+# exiting 1, as musl's does), DIR/cygpath and, with SYSCTL_ARM64, DIR/sysctl
+# (answering hw.optional.arm64) so platform detection can be driven on any host.
+# Everything else on PATH stays real.
+#
+# The cygpath stand-in knows -u, -w and -m. It maps a drive letter onto the
+# directory DIR/drive (C:\a\b <-> DIR/drive/c/a/b), which keeps what the
+# installer writes inside the test sandbox; a path outside DIR/drive passes
+# through unchanged in both directions. The root is neither /c nor /cygdrive/c,
+# so an installer that hard-codes either spelling misses it.
 server_fake_platform() {
     local _dir="$1" _os="$2" _arch="$3" _ldd="${4:-}" _arm="${5:-}"
     mkdir -p "$_dir"
@@ -516,6 +561,51 @@ case "\$1" in
 esac
 EOF
     chmod +x "$_dir/uname"
+    cat >"$_dir/cygpath" <<'EOF'
+#!/bin/sh
+root="$(cd "$(dirname "$0")" && pwd)/drive"
+# getopt_long: -- ends the options, so a value that starts with - is a path.
+if [ "${2:-}" = -- ]; then set -- "$1" "$3"; fi
+case "$1" in
+    -u)
+        case "$2" in
+            \\\\*)
+                printf '%s/unc/%s\n' "$root" "$(printf '%s' "${2#??}" | tr '\\' '/')"
+                ;;
+            [A-Za-z]:[\\/]*)
+                _d=$(printf '%s' "${2%"${2#?}"}" | tr 'A-Z' 'a-z')
+                _r=$(printf '%s' "${2#?:}" | tr '\\' '/')
+                printf '%s/%s%s\n' "$root" "$_d" "$_r"
+                ;;
+            *) printf '%s\n' "$2" ;;
+        esac
+        ;;
+    -w)
+        case "$2" in
+            "$root"/[a-z] | "$root"/[a-z]/*)
+                _rest="${2#"$root"/}"
+                _d=$(printf '%s' "${_rest%"${_rest#?}"}" | tr 'a-z' 'A-Z')
+                _r=$(printf '%s' "${_rest#?}" | tr '/' '\\')
+                printf '%s:%s\n' "$_d" "${_r:-\\}"
+                ;;
+            *) printf '%s\n' "$2" ;;
+        esac
+        ;;
+    -m)
+        case "$2" in
+            "$root"/[a-z] | "$root"/[a-z]/*)
+                _rest="${2#"$root"/}"
+                _d=$(printf '%s' "${_rest%"${_rest#?}"}" | tr 'a-z' 'A-Z')
+                printf '%s:%s\n' "$_d" "${_rest#?}"
+                ;;
+            [A-Za-z]:[\\/]*) printf '%s\n' "$2" | tr '\\' '/' ;;
+            *) printf '%s\n' "$2" ;;
+        esac
+        ;;
+    *) exit 2 ;;
+esac
+EOF
+    chmod +x "$_dir/cygpath"
     if [ -n "$_ldd" ]; then
         {
             echo '#!/bin/sh'
@@ -530,6 +620,27 @@ EOF
         printf '#!/bin/sh\necho %s\n' "$_arm" >"$_dir/sysctl"
         chmod +x "$_dir/sysctl"
     fi
+}
+
+# server_fake_mktemp DIR ROOT
+#
+# Write DIR/mktemp, a stand-in that creates the work directory of a bare
+# `mktemp -d` as ROOT/tmp.<unique> and passes every other call to the mktemp on
+# PATH at write time. A case that must see the installer's work directory inside
+# the fake drive cannot rely on TMPDIR: macOS mktemp prefers the per-user Darwin
+# temp dir (_CS_DARWIN_USER_TEMP_DIR) and falls back to TMPDIR only without it.
+server_fake_mktemp() {
+    local _dir="$1" _root="$2" _real
+    _real=$(command -v mktemp)
+    mkdir -p "$_dir" "$_root"
+    cat >"$_dir/mktemp" <<EOF
+#!/bin/sh
+if [ "\$#" -eq 0 ] || { [ "\$#" -eq 1 ] && [ "\$1" = -d ]; }; then
+    exec "$_real" -d "$_root/tmp.XXXXXXXX"
+fi
+exec "$_real" "\$@"
+EOF
+    chmod +x "$_dir/mktemp"
 }
 
 # server_signal_run SIGNAME MARKFILE CMD [ARG...]

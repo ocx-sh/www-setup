@@ -20,10 +20,10 @@ Thanks for helping land changes to the canonical OCX installer scripts.
 ## Layout
 
 ```
-src/install.sh               POSIX installer (bash/zsh/ash/ksh/dash; Linux + macOS)
+src/install.sh               POSIX installer (bash/zsh/ash/ksh/dash; Linux + macOS + Git Bash/MSYS2/Cygwin on Windows)
 src/install.ps1              PowerShell installer (cross-platform; PS 5.1 floor on Windows, PS 7+ on Unix)
 src/install.nu               Nushell installer (env-driven; cross-platform)
-src/install.fish             fish installer (unix-only)
+src/install.fish             fish installer (Linux + macOS; on Windows fish installs through install.sh)
 src/install.elv              Elvish installer (cross-platform)
 scripts/publish-installers.sh   Upload all 5 installers to Bunny Edge Storage (archive/<VERSION>/ + latest|next/), then publish-dist.sh
 scripts/gen-dist.sh             Generate dist.json (manifest) from the ocx-sh/ocx Releases API (inline sha256)
@@ -36,7 +36,7 @@ external/                    Vendored Bats submodules (bats-core, bats-support, 
 site/                        The /install/ section of ocx.sh (Astro Starlight): pages, drift guard, docs gates
 deploy/bunny/                Live routing + zone settings (edge-rules.py: plan/apply/verify, zone-apply)
 deploy/nginx/                SUPERSEDED reference nginx block, kept as the rollback target
-tests/install/*.bats         Bats env-knob / exit-code / print-path / dist suites (sh)
+tests/install/*.bats         Bats env-knob / exit-code / print-path / windows / dist suites (sh); windows.bats fakes `uname`/`cygpath` on Linux and needs `bsdtar` (libarchive-tools) for its zip cases
 tests/install/{nu,fish,elvish}/  Per-shell installer suites (skip locally where the shell is absent)
 tests/install/ps1/*.Tests.ps1   Pester equivalents (+ Fixture.psm1, Run-Installer.ps1, Trust-Fixture.ps1)
 tests/install/helpers/       Shared fixture HTTPS server helpers + load.bash (bats-assert)
@@ -67,6 +67,8 @@ task docker:integration:all                                   # full matrix
 ```
 
 The Bats suite spins a `python3 ssl` HTTPS server against a fixture release tree — archive + a `dist.json` manifest (with an inline `sha256`) — built per-test in `${BATS_FILE_TMPDIR}`. No network access is required. Tests point `OCX_INSTALL_DIST_URL` at the fixture manifest and redirect the artifact download to the fixture via `OCX_INSTALL_MIRROR_URL` (the manifest `url` is a dummy). They inject a binary without a network artifact via the internal test-only hatch `__OCX_TESTING_INSTALL_BINARY` (a path to a stub or real `ocx`; never a public knob) and assert the recorded `ocx self setup` hand-off argv.
+
+Windows is covered by `tests/install/windows.bats` (Linux and macOS, with a faked `uname` and `cygpath`) and by real-host CI jobs: `smoke-windows-sh` and `smoke-cygwin-sh` (every PR touching `src/install.sh`) run the installer under Git Bash and under a base Cygwin with a stub binary and both a POSIX and a Windows-form `OCX_HOME`, the nightly `install-sh-real` windows-latest leg installs a real release through `System32/tar.exe` and then checks `ocx version` in a fresh PowerShell, and `install-sh-cygwin-real` installs a real release under Cygwin. The PR-tier Cygwin leg proves platform detection, `OCX_HOME` conversion and `ocx.exe` placement only; download and extraction under Cygwin are proven by the scheduled real-release leg.
 
 The docker matrix runs each installer (`sh`/`nu`/`fish`/`elvish`) via its own interpreter against an injected stub (network-free, deterministic) across alpine/fedora/ubuntu × amd64/arm64. The per-shell *activation* matrix (which exercises the `ocx self setup`-written profile/autoload blocks) needs a real `ocx` binary and runs nightly and on manual dispatch. Set the `VERSION` argument / `OCX_INSTALL_VERSION` to pin a release:
 

@@ -47,10 +47,11 @@ jobs:
           persist-credentials: false
       - uses: ocx-sh/setup-ocx@eaeb6788da6191868a1310cc2bba93233b586369 # v1.4.1
       # The sh suite also runs the installer under dash, busybox ash, ksh and zsh; the runner lacks ksh and zsh.
+      # libarchive-tools ships bsdtar, which reads the .zip fixtures of the Windows suite.
       - name: Install the POSIX shells the sh suite runs under
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends dash busybox ksh zsh
+          sudo apt-get install -y --no-install-recommends dash busybox ksh zsh libarchive-tools
       # bats-ci.sh asserts the pinned bats, runs the canary, then the censused suite. An absent
       # interpreter fails (OCX_TEST_REQUIRE_SHELLS) and the skip budget is zero on this runner.
       - name: Run bats (vendored, shells via ocx.toml)
@@ -161,16 +162,17 @@ jobs:
             tests/install/env-knobs.bats \
             tests/install/exit-codes.bats \
             tests/install/print-path.bats \
+            tests/install/windows.bats \
             tests/install/nu \
             tests/install/fish \
             tests/install/elvish
 
   # Windows nu/elvish smoke: install.nu and install.elv are cross-platform
-  # (*-pc-windows-msvc target, ocx.exe binary). A full Bats run on Windows would
-  # need bash; instead this is a fixture-free smoke (mirrors smoke-windows-51 for
-  # pwsh) that drives each installer through the __OCX_TESTING_INSTALL_BINARY hatch
-  # under its ocx-provisioned interpreter and asserts the PrintPath contract — the
-  # only automated nu/elvish-on-Windows coverage.
+  # (*-pc-windows-msvc target, ocx.exe binary). This is a fixture-free smoke
+  # (mirrors smoke-windows-51 for pwsh) that drives each installer through the
+  # __OCX_TESTING_INSTALL_BINARY hatch under its ocx-provisioned interpreter and
+  # asserts the PrintPath contract. install.sh has its own Windows smoke in
+  # smoke-windows-sh (Git Bash); the full Bats suite runs on Linux and macOS only.
   smoke-windows-nu-elvish:
     name: ${{ matrix.label }} smoke (windows-latest)
     runs-on: windows-latest
@@ -215,6 +217,97 @@ jobs:
           if (-not (Test-Path (Join-Path $binDir 'ocx.exe'))) {
             throw "expected ocx.exe under printed bin dir: $binDir"
           }
+
+  # Windows sh smoke: install.sh runs natively under Git Bash (MINGW/MSYS). Same
+  # fixture-free approach as the nu/elvish smoke: the test-binary hatch installs a
+  # stub ocx.exe, so no network and no archive. The installer needs nothing from the
+  # ocx toolchain. `form` selects how OCX_HOME is spelled: POSIX (/d/a/_temp/...) or
+  # Windows (D:\a\_temp\..., as the runner exports RUNNER_TEMP). The archive path
+  # (zip + System32 tar.exe) is covered by install-sh-real.
+  smoke-windows-sh:
+    name: install.sh smoke (windows-latest / Git Bash, ${{ matrix.form }} OCX_HOME)
+    runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.sh == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        form: [posix, windows]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Smoke (install.sh, ${{ matrix.form }} OCX_HOME)
+        shell: bash
+        env:
+          FORM: ${{ matrix.form }}
+          OCX_NO_MODIFY_PATH: '1'
+          OCX_INSTALL_NO_SETUP: '1'
+          OCX_INSTALL_NO_SMOKETEST: '1'
+          OCX_INSTALL_PRINT_PATH: '1'
+        run: |
+          tmp=$(cygpath -u "$RUNNER_TEMP")
+          printf '@echo 0.0.0\n' > "$tmp/ocx.exe"
+          export __OCX_TESTING_INSTALL_BINARY="$tmp/ocx.exe"
+          if [ "$FORM" = windows ]; then
+            export OCX_HOME="$RUNNER_TEMP\\.ocx-win"
+          else
+            export OCX_HOME="$tmp/.ocx-posix"
+          fi
+          out=$(sh src/install.sh)
+          bin_dir=$(printf '%s\n' "$out" | tail -n 1)
+          echo "printed bin dir: $bin_dir"
+          [ -f "$bin_dir/ocx.exe" ] || { echo "expected ocx.exe under printed bin dir: $bin_dir" >&2; exit 1; }
+
+  # Cygwin sh smoke: install.sh runs under Cygwin's own bash, which converts no
+  # argument for a native program (MSYS2 does). Same hatch as the Git Bash smoke, so
+  # no network and no archive; the real-release job below covers download, checksum
+  # and System32/tar.exe. Only the base Cygwin packages are installed, so the leg
+  # sees what a default install sees: no Cygwin curl and no bsdtar. PATH is cut to
+  # Cygwin's /usr/bin plus the Windows system dir, so a Git for Windows tool on the
+  # runner PATH cannot stand in for one Cygwin lacks. `igncr` lets the runner's
+  # CRLF-written step script run; src/install.sh itself must be LF (.gitattributes).
+  smoke-cygwin-sh:
+    name: install.sh smoke (windows-latest / Cygwin, ${{ matrix.form }} OCX_HOME)
+    runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.sh == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        form: [posix, windows]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Cygwin (base packages)
+        uses: cygwin/cygwin-install-action@5a1b0cd107181fa6bb6bf3f90d500f4fb3132f18 # v7.0.0
+      - name: Smoke (install.sh, ${{ matrix.form }} OCX_HOME)
+        shell: C:\cygwin\bin\bash.exe --noprofile --norc -eo pipefail -o igncr '{0}'
+        env:
+          FORM: ${{ matrix.form }}
+          OCX_NO_MODIFY_PATH: '1'
+          OCX_INSTALL_NO_SETUP: '1'
+          OCX_INSTALL_NO_SMOKETEST: '1'
+          OCX_INSTALL_PRINT_PATH: '1'
+        run: |
+          export PATH="/usr/bin:$(cygpath -S -u)"
+          [ "$(uname -s | cut -c1-6)" = CYGWIN ] || { echo "not Cygwin: $(uname -s)" >&2; exit 1; }
+          if command -v bsdtar >/dev/null 2>&1; then echo "bsdtar present: not a base install" >&2; exit 1; fi
+          # `igncr` drops the CR from a command substitution, so the probe may not build one.
+          tr -d '\r' < src/install.sh | cmp -s - src/install.sh || { echo "src/install.sh has CRLF line endings" >&2; exit 1; }
+          tmp=$(cygpath -u "$RUNNER_TEMP")
+          printf '@echo 0.0.0\n' > "$tmp/ocx.exe"
+          export __OCX_TESTING_INSTALL_BINARY="$tmp/ocx.exe"
+          if [ "$FORM" = windows ]; then
+            export OCX_HOME="$RUNNER_TEMP\\.ocx-win"
+          else
+            export OCX_HOME="$tmp/.ocx-posix"
+          fi
+          out=$(sh src/install.sh)
+          bin_dir=$(printf '%s\n' "$out" | tail -n 1)
+          echo "printed bin dir: $bin_dir"
+          [ -f "$bin_dir/ocx.exe" ] || { echo "expected ocx.exe under printed bin dir: $bin_dir" >&2; exit 1; }
 
   # PowerShell 7 (pwsh) on Windows + Linux + macOS. install.ps1 is cross-platform
   # (it resolves *-unknown-linux-{gnu,musl} / *-apple-darwin targets and the `ocx`
@@ -339,12 +432,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-26]
+        os: [ubuntu-latest, macos-26, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Windows runs this under Git Bash: the zip is read by System32/tar.exe (no bsdtar there).
       - name: Run install.sh against the real release
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
@@ -356,8 +450,69 @@ jobs:
           OCX_NO_MODIFY_PATH=1 OCX_INSTALL_PRINT_PATH=1 sh src/install.sh "$@"
       - name: Verify
         run: |
-          export PATH="$HOME/.ocx/symlinks/ocx.sh/ocx/cli/current/content/bin:$PATH"
+          home=$HOME
+          # Windows: ocx.exe homes under %USERPROFILE%, and `ocx version` finds ocx.exe through PATH.
+          if [ "$RUNNER_OS" = Windows ]; then
+            home=$(cygpath -u "$USERPROFILE")
+          fi
+          export PATH="$home/.ocx/symlinks/ocx.sh/ocx/cli/current/content/bin:$PATH"
           ocx version
+      # The step above installs with OCX_NO_MODIFY_PATH, so `ocx self setup` never touched a
+      # profile. Install again the way a user does (force: the same version would stop at the
+      # fast path before `ocx self setup`), then ask a new PowerShell, profile loaded, for ocx.
+      # An install made from Git Bash must be usable from PowerShell.
+      - name: Install from Git Bash with profile edits (Windows)
+        if: runner.os == 'Windows'
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set --
+          if [ -n "$RELEASE_TAG" ]; then
+            set -- --version "${RELEASE_TAG#v}"
+          fi
+          OCX_INSTALL_FORCE=1 sh src/install.sh "$@"
+      - name: ocx version in a fresh PowerShell (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # The earlier install step put the bin dir on GITHUB_PATH, so ocx is on PATH with or without
+          # a profile block. Drop every .ocx entry so only the profile can supply ocx, then load it
+          # (no -NoProfile) in a fresh pwsh.
+          $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -and $_ -notlike '*\.ocx\*' }) -join ';'
+          if (Get-Command ocx -ErrorAction SilentlyContinue) { throw 'ocx is still on PATH before the profile loads' }
+          pwsh -NoLogo -NonInteractive -Command 'ocx version; exit $LASTEXITCODE'
+          if ($LASTEXITCODE -ne 0) { throw "ocx version exited $LASTEXITCODE" }
+
+  # Cygwin real-release smoke: the full path under Cygwin's bash with a base install,
+  # so curl is Windows' own curl.exe and the zip is read by System32/tar.exe, both
+  # native programs that get Windows-form paths from the installer.
+  install-sh-cygwin-real:
+    name: install.sh (Cygwin, real release)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Cygwin (base packages)
+        uses: cygwin/cygwin-install-action@5a1b0cd107181fa6bb6bf3f90d500f4fb3132f18 # v7.0.0
+      - name: Run install.sh against the real release
+        shell: C:\cygwin\bin\bash.exe --noprofile --norc -eo pipefail -o igncr '{0}'
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          export PATH="/usr/bin:$(cygpath -S -u)"
+          [ "$(uname -s | cut -c1-6)" = CYGWIN ] || { echo "not Cygwin: $(uname -s)" >&2; exit 1; }
+          if command -v bsdtar >/dev/null 2>&1; then echo "bsdtar present: not a base install" >&2; exit 1; fi
+          command -v curl >/dev/null || { echo "curl not on PATH" >&2; exit 1; }
+          set --
+          if [ -n "$RELEASE_TAG" ]; then
+            set -- --version "${RELEASE_TAG#v}"
+          fi
+          out=$(OCX_NO_MODIFY_PATH=1 OCX_INSTALL_PRINT_PATH=1 sh src/install.sh "$@")
+          bin_dir=$(printf '%s\n' "$out" | tail -n 1)
+          echo "printed bin dir: $bin_dir"
+          "$bin_dir/ocx.exe" version
 
   install-ps1-windows:
     name: install.ps1 (Windows / ${{ matrix.shell }}, real release)
