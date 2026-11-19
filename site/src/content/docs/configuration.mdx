@@ -28,7 +28,7 @@ These are shared with `ocx` itself or standard across tools.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `OCX_HOME` | `~/.ocx` | The OCX home directory. The installer requires an absolute path with no `..` segment and none of the [characters each installer refuses](#home-chars). Anything else exits with code 2. |
+| `OCX_HOME` | `~/.ocx` (`%USERPROFILE%\.ocx` in Git Bash, MSYS2 and Cygwin) | The OCX home directory. In Git Bash, MSYS2 and Cygwin the value may be a Windows path such as `C:\Users\me\.ocx`. The installer requires an absolute path with no `..` segment and none of the [characters each installer refuses](#home-chars). Anything else exits with code 2. |
 | `OCX_NO_MODIFY_PATH` | false | When true, `ocx self setup` does not edit shell profiles. The flags `--no-modify-path` and `-NoModifyPath` do the same. It has no effect when `OCX_INSTALL_NO_SETUP` is true, because setup does not run. |
 | `OCX_MANAGED_CONFIG` | unset | A managed-configuration OCI reference. `ocx self setup` reads it. When set, it overrides the value embedded in a patched installer. |
 | `NO_COLOR` | unset | Disables colored output. |
@@ -62,7 +62,7 @@ These are read by the installers only.
 | `OCX_INSTALL_NO_SMOKETEST` | false | Skips running `ocx version` on the extracted binary before the hand-over. |
 | `OCX_INSTALL_FORCE` | false | Reinstalls when the requested version is already present. Without it the installer reports the installed version and exits 0. |
 | `OCX_INSTALL_QUIET` | false | Suppresses informational messages on stderr. Warnings and errors still print. |
-| `OCX_INSTALL_PRINT_PATH` | false | Prints the absolute OCX bin directory as the final line of stdout. See [the output contract](/install/reference/#output). |
+| `OCX_INSTALL_PRINT_PATH` | false | Prints the absolute OCX bin directory as the final line of stdout, in POSIX form (`/c/…`, or `/cygdrive/c/…` in Cygwin) under Git Bash, MSYS2 and Cygwin. See [the output contract](/install/reference/#output). |
 | `OCX_INSTALL_DOWNLOADER` | auto-detect | `curl` or `wget`. The POSIX installer only. The other installers use their own downloader. |
 | `OCX_INSTALL_CA_BUNDLE` | system trust store | A CA bundle trusted for every download: a PEM file path, or the PEM text itself. See [Trust a corporate CA](/install/mirrors/#ca-bundle). |
 

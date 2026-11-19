@@ -138,6 +138,12 @@ STUB
     [ "$status" -eq 2 ]
 }
 
+@test "exit 2: OCX_HOME ending in a newline" {
+    OCX_HOME="${BATS_TEST_TMPDIR}/.ocx
+" run sh "$INSTALL_SH"
+    [ "$status" -eq 2 ]
+}
+
 # Retry. The real incident: one CDN edge PoP answered 500 for dist.json while
 # every other PoP served it fine, and a single unretried GET aborted the whole
 # install with exit 3.
