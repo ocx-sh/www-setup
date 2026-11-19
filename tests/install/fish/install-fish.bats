@@ -735,6 +735,17 @@ Version 1.2.5"
     [[ "$output" == *"unsupported operating system: FreeBSD"* ]] || false
 }
 
+@test "fish: exit 7 on Windows names the sh installer one-liner" {
+    local _os
+    for _os in MINGW64_NT-10.0-26100 MSYS_NT-10.0-26100 CYGWIN_NT-10.0-26100; do
+        server_fake_platform "${BATS_TEST_TMPDIR}/plat" "$_os" x86_64
+        PATH="${BATS_TEST_TMPDIR}/plat:$PATH" run fish "$INSTALL_FISH" --version 0.0.0
+        [ "$status" -eq 7 ]
+        [[ "$output" == *"fish on Windows installs through the sh installer"* ]] || false
+        [[ "$output" == *"curl -fsSL https://setup.ocx.sh/sh | sh"* ]] || false
+    done
+}
+
 # --- BusyBox wget (same contract as install.sh) ------------------------------------
 
 # Fake wget that rejects every option outside -q/-O the way BusyBox does and

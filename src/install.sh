@@ -6,7 +6,8 @@
 # Exit: 0 ok, 1 generic, 2 usage/env/missing tool, 3 network, 4 checksum, 5 extract, 6 setup, 7 platform, 129 130 143 HUP INT TERM
 # Integrity: sha256 from the manifest at OCX_INSTALL_DIST_URL (another origin than the archive); a dist/<sha256>.json URL pins it.
 # shellcheck disable=SC3043  # `local` verified at runtime by has_local()
-# install.sh - OCX installer for Unix and macOS (bash/zsh/ash/ksh/dash)
+# install.sh - OCX installer for Linux, macOS and Windows (bash/zsh/ash/ksh/dash;
+# Git Bash, MSYS2 and Cygwin on Windows)
 # https://ocx.sh
 #
 # This is a THIN BOOTSTRAP. It detects the platform, resolves the release from
@@ -204,6 +205,8 @@ _wget_tls12=0
 _wget_cacert=0
 _tls_unvalidated=0
 _hash_tool=""
+_windows=0
+_exe="ocx"
 _tmpdir=""
 _ca_tmp=""
 _exit_status=0
@@ -252,6 +255,63 @@ EOF
 
 # --- Platform detection -----------------------------------------------------
 
+# Set _windows and _exe from uname alone: the test hatch returns before
+# detect_target, and the binary's file name is needed on both paths.
+detect_windows() {
+    case "$(uname -s 2>/dev/null || true)" in
+        MINGW* | MSYS* | CYGWIN*)
+            _windows=1
+            _exe="ocx.exe"
+            ;;
+    esac
+}
+
+# Echo a path in the form this shell's tools take. A drive-letter path (C:\x,
+# C:/x) and anything with a backslash (a UNC \\srv\share) needs cygpath;
+# everything else is already POSIX.
+to_posix_path() {
+    case "$1" in
+        [A-Za-z]:[\\/]* | *\\*)
+            need_cmd cygpath
+            cygpath -u -- "$1"
+            ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
+# Echo a path in the form a native Windows program takes. C:/x is left alone by
+# the MSYS2 argument conversion and Cygwin never converts, so it is safe in both.
+# The drive spelling comes from cygpath: Cygwin's prefix is configurable.
+to_native_path() {
+    need_cmd cygpath
+    cygpath -m -- "$1"
+}
+
+# Echo the variable the OCX home comes from, for error messages.
+ocx_home_var() {
+    if [ -z "${OCX_HOME:-}" ] && [ "$_windows" = 1 ] && [ -n "${USERPROFILE:-}" ]; then
+        printf 'USERPROFILE\n'
+    else
+        printf 'OCX_HOME\n'
+    fi
+}
+
+# Echo the OCX home as a POSIX path. On Windows the default is %USERPROFILE%\.ocx,
+# the directory ocx.exe itself uses, and OCX_HOME may come in Windows form.
+ocx_home_dir() {
+    if [ -n "${OCX_HOME:-}" ]; then
+        if [ "$_windows" = 1 ]; then
+            to_posix_path "$OCX_HOME"
+        else
+            printf '%s\n' "$OCX_HOME"
+        fi
+    elif [ "$_windows" = 1 ] && [ -n "${USERPROFILE:-}" ]; then
+        to_posix_path "$USERPROFILE/.ocx"
+    else
+        printf '%s\n' "$HOME/.ocx"
+    fi
+}
+
 # Set _libc to gnu or musl from evidence on this host, else exit 7: guessing
 # glibc hands a static or musl-only host a binary it cannot load.
 detect_libc() {
@@ -288,8 +348,8 @@ detect_target() {
 
     _os=$(uname -s)
     case "$_os" in
-        Linux | Darwin) ;;
-        *) err "unsupported operating system: $_os (expected Linux or macOS)" 7 ;;
+        Linux | Darwin | MINGW* | MSYS* | CYGWIN*) ;;
+        *) err "unsupported operating system: $_os (expected Linux, macOS or Windows under Git Bash, MSYS2 or Cygwin)" 7 ;;
     esac
 
     _arch=$(uname -m)
@@ -313,6 +373,9 @@ detect_target() {
             ;;
         Darwin)
             printf '%s-apple-darwin\n' "$_arch"
+            ;;
+        MINGW* | MSYS* | CYGWIN*)
+            printf '%s-pc-windows-gnullvm\n' "$_arch"
             ;;
         *)
             err "unsupported operating system: $_os" 7
@@ -397,15 +460,25 @@ download_once() {
     local _url="$1" _dest="$2" _status=0
 
     if [ "$_downloader" = "curl" ]; then
-        if [ "$_curl_tls12" = 1 ] && [ -n "$OCX_INSTALL_CA_BUNDLE" ]; then
-            curl --proto '=https' --tlsv1.2 --cacert "$OCX_INSTALL_CA_BUNDLE" -fsSL -o "$_dest" "$_url"
-        elif [ "$_curl_tls12" = 1 ]; then
-            curl --proto '=https' --tlsv1.2 -fsSL -o "$_dest" "$_url"
-        elif [ -n "$OCX_INSTALL_CA_BUNDLE" ]; then
-            curl --proto '=https' --cacert "$OCX_INSTALL_CA_BUNDLE" -fsSL -o "$_dest" "$_url"
-        else
-            curl --proto '=https' -fsSL -o "$_dest" "$_url"
+        # Cygwin has no curl in its base install, so curl is Windows' own
+        # curl.exe there, and a native program is never handed a POSIX path.
+        # The output path and --cacert take the Windows form.
+        set -- --proto '=https'
+        if [ "$_curl_tls12" = 1 ]; then
+            set -- "$@" --tlsv1.2
         fi
+        if [ -n "$OCX_INSTALL_CA_BUNDLE" ]; then
+            if [ "$_windows" = 1 ]; then
+                set -- "$@" --cacert "$(to_native_path "$OCX_INSTALL_CA_BUNDLE")"
+            else
+                set -- "$@" --cacert "$OCX_INSTALL_CA_BUNDLE"
+            fi
+        fi
+        set -- "$@" -fsSL
+        if [ "$_windows" = 1 ]; then
+            _dest=$(to_native_path "$_dest")
+        fi
+        curl "$@" -o "$_dest" "$_url"
         return
     fi
 
@@ -512,6 +585,25 @@ verify_checksum() {
 
 # --- Safe archive extraction ------------------------------------------------
 
+# Echo the tar that can read a .zip: bsdtar, else the tar.exe Windows ships in
+# System32 (also bsdtar). Exits 2 when neither exists.
+zip_tar() {
+    local _t
+
+    if command -v bsdtar >/dev/null 2>&1; then
+        printf 'bsdtar\n'
+        return 0
+    fi
+    if [ -n "${SYSTEMROOT:-}" ] && command -v cygpath >/dev/null 2>&1; then
+        _t="$(cygpath -u "$SYSTEMROOT")/System32/tar.exe"
+        if [ -x "$_t" ]; then
+            printf '%s\n' "$_t"
+            return 0
+        fi
+    fi
+    err "reading a .zip needs bsdtar or Windows' own tar.exe (System32), and neither was found" 2
+}
+
 # Two-pass extraction. Pass 1: reject any member that escapes the destination
 # via an absolute path or a ".." traversal component. Pass 2: reject any
 # symlink/hardlink whose target escapes the tree. Then extract with
@@ -520,16 +612,34 @@ verify_checksum() {
 # tar and macOS bsdtar are used -- --no-overwrite-dir is GNU-only and would abort
 # bsdtar, and the fresh mktemp dest has no pre-existing dirs for it to protect.
 safe_extract() {
-    local _archive="$1" _dest="$2" _bad_entry _bad_target
+    local _archive="$1" _dest="$2" _tar="tar" _bad_entry _bad_target
+    local _unsafe='(^|/)\.\.(/|$)|^/'
 
-    _bad_entry=$(tar --list -f "$_archive" 2>/dev/null |
-        grep -E '(^|/)\.\.(/|$)|^/' || true)
+    # Windows releases are .zip. Git's tar is GNU tar and cannot read one, and a
+    # Windows tar.exe takes a backslash and a drive prefix as path syntax.
+    case "$_archive" in
+        *.zip)
+            _tar=$(zip_tar)
+            # System32 tar.exe is a native program: under Cygwin it gets no
+            # argument conversion, so hand it Windows paths. A bsdtar from the
+            # runtime keeps POSIX paths.
+            if [ "$_tar" != "bsdtar" ]; then
+                _archive=$(to_native_path "$_archive")
+                _dest=$(to_native_path "$_dest")
+            fi
+            _unsafe='(^|[/\\])\.\.([/\\]|$)|^[/\\]|^[A-Za-z]:'
+            ;;
+    esac
+
+    # tr drops the CR a native tar.exe may print, which would hide a trailing "..".
+    _bad_entry=$("$_tar" --list -f "$_archive" 2>/dev/null |
+        tr -d '\r' | grep -E "$_unsafe" || true)
     if [ -n "$_bad_entry" ]; then
         err "archive contains unsafe path: $_bad_entry" 5
     fi
 
-    _bad_target=$(tar -tvf "$_archive" 2>/dev/null |
-        awk -F ' -> ' '
+    _bad_target=$("$_tar" -tvf "$_archive" 2>/dev/null |
+        tr -d '\r' | awk -F ' -> ' '
             /->/ {
                 target = ""
                 for (i = 2; i <= NF; i++) target = target (i == 2 ? "" : " -> ") $i
@@ -551,7 +661,7 @@ safe_extract() {
         err "archive contains escaping link target: $_bad_target" 5
     fi
 
-    tar xf "$_archive" -C "$_dest" \
+    "$_tar" xf "$_archive" -C "$_dest" \
         --no-same-owner --no-same-permissions 2>/dev/null ||
         err "failed to extract ${_archive} -- ensure tar is installed" 5
 }
@@ -629,12 +739,21 @@ get_latest_version() {
 
 # Echo the FLAT release row matching (version,target), or empty.
 dist_row() {
-    local _dist="$1" _version="$2" _target="$3"
-    printf '%s' "$_dist" |
+    local _dist="$1" _version="$2" _target="$3" _row
+    _row=$(printf '%s' "$_dist" |
         grep -o '{[^{}]*}' |
         grep "\"version\"[[:space:]]*:[[:space:]]*\"${_version}\"" |
         grep "\"target\"[[:space:]]*:[[:space:]]*\"${_target}\"" |
-        head -1
+        head -1)
+    # Releases before the gnullvm rename publish the msvc spelling.
+    case "$_target" in
+        *-pc-windows-gnullvm)
+            if [ -z "$_row" ]; then
+                _row=$(dist_row "$_dist" "$_version" "${_target%gnullvm}msvc")
+            fi
+            ;;
+    esac
+    printf '%s' "$_row"
 }
 
 # Extract a string field from a flat JSON object.
@@ -661,8 +780,13 @@ run_self_setup() {
 
 # Export the OCX bin directory to GITHUB_PATH for GitHub Actions.
 export_github_path() {
-    local _install_path="${OCX_HOME:-$HOME/.ocx}/${OCX_BIN_SUBPATH}"
+    local _install_path
     if [ -n "${GITHUB_PATH:-}" ]; then
+        _install_path="$(ocx_home_dir)/${OCX_BIN_SUBPATH}"
+        # The Actions runner reads this file natively, so it wants C:\... on Windows.
+        if [ "$_windows" = 1 ]; then
+            _install_path=$(cygpath -w "$_install_path")
+        fi
         printf '%s\n' "$_install_path" >>"$GITHUB_PATH" ||
             warn "failed to write to \$GITHUB_PATH"
     fi
@@ -674,9 +798,9 @@ export_github_path() {
 place_binary() {
     local _bin="$1" _ocx_home="$2" _bin_dir="$2/$OCX_BIN_SUBPATH"
     mkdir -p "$_bin_dir"
-    cp -f "$_bin" "$_bin_dir/ocx"
-    chmod +x "$_bin_dir/ocx"
-    say "Installed to $(tildify "${_bin_dir}/ocx")"
+    cp -f "$_bin" "$_bin_dir/$_exe"
+    chmod +x "$_bin_dir/$_exe"
+    say "Installed to $(tildify "${_bin_dir}/${_exe}")"
 }
 
 # --- Test-mode install (internal, test-only) --------------------------------
@@ -693,9 +817,9 @@ install_local_test_binary() {
     _bin_dir="$_ocx_home/$OCX_BIN_SUBPATH"
     say "Test mode: installing local binary as the candidate (no download)."
     mkdir -p "$_bin_dir"
-    cp -f "$_src" "$_bin_dir/ocx"
-    chmod +x "$_bin_dir/ocx"
-    say "Installed to $(tildify "${_bin_dir}/ocx")"
+    cp -f "$_src" "$_bin_dir/$_exe"
+    chmod +x "$_bin_dir/$_exe"
+    say "Installed to $(tildify "${_bin_dir}/${_exe}")"
 }
 
 # --- OCX_HOME validation ----------------------------------------------------
@@ -704,24 +828,34 @@ install_local_test_binary() {
 # `ocx self setup`. Harden it: require an absolute path, reject ".." traversal,
 # reject shell metacharacters that could break out of the quoting downstream.
 assert_safe_ocx_home() {
-    local _home="$1"
+    local _home="$1" _var="${2:-OCX_HOME}" _c _hint=""
 
     case "$_home" in
         /*) ;;
-        *) err "OCX_HOME must be an absolute path (got: $_home)" 2 ;;
+        *) err "$_var must be an absolute path (got: $_home)" 2 ;;
     esac
     case "$_home" in
-        */../* | */..) err "OCX_HOME must not contain '..' (got: $_home)" 2 ;;
-        ../*) err "OCX_HOME must not contain '..' (got: $_home)" 2 ;;
+        */../* | */..) err "$_var must not contain '..' (got: $_home)" 2 ;;
+        ../*) err "$_var must not contain '..' (got: $_home)" 2 ;;
     esac
+    for _c in '"' '$' '`' ';' '&' '|' '<' '>' '(' ')'; do
+        case "$_home" in
+            *"$_c"*)
+                if [ "$_windows" = 1 ]; then
+                    _hint="; remove '$_c' or set OCX_HOME to a plain path such as C:\\ocx"
+                fi
+                err "$_var contains characters unsafe for shell embedding (got: $_home)$_hint" 2
+                ;;
+        esac
+    done
     case "$_home" in
-        *'"'* | *'$'* | *'`'* | *';'* | *'&'* | *'|'* | *'<'* | *'>'* | *'('* | *')'* | *'
+        *'
 '*)
-            err "OCX_HOME contains characters unsafe for shell embedding (got: $_home)" 2
+            err "$_var contains characters unsafe for shell embedding (got: $_home)" 2
             ;;
     esac
     case "$_home" in
-        *\\*) err "OCX_HOME contains characters unsafe for shell embedding (got: $_home)" 2 ;;
+        *\\*) err "$_var contains characters unsafe for shell embedding (got: $_home)" 2 ;;
     esac
 }
 
@@ -754,7 +888,7 @@ print_success() {
     if [ "$OCX_INSTALL_QUIET" = 1 ]; then
         return 0
     fi
-    _ocx_home="${OCX_HOME:-$HOME/.ocx}"
+    _ocx_home=$(ocx_home_dir)
 
     printf '\n  %socx %s installed successfully!%s\n' "$_bold" "$_version" "$_reset" >&2
     cat >&2 <<EOF
@@ -778,6 +912,7 @@ main() {
 
     _no_modify_path=$(truthy01 "${OCX_NO_MODIFY_PATH:-0}")
     _version="$OCX_INSTALL_VERSION"
+    detect_windows
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -838,12 +973,39 @@ main() {
     fi
     if [ -n "$_ca_raw" ] && [ -z "${OCX_EXTRA_CA_CERTS:-}" ]; then
         OCX_EXTRA_CA_CERTS="$_ca_raw"
+        # A path (not PEM text) reaches ocx.exe, which reads it natively.
+        case "$_ca_raw" in
+            *"-----BEGIN"*) ;;
+            *)
+                if [ "$_windows" = 1 ]; then
+                    OCX_EXTRA_CA_CERTS=$(to_native_path "$_ca_raw")
+                fi
+                ;;
+        esac
         export OCX_EXTRA_CA_CERTS
     fi
 
-    _ocx_home="${OCX_HOME:-$HOME/.ocx}"
-    assert_safe_ocx_home "$_ocx_home"
+    # Command substitution strips trailing newlines, so reject them on the raw
+    # values before they are captured.
+    case "${OCX_HOME:-}" in
+        *'
+'*) err "OCX_HOME contains characters unsafe for shell embedding" 2 ;;
+    esac
+    if [ "$_windows" = 1 ]; then
+        case "${USERPROFILE:-}" in
+            *'
+'*) err "USERPROFILE contains characters unsafe for shell embedding" 2 ;;
+        esac
+    fi
+    _ocx_home=$(ocx_home_dir)
+    assert_safe_ocx_home "$_ocx_home" "$(ocx_home_var)"
     _bin_dir="${_ocx_home}/${OCX_BIN_SUBPATH}"
+    # Every ocx.exe call below reads OCX_HOME natively, and Cygwin converts no
+    # variable but PATH, HOME and the temp ones, so it gets the Windows form.
+    if [ "$_windows" = 1 ]; then
+        OCX_HOME=$(to_native_path "$_ocx_home")
+        export OCX_HOME
+    fi
 
     # --- Internal test-mode hatch (UNDOCUMENTED) ---------------------------
     # Install a locally-built binary as the candidate; skip download + checksum
@@ -860,7 +1022,7 @@ main() {
             if [ "$_no_modify_path" = 1 ]; then
                 set -- "$@" --no-modify-path
             fi
-            run_self_setup "$_bin_dir/ocx" "$@"
+            run_self_setup "$_bin_dir/$_exe" "$@"
         fi
         export_github_path
         if [ "$OCX_INSTALL_PRINT_PATH" = 1 ]; then
@@ -878,6 +1040,10 @@ main() {
 
     _target=$(detect_target)
     say "Detected platform: $_target"
+    # Fail before any network work when no tar can read the .zip.
+    if [ "$_windows" = 1 ]; then
+        zip_tar >/dev/null
+    fi
 
     _tmpdir=$(mktemp -d)
 
@@ -907,11 +1073,11 @@ main() {
     # Idempotent fast-path: same version already present at the canonical bin
     # dir (unless OCX_INSTALL_FORCE).
     _old_version=""
-    if [ -x "$_bin_dir/ocx" ]; then
-        _old_version=$("$_bin_dir/ocx" version 2>/dev/null || echo "")
+    if [ -x "$_bin_dir/$_exe" ]; then
+        _old_version=$("$_bin_dir/$_exe" version 2>/dev/null || echo "")
     fi
     if [ -n "$_old_version" ] && [ "$_old_version" = "$_version" ] && [ "$OCX_INSTALL_FORCE" != 1 ]; then
-        say "ocx v${_version} already installed at $(tildify "$_bin_dir/ocx") (set OCX_INSTALL_FORCE=1 to reinstall)"
+        say "ocx v${_version} already installed at $(tildify "$_bin_dir/$_exe") (set OCX_INSTALL_FORCE=1 to reinstall)"
         export_github_path
         if [ "$OCX_INSTALL_PRINT_PATH" = 1 ]; then
             printf '%s\n' "$_bin_dir"
@@ -958,10 +1124,15 @@ main() {
 
     # Locate binary: nested (ocx-TARGET/ocx) or flat (ocx at archive root - the
     # real cargo-dist layout).
-    if [ -f "$_tmpdir/ocx-${_target}/ocx" ]; then
-        _bin="$_tmpdir/ocx-${_target}/ocx"
-    elif [ -f "$_tmpdir/ocx" ]; then
-        _bin="$_tmpdir/ocx"
+    # The Windows msvc row is the fallback when gnullvm is absent; its archive
+    # nests under the msvc target name.
+    _row_target=$(json_field "$_row" target)
+    if [ -f "$_tmpdir/ocx-${_target}/$_exe" ]; then
+        _bin="$_tmpdir/ocx-${_target}/$_exe"
+    elif [ "$_row_target" != "$_target" ] && [ -f "$_tmpdir/ocx-${_row_target}/$_exe" ]; then
+        _bin="$_tmpdir/ocx-${_row_target}/$_exe"
+    elif [ -f "$_tmpdir/$_exe" ]; then
+        _bin="$_tmpdir/$_exe"
     else
         err "could not find ocx binary in archive" 5
     fi

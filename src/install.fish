@@ -4,7 +4,8 @@
 # Kind: INST. Dialect: fish, Unix + macOS only. Floor: fish 3.6.0. Tested: 3.6.0, 4.8.
 # Exit: 0 ok; 1 generic; 2 arg/env; 3 network; 4 checksum; 5 extract; 6 self setup; 7 platform; 129/130/143 signal
 #
-# install.fish -- OCX installer for the fish shell (not supported on Windows).
+# install.fish -- OCX installer for the fish shell (Linux and macOS; fish on Windows
+# installs through the sh installer).
 # https://ocx.sh
 #
 # This is a THIN BOOTSTRAP. It detects the platform, resolves the release from
@@ -259,6 +260,8 @@ function __ocx_detect_target
                 set arch aarch64
             end
             set -g __ocx_target "$arch-apple-darwin"
+        case 'MINGW*' 'MSYS*' 'CYGWIN*'
+            __ocx_err "fish on Windows installs through the sh installer ($os): curl -fsSL https://setup.ocx.sh/sh | sh" 7
         case '*'
             __ocx_err "unsupported operating system: $os (expected Linux or macOS)" 7
     end

@@ -245,6 +245,26 @@ setup() {
     [ -x "${OCX_HOME}/${BIN_SUBPATH}/ocx" ]
 }
 
+@test "nested archive whose file name is not ocx-<target> still installs" {
+    local _n="${BATS_TEST_TMPDIR}/renamed"
+    server_build_fixture "$_n" >/dev/null
+    local _old="$_n/releases/download/v0.0.0/ocx-${FIXTURE_TARGET}.tar.gz"
+    local _file="ocx-0.0.0-${FIXTURE_TARGET}.tar.gz"
+    mv "$_old" "$_n/releases/download/v0.0.0/${_file}"
+    server_write_dist "$_n" "$FIXTURE_TARGET" "$(server_sha256 "$_n/releases/download/v0.0.0/${_file}")" "$_file"
+    local _info _pid _port
+    _info=$(server_start "$_n" "${BATS_TEST_TMPDIR}/renamed.log")
+    _pid="${_info% *}"
+    _port="${_info#* }"
+    OCX_INSTALL_NO_SETUP=1 \
+        OCX_INSTALL_DIST_URL="https://127.0.0.1:${_port}/dist.json" \
+        OCX_INSTALL_MIRROR_URL="https://127.0.0.1:${_port}/releases/download" \
+        run sh "$INSTALL_SH" --version 0.0.0
+    server_stop "$_pid"
+    [ "$status" -eq 0 ]
+    [ -x "${OCX_HOME}/${BIN_SUBPATH}/ocx" ]
+}
+
 @test "latest version resolves via the dist.json manifest" {
     # No --version: the installer reads dist.json and picks the first stable entry
     # (0.0.0).

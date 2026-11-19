@@ -42,6 +42,7 @@ The POSIX and fish installers exit with code 2 for an unknown option.
 - All messages go to stderr: progress, warnings and errors.
 - Stdout is silent on success.
 - With `OCX_INSTALL_PRINT_PATH` true, or `-PrintPath` in PowerShell, the final line of stdout is the absolute OCX bin directory.
+  Under Git Bash, MSYS2 and Cygwin the directory is printed in POSIX form (`/c/…`, or `/cygdrive/c/…` in Cygwin), which is what an `sh` consumer needs.
 
 A wrapper can capture the directory with `BIN_DIR=$(... | tail -n1)`.
 The [generic CI wrapper](/install/examples/#ci-wrapper) shows it in full.

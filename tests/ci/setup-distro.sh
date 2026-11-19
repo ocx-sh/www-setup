@@ -12,8 +12,9 @@
 # elvish) are NOT installed here -- they come from ocx.toml via `ocx run`.
 # (pwsh is not among them: ocx.sh/powershell/powershell ships glibc-only
 # leaves, so it cannot come from ocx on Alpine/musl.) The sh suite also runs
-# the installer under dash, busybox ash, ksh and zsh, and the elvish suite needs
-# openssl; under OCX_TEST_REQUIRE_SHELLS a missing one fails the leg.
+# the installer under dash, busybox ash, ksh and zsh, the Windows suite reads
+# .zip fixtures with bsdtar, and the elvish suite needs openssl; under
+# OCX_TEST_REQUIRE_SHELLS a missing one fails the leg.
 #
 # Usage: setup-distro.sh [alpine|fedora|ubuntu|debian]
 # Distro auto-detected from /etc/os-release when omitted.
@@ -31,13 +32,13 @@ case "$DISTRO" in
         apk add --no-cache \
             git curl ca-certificates tar xz gzip \
             coreutils findutils grep bash python3 \
-            dash busybox loksh zsh openssl
+            dash busybox loksh zsh openssl libarchive-tools
         ;;
     fedora)
         dnf install -y --setopt=install_weak_deps=False \
             git curl ca-certificates tar xz gzip \
             coreutils findutils grep bash python3 \
-            dash busybox ksh zsh openssl
+            dash busybox ksh zsh openssl bsdtar
         dnf clean all || true
         ;;
     ubuntu | debian)
@@ -46,7 +47,7 @@ case "$DISTRO" in
         apt-get install -y --no-install-recommends \
             git curl ca-certificates tar xz-utils gzip \
             coreutils findutils grep bash python3 \
-            dash busybox ksh zsh openssl
+            dash busybox ksh zsh openssl libarchive-tools
         rm -rf /var/lib/apt/lists/*
         ;;
     *)
@@ -54,5 +55,11 @@ case "$DISTRO" in
         exit 2
         ;;
 esac
+
+# A wrong package name must fail the job here, not as skipped Windows tests later.
+command -v bsdtar >/dev/null 2>&1 || {
+    echo "setup-distro.sh: bsdtar is not installed after the package install" >&2
+    exit 1
+}
 
 echo "setup-distro: base deps installed for ${DISTRO}" >&2
