@@ -12,7 +12,7 @@
   "dependencies": {
     "@astrojs/markdown-satteri": "0.4.3",
     "@astrojs/starlight": "0.42.4",
-    "@ocx-sh/theme": "github:ocx-sh/website#e86b83014538975c186912e5038567c69b2f2f2c&path:/packages/theme",
+    "@ocx-sh/theme": "github:ocx-sh/website#ac3359ef23cf0587f43d511a18fe8c71add702ad&path:/packages/theme",
     "astro": "7.3.5"
   },
   "devDependencies": {

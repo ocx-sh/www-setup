@@ -69,7 +69,7 @@ export function sitePages(distDir = 'dist', base = BASE) {
   if (!existsSync(distDir)) throw new Error(`missing dist: ${distDir}`);
   return readdirSync(distDir, { recursive: true, encoding: 'utf8' })
     .map((f) => f.split('\\').join('/'))
-    .filter((f) => f.endsWith('.html') && f !== '404.html')
+    .filter((f) => f.endsWith('.html') && f !== '404.html' && !f.startsWith('frag/')) // frag/ pages are bare, noindex documents
     .map((f) => `${base}${f.replace(/index\.html$/, '')}`)
     .sort();
 }
