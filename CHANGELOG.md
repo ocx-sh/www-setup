@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0](https://github.com/ocx-sh/www-setup/releases/tag/v0.4.0) — 2026-11-25
+
+### Added
+
+- **ci:** Dispatch dist-updated to receiver repos after the dist.json publish by @michael-herwig ([a33acd0](https://github.com/ocx-sh/www-setup/commit/a33acd02222ba348ca666def453c1b0f4e449758))
+- **install:** The sh installer runs in Git Bash, MSYS2 and Cygwin on Windows by @michael-herwig ([398fde7](https://github.com/ocx-sh/www-setup/commit/398fde7ce7b8e2bf19199d76b95407c9563bc29f))
+
+### Documentation
+
+- **site:** The installer recordings have one linkable section per shell by @michael-herwig ([1a91542](https://github.com/ocx-sh/www-setup/commit/1a91542af9e0cb928187ad2b0a006a4596a17884))
+
+### Fixed
+
+- **ci:** Mark the dispatch bats suite executable by @michael-herwig ([9ed5cd6](https://github.com/ocx-sh/www-setup/commit/9ed5cd60223f54699eb13918f7405d8f200d7446))
 ## [0.3.2](https://github.com/ocx-sh/www-setup/releases/tag/v0.3.2) — 2026-11-15
 
 ### Fixed
